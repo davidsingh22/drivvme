@@ -333,9 +333,15 @@ const AdminDashboard = () => {
       <Navbar />
       
       <main className="container mx-auto px-4 py-8 pt-20">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-foreground">Admin Dashboard</h1>
-          <p className="text-muted-foreground">Manage users, payments, and refunds</p>
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">Admin Dashboard</h1>
+            <p className="text-muted-foreground">Manage users, payments, and refunds</p>
+          </div>
+          <Button onClick={() => navigate('/admin/refunds')} className="gap-2">
+            <RefreshCw className="w-4 h-4" />
+            Issue Refund
+          </Button>
         </div>
 
         {/* Stats Cards */}
