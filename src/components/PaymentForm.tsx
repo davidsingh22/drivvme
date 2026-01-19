@@ -14,7 +14,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { Loader2, CreditCard, Shield, Smartphone } from 'lucide-react';
 
 // Initialize Stripe
-const stripePromise = loadStripe('pk_live_51Sr74NCPDS7mXarY1uW0yyoWOUzjTxFmhqq1Qu1b4EHIKlHCXCJLHBDjWp0LXJnYYRHqgNHNCcGQbdOEfWsjJBTv00oeyeqN30');
+// Prefer env var if available; fallback is intentionally empty to avoid using an invalid key.
+const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
+const stripePromise = loadStripe(STRIPE_PUBLISHABLE_KEY ?? '');
 
 interface PaymentFormInnerProps {
   onSuccess: () => void;
@@ -315,6 +317,19 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     return (
       <Card className="p-6 flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </Card>
+    );
+  }
+
+  if (!STRIPE_PUBLISHABLE_KEY) {
+    return (
+      <Card className="p-6">
+        <p className="text-destructive text-center">
+          Stripe publishable key is missing. Add VITE_STRIPE_PUBLISHABLE_KEY and reload.
+        </p>
+        <Button onClick={onCancel} variant="outline" className="w-full mt-4">
+          Go Back
+        </Button>
       </Card>
     );
   }
