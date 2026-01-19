@@ -27,7 +27,7 @@ const TEST_ACCOUNTS = ['alsenesa@hotmail.com', 'davidsingh22@hotmail.com'];
 
 const RideBooking = () => {
   const { t, language } = useLanguage();
-  const { user, profile, isRider, isLoading: authLoading } = useAuth();
+  const { user, profile, roles, isRider, isDriver, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -46,12 +46,23 @@ const RideBooking = () => {
   // Check if current user is a test account
   const isTestAccount = profile?.email && TEST_ACCOUNTS.includes(profile.email.toLowerCase());
 
-  // Redirect if not logged in as rider
+  // Route guard
   useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/login');
+    if (authLoading) return;
+
+    if (!user) {
+      navigate('/login', { replace: true });
+      return;
     }
-  }, [user, authLoading, navigate]);
+
+    // Wait for roles to be loaded
+    if (roles.length === 0) return;
+
+    // Drivers should not use the rider booking page
+    if (isDriver && !isRider) {
+      navigate('/driver', { replace: true });
+    }
+  }, [user, authLoading, roles.length, isDriver, isRider, navigate]);
 
   // Subscribe to ride updates
   useEffect(() => {
