@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { loadStripe } from '@stripe/stripe-js';
+import { useState, useEffect } from 'react';
+import { loadStripe, PaymentRequest } from '@stripe/stripe-js';
 import {
   Elements,
   PaymentElement,
+  PaymentRequestButtonElement,
   useStripe,
   useElements,
 } from '@stripe/react-stripe-js';
@@ -10,21 +11,104 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Loader2, CreditCard, Shield } from 'lucide-react';
+import { Loader2, CreditCard, Shield, Smartphone } from 'lucide-react';
 
-// Initialize Stripe - this will use Stripe's test publishable key
+// Initialize Stripe
 const stripePromise = loadStripe('pk_live_51Sr74NCPDS7mXarY1uW0yyoWOUzjTxFmhqq1Qu1b4EHIKlHCXCJLHBDjWp0LXJnYYRHqgNHNCcGQbdOEfWsjJBTv00oeyeqN30');
 
 interface PaymentFormInnerProps {
   onSuccess: () => void;
   onCancel: () => void;
+  amount: number;
+  clientSecret: string;
 }
 
-const PaymentFormInner = ({ onSuccess, onCancel }: PaymentFormInnerProps) => {
+const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: PaymentFormInnerProps) => {
   const stripe = useStripe();
   const elements = useElements();
   const { toast } = useToast();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [paymentRequest, setPaymentRequest] = useState<PaymentRequest | null>(null);
+  const [canMakePayment, setCanMakePayment] = useState(false);
+
+  // Set up Apple Pay / Google Pay
+  useEffect(() => {
+    if (!stripe) return;
+
+    const pr = stripe.paymentRequest({
+      country: 'US',
+      currency: 'usd',
+      total: {
+        label: 'Ride Payment',
+        amount: Math.round(amount * 100), // Convert to cents
+      },
+      requestPayerName: true,
+      requestPayerEmail: true,
+    });
+
+    // Check if the Payment Request is available
+    pr.canMakePayment().then((result) => {
+      if (result) {
+        setPaymentRequest(pr);
+        setCanMakePayment(true);
+      }
+    });
+
+    // Handle the payment
+    pr.on('paymentmethod', async (event) => {
+      setIsProcessing(true);
+      
+      try {
+        const { error, paymentIntent } = await stripe.confirmCardPayment(
+          clientSecret,
+          { payment_method: event.paymentMethod.id },
+          { handleActions: false }
+        );
+
+        if (error) {
+          event.complete('fail');
+          toast({
+            title: 'Payment failed',
+            description: error.message,
+            variant: 'destructive',
+          });
+        } else if (paymentIntent?.status === 'requires_action') {
+          event.complete('success');
+          // Handle 3D Secure if needed
+          const { error: confirmError } = await stripe.confirmCardPayment(clientSecret);
+          if (confirmError) {
+            toast({
+              title: 'Payment failed',
+              description: confirmError.message,
+              variant: 'destructive',
+            });
+          } else {
+            toast({
+              title: 'Payment successful!',
+              description: 'Your ride has been confirmed.',
+            });
+            onSuccess();
+          }
+        } else if (paymentIntent?.status === 'succeeded') {
+          event.complete('success');
+          toast({
+            title: 'Payment successful!',
+            description: 'Your ride has been confirmed.',
+          });
+          onSuccess();
+        }
+      } catch (err: any) {
+        event.complete('fail');
+        toast({
+          title: 'Error',
+          description: err.message || 'Something went wrong',
+          variant: 'destructive',
+        });
+      } finally {
+        setIsProcessing(false);
+      }
+    });
+  }, [stripe, amount, clientSecret, onSuccess, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,10 +158,44 @@ const PaymentFormInner = ({ onSuccess, onCancel }: PaymentFormInnerProps) => {
         <Shield className="h-4 w-4" />
         <span>Secure payment powered by Stripe</span>
       </div>
+
+      {/* Apple Pay / Google Pay Button */}
+      {canMakePayment && paymentRequest && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Smartphone className="h-4 w-4" />
+            <span>Express checkout</span>
+          </div>
+          <PaymentRequestButtonElement
+            options={{
+              paymentRequest,
+              style: {
+                paymentRequestButton: {
+                  type: 'default',
+                  theme: 'dark',
+                  height: '48px',
+                },
+              },
+            }}
+          />
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">Or pay with card</span>
+            </div>
+          </div>
+        </div>
+      )}
       
       <PaymentElement 
         options={{
           layout: 'tabs',
+          wallets: {
+            applePay: 'auto',
+            googlePay: 'auto',
+          },
         }}
       />
       
@@ -247,7 +365,7 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
         },
       }}
     >
-      <PaymentFormInner onSuccess={onSuccess} onCancel={onCancel} />
+      <PaymentFormInner onSuccess={onSuccess} onCancel={onCancel} amount={amount} clientSecret={clientSecret} />
     </Elements>
   );
 };
