@@ -348,7 +348,7 @@ const RideBooking = () => {
     setDriverInfo(null);
   };
 
-  if (authLoading) {
+  if (authLoading || (user && roles.length === 0)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
