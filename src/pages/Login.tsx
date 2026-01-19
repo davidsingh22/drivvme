@@ -12,7 +12,7 @@ import LanguageToggle from '@/components/LanguageToggle';
 
 const Login = () => {
   const { t } = useLanguage();
-  const { signIn, isLoading, isRider, isDriver, isAdmin, user } = useAuth();
+  const { signIn, isLoading, roles, isRider, isDriver, isAdmin, user } = useAuth();
   const navigate = useNavigate();
   
   const [email, setEmail] = useState('');
@@ -26,11 +26,14 @@ const Login = () => {
     if (isLoading) return;
     if (!user) return;
 
+    // Wait until roles are loaded so we don't mis-route and appear "logged out"
+    if (roles.length === 0) return;
+
     if (isAdmin) navigate('/admin', { replace: true });
     else if (isDriver) navigate('/driver', { replace: true });
     else if (isRider) navigate('/ride', { replace: true });
     else navigate('/', { replace: true });
-  }, [user, isLoading, isAdmin, isDriver, isRider, navigate]);
+  }, [user, isLoading, roles.length, isAdmin, isDriver, isRider, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
