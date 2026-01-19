@@ -172,11 +172,29 @@ const RideBooking = () => {
     );
   };
 
+  const geocodeAddress = useCallback(async (address: string) => {
+    try {
+      const geocoder = new google.maps.Geocoder();
+      return await new Promise<{ lat: number; lng: number } | null>((resolve) => {
+        geocoder.geocode({ address }, (results, status) => {
+          const loc = results?.[0]?.geometry?.location;
+          if (status === 'OK' && loc) {
+            resolve({ lat: loc.lat(), lng: loc.lng() });
+            return;
+          }
+          resolve(null);
+        });
+      });
+    } catch {
+      return null;
+    }
+  }, []);
+
   const calculateRoute = useCallback(async () => {
     if (!pickup || !dropoff) return;
 
     const directionsService = new google.maps.DirectionsService();
-    
+
     try {
       const result = await directionsService.route({
         origin: { lat: pickup.lat, lng: pickup.lng },
@@ -191,10 +209,10 @@ const RideBooking = () => {
         const leg = route.legs[0];
         const distanceInKm = (leg.distance?.value || 0) / 1000;
         const durationInMinutes = (leg.duration?.value || 0) / 60;
-        
+
         setDistanceKm(distanceInKm);
         setDurationMinutes(durationInMinutes);
-        
+
         const estimate = calculateFare(distanceInKm, durationInMinutes);
         setFareEstimate(estimate);
         setStep('estimate');
@@ -208,16 +226,34 @@ const RideBooking = () => {
     }
   }, [pickup, dropoff, toast]);
 
-  const handleGetEstimate = () => {
-    if (!pickup || !dropoff) {
+  const handleGetEstimate = async () => {
+    // Allow typing without selecting an autocomplete option by resolving coordinates here.
+    let resolvedPickup = pickup;
+    let resolvedDropoff = dropoff;
+
+    if (!resolvedPickup && pickupAddress.trim()) {
+      const loc = await geocodeAddress(pickupAddress.trim());
+      if (loc) resolvedPickup = { address: pickupAddress.trim(), ...loc };
+    }
+
+    if (!resolvedDropoff && dropoffAddress.trim()) {
+      const loc = await geocodeAddress(dropoffAddress.trim());
+      if (loc) resolvedDropoff = { address: dropoffAddress.trim(), ...loc };
+    }
+
+    if (resolvedPickup && !pickup) setPickup(resolvedPickup);
+    if (resolvedDropoff && !dropoff) setDropoff(resolvedDropoff);
+
+    if (!resolvedPickup || !resolvedDropoff) {
       toast({
         title: 'Missing locations',
-        description: 'Please enter pickup and destination',
+        description: 'Please select a suggestion from the dropdown (or enable Geocoding API for typed addresses).',
         variant: 'destructive',
       });
       return;
     }
-    calculateRoute();
+
+    await calculateRoute();
   };
 
   const handleProceedToPayment = async () => {
