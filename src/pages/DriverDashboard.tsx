@@ -101,12 +101,9 @@ const DriverDashboard = () => {
     if (!isOnline || !user || !session) return;
 
     const fetchRides = async () => {
-      // Refresh session to ensure valid auth token for RLS policies
-      const { data: sessionData } = await supabase.auth.refreshSession();
-      if (!sessionData.session) {
-        console.error('No valid session for fetching rides');
-        return;
-      }
+      // Avoid forcing refreshSession here (can cause unexpected auth churn on flaky connections)
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session) return;
 
       const { data, error } = await supabase
         .from('rides')
@@ -114,10 +111,7 @@ const DriverDashboard = () => {
         .eq('status', 'searching')
         .order('requested_at', { ascending: true });
 
-      if (error) {
-        console.error('Error fetching rides:', error);
-      } else if (data) {
-        console.log('Available rides:', data.length);
+      if (!error && data) {
         setAvailableRides(data);
       }
     };
