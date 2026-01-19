@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer } from '@react-google-maps/api';
 import { GOOGLE_MAPS_API_KEY } from '@/lib/googleMaps';
 
@@ -87,6 +87,22 @@ const MapComponent = ({
 }: MapComponentProps) => {
   const mapRef = useRef<google.maps.Map | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Some Maps errors (billing/referrer restrictions) don't surface as `loadError`.
+  // Google calls `window.gm_authFailure()` in those cases, so we hook it to show a helpful message.
+  useEffect(() => {
+    const prev = (window as any).gm_authFailure;
+    (window as any).gm_authFailure = () => {
+      setAuthError(
+        'Google Maps authentication failed. This is usually billing disabled or an invalid HTTP referrer restriction for this domain.'
+      );
+      if (typeof prev === 'function') prev();
+    };
+    return () => {
+      (window as any).gm_authFailure = prev;
+    };
+  }, []);
 
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_API_KEY,
@@ -132,78 +148,92 @@ const MapComponent = ({
   }
 
   return (
-    <GoogleMap
-      mapContainerStyle={mapContainerStyle}
-      center={pickup || defaultCenter}
-      zoom={13}
-      onLoad={onLoad}
-      onClick={handleMapClick}
-      options={{
-        styles: darkMapStyles,
-        disableDefaultUI: true,
-        zoomControl: true,
-        mapTypeControl: false,
-        scaleControl: false,
-        streetViewControl: false,
-        rotateControl: false,
-        fullscreenControl: false,
-      }}
-    >
-      {pickup && (
-        <Marker
-          position={pickup}
-          icon={{
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 10,
-            fillColor: '#a855f7',
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 3,
-          }}
-        />
+    <div className="w-full h-full relative">
+      <GoogleMap
+        mapContainerStyle={mapContainerStyle}
+        center={pickup || defaultCenter}
+        zoom={13}
+        onLoad={onLoad}
+        onClick={handleMapClick}
+        options={{
+          styles: darkMapStyles,
+          disableDefaultUI: true,
+          zoomControl: true,
+          mapTypeControl: false,
+          scaleControl: false,
+          streetViewControl: false,
+          rotateControl: false,
+          fullscreenControl: false,
+        }}
+      >
+        {pickup && (
+          <Marker
+            position={pickup}
+            icon={{
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 10,
+              fillColor: '#a855f7',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 3,
+            }}
+          />
+        )}
+        {dropoff && (
+          <Marker
+            position={dropoff}
+            icon={{
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 10,
+              fillColor: '#84cc16',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 3,
+            }}
+          />
+        )}
+        {driverLocation && (
+          <Marker
+            position={driverLocation}
+            icon={{
+              path: 'M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z',
+              scale: 2,
+              fillColor: '#a855f7',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 1,
+              rotation: 0,
+              anchor: new google.maps.Point(12, 12),
+            }}
+          />
+        )}
+        {directions && (
+          <DirectionsRenderer
+            directions={directions}
+            options={{
+              suppressMarkers: true,
+              polylineOptions: {
+                strokeColor: '#a855f7',
+                strokeWeight: 5,
+                strokeOpacity: 0.8,
+              },
+            }}
+          />
+        )}
+      </GoogleMap>
+
+      {authError && (
+        <div className="absolute inset-x-4 top-4 z-10 rounded-lg border border-destructive/30 bg-card/95 p-4 backdrop-blur">
+          <p className="text-sm font-medium text-foreground">Maps setup issue</p>
+          <p className="mt-1 text-xs text-muted-foreground">{authError}</p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Fix: enable billing, enable Maps JavaScript + Places + Directions + Geocoding APIs, and add HTTP referrers
+            <br />
+            <span className="font-mono">https://*.lovableproject.com/*</span> and <span className="font-mono">https://*.lovable.app/*</span>
+          </p>
+        </div>
       )}
-      {dropoff && (
-        <Marker
-          position={dropoff}
-          icon={{
-            path: google.maps.SymbolPath.CIRCLE,
-            scale: 10,
-            fillColor: '#84cc16',
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 3,
-          }}
-        />
-      )}
-      {driverLocation && (
-        <Marker
-          position={driverLocation}
-          icon={{
-            path: 'M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z',
-            scale: 2,
-            fillColor: '#a855f7',
-            fillOpacity: 1,
-            strokeColor: '#ffffff',
-            strokeWeight: 1,
-            rotation: 0,
-            anchor: new google.maps.Point(12, 12),
-          }}
-        />
-      )}
-      {directions && (
-        <DirectionsRenderer
-          directions={directions}
-          options={{
-            suppressMarkers: true,
-            polylineOptions: {
-              strokeColor: '#a855f7',
-              strokeWeight: 5,
-              strokeOpacity: 0.8,
-            },
-          }}
-        />
-      )}
-    </GoogleMap>
+    </div>
   );
 };
 
