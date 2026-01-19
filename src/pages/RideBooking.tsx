@@ -34,7 +34,6 @@ const RideBooking = () => {
   const [pickupAddress, setPickupAddress] = useState('');
   const [dropoffAddress, setDropoffAddress] = useState('');
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
-  const [directions, setDirections] = useState<google.maps.DirectionsResult | null>(null);
   const [distanceKm, setDistanceKm] = useState(0);
   const [durationMinutes, setDurationMinutes] = useState(0);
   const [currentRide, setCurrentRide] = useState<any>(null);
@@ -140,27 +139,9 @@ const RideBooking = () => {
       (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-
-        // NOTE: Reverse-geocoding requires the Google Geocoding API.
-        // To keep the app usable even when that API isn't enabled, we fall back to
-        // using coordinates as the address.
         const fallbackAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
         setPickupAddress(fallbackAddress);
         setPickup({ address: fallbackAddress, lat, lng });
-
-        // Try reverse geocode opportunistically (best-effort).
-        try {
-          const geocoder = new google.maps.Geocoder();
-          geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-            if (status === 'OK' && results?.[0]?.formatted_address) {
-              const address = results[0].formatted_address;
-              setPickupAddress(address);
-              setPickup({ address, lat, lng });
-            }
-          });
-        } catch {
-          // ignore
-        }
       },
       () => {
         toast({
@@ -172,51 +153,35 @@ const RideBooking = () => {
     );
   };
 
-  const geocodeAddress = useCallback(async (address: string) => {
-    try {
-      const geocoder = new google.maps.Geocoder();
-      return await new Promise<{ lat: number; lng: number } | null>((resolve) => {
-        geocoder.geocode({ address }, (results, status) => {
-          const loc = results?.[0]?.geometry?.location;
-          if (status === 'OK' && loc) {
-            resolve({ lat: loc.lat(), lng: loc.lng() });
-            return;
-          }
-          resolve(null);
-        });
-      });
-    } catch {
-      return null;
-    }
-  }, []);
-
   const calculateRoute = useCallback(async () => {
     if (!pickup || !dropoff) return;
 
-    const directionsService = new google.maps.DirectionsService();
-
     try {
-      const result = await directionsService.route({
-        origin: { lat: pickup.lat, lng: pickup.lng },
-        destination: { lat: dropoff.lat, lng: dropoff.lng },
-        travelMode: google.maps.TravelMode.DRIVING,
-      });
+      // Use Mapbox Directions API directly via the token hook in MapComponent
+      // For estimation, calculate rough distance using Haversine formula
+      const R = 6371; // Earth's radius in km
+      const dLat = ((dropoff.lat - pickup.lat) * Math.PI) / 180;
+      const dLon = ((dropoff.lng - pickup.lng) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((pickup.lat * Math.PI) / 180) *
+          Math.cos((dropoff.lat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const straightLineDistance = R * c;
+      
+      // Adjust for road distance (typically 1.3-1.5x straight line)
+      const estimatedDistance = straightLineDistance * 1.4;
+      // Estimate duration: average urban speed ~30km/h
+      const estimatedDuration = (estimatedDistance / 30) * 60;
 
-      setDirections(result);
+      setDistanceKm(estimatedDistance);
+      setDurationMinutes(estimatedDuration);
 
-      const route = result.routes[0];
-      if (route?.legs?.[0]) {
-        const leg = route.legs[0];
-        const distanceInKm = (leg.distance?.value || 0) / 1000;
-        const durationInMinutes = (leg.duration?.value || 0) / 60;
-
-        setDistanceKm(distanceInKm);
-        setDurationMinutes(durationInMinutes);
-
-        const estimate = calculateFare(distanceInKm, durationInMinutes);
-        setFareEstimate(estimate);
-        setStep('estimate');
-      }
+      const estimate = calculateFare(estimatedDistance, estimatedDuration);
+      setFareEstimate(estimate);
+      setStep('estimate');
     } catch (error) {
       toast({
         title: 'Route error',
@@ -227,27 +192,10 @@ const RideBooking = () => {
   }, [pickup, dropoff, toast]);
 
   const handleGetEstimate = async () => {
-    // Allow typing without selecting an autocomplete option by resolving coordinates here.
-    let resolvedPickup = pickup;
-    let resolvedDropoff = dropoff;
-
-    if (!resolvedPickup && pickupAddress.trim()) {
-      const loc = await geocodeAddress(pickupAddress.trim());
-      if (loc) resolvedPickup = { address: pickupAddress.trim(), ...loc };
-    }
-
-    if (!resolvedDropoff && dropoffAddress.trim()) {
-      const loc = await geocodeAddress(dropoffAddress.trim());
-      if (loc) resolvedDropoff = { address: dropoffAddress.trim(), ...loc };
-    }
-
-    if (resolvedPickup && !pickup) setPickup(resolvedPickup);
-    if (resolvedDropoff && !dropoff) setDropoff(resolvedDropoff);
-
-    if (!resolvedPickup || !resolvedDropoff) {
+    if (!pickup || !dropoff) {
       toast({
         title: 'Missing locations',
-        description: 'Please select a suggestion from the dropdown (or enable Geocoding API for typed addresses).',
+        description: 'Please select both pickup and destination from the suggestions.',
         variant: 'destructive',
       });
       return;
@@ -354,7 +302,6 @@ const RideBooking = () => {
     setPickupAddress('');
     setDropoffAddress('');
     setFareEstimate(null);
-    setDirections(null);
     setCurrentRide(null);
     setDriverInfo(null);
   };
@@ -377,7 +324,6 @@ const RideBooking = () => {
           <MapComponent
             pickup={pickup}
             dropoff={dropoff}
-            directions={directions}
           />
         </div>
 

@@ -1,239 +1,313 @@
-import { useRef, useCallback, useState, useEffect } from 'react';
-import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer } from '@react-google-maps/api';
-import { GOOGLE_MAPS_API_KEY } from '@/lib/googleMaps';
-
-const libraries: ("places" | "geometry" | "drawing" | "visualization")[] = ["places"];
-
-const mapContainerStyle = {
-  width: '100%',
-  height: '100%',
-};
-
-const defaultCenter = {
-  lat: 45.5017, // Montreal
-  lng: -73.5673,
-};
-
-const darkMapStyles = [
-  { elementType: "geometry", stylers: [{ color: "#1a1a2e" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1a1a2e" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8a8a8a" }] },
-  {
-    featureType: "administrative.locality",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#d4d4d4" }],
-  },
-  {
-    featureType: "poi",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#8a8a8a" }],
-  },
-  {
-    featureType: "poi.park",
-    elementType: "geometry",
-    stylers: [{ color: "#1e3a2f" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry",
-    stylers: [{ color: "#2d2d44" }],
-  },
-  {
-    featureType: "road",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#1a1a2e" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry",
-    stylers: [{ color: "#3d3d5c" }],
-  },
-  {
-    featureType: "road.highway",
-    elementType: "geometry.stroke",
-    stylers: [{ color: "#1a1a2e" }],
-  },
-  {
-    featureType: "transit",
-    elementType: "geometry",
-    stylers: [{ color: "#2d2d44" }],
-  },
-  {
-    featureType: "water",
-    elementType: "geometry",
-    stylers: [{ color: "#0e1626" }],
-  },
-  {
-    featureType: "water",
-    elementType: "labels.text.fill",
-    stylers: [{ color: "#4a4a6a" }],
-  },
-];
+import { useRef, useEffect, useState, useCallback } from 'react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
+import { useMapboxToken } from '@/hooks/useMapboxToken';
+import { AlertCircle, Loader2 } from 'lucide-react';
 
 interface MapComponentProps {
   pickup?: { lat: number; lng: number } | null;
   dropoff?: { lat: number; lng: number } | null;
   driverLocation?: { lat: number; lng: number } | null;
   onMapClick?: (lat: number, lng: number) => void;
-  directions?: google.maps.DirectionsResult | null;
+  showUserLocation?: boolean;
 }
+
+const defaultCenter: [number, number] = [-73.5673, 45.5017]; // Montreal [lng, lat]
 
 const MapComponent = ({
   pickup,
   dropoff,
   driverLocation,
   onMapClick,
-  directions,
+  showUserLocation = true,
 }: MapComponentProps) => {
-  const mapRef = useRef<google.maps.Map | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<mapboxgl.Map | null>(null);
+  const pickupMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const dropoffMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const driverMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
 
-  // Some Maps errors (billing/referrer restrictions) don't surface as `loadError`.
-  // Google calls `window.gm_authFailure()` in those cases, so we hook it to show a helpful message.
+  const { token, loading, error } = useMapboxToken();
+
+  // Get user location
   useEffect(() => {
-    const prev = (window as any).gm_authFailure;
-    (window as any).gm_authFailure = () => {
-      setAuthError(
-        'Google Maps authentication failed. This is usually billing disabled or an invalid HTTP referrer restriction for this domain.'
+    if (!showUserLocation) return;
+
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setUserLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+        },
+        (err) => {
+          console.log('Geolocation error:', err.message);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
       );
-      if (typeof prev === 'function') prev();
-    };
-    return () => {
-      (window as any).gm_authFailure = prev;
-    };
-  }, []);
+    }
+  }, [showUserLocation]);
 
-  const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-    libraries,
-  });
+  // Initialize map
+  useEffect(() => {
+    if (!token || !mapContainerRef.current || mapRef.current) return;
 
-  const onLoad = useCallback((map: google.maps.Map) => {
-    mapRef.current = map;
-    setMapLoaded(true);
-  }, []);
+    mapboxgl.accessToken = token;
 
-  const handleMapClick = useCallback(
-    (e: google.maps.MapMouseEvent) => {
-      if (onMapClick && e.latLng) {
-        onMapClick(e.latLng.lat(), e.latLng.lng());
+    const initialCenter = pickup
+      ? [pickup.lng, pickup.lat]
+      : userLocation
+      ? [userLocation.lng, userLocation.lat]
+      : defaultCenter;
+
+    const map = new mapboxgl.Map({
+      container: mapContainerRef.current,
+      style: 'mapbox://styles/mapbox/dark-v11',
+      center: initialCenter as [number, number],
+      zoom: 13,
+    });
+
+    map.addControl(new mapboxgl.NavigationControl(), 'top-right');
+
+    map.on('load', () => {
+      setMapLoaded(true);
+    });
+
+    map.on('click', (e) => {
+      if (onMapClick) {
+        onMapClick(e.lngLat.lat, e.lngLat.lng);
       }
-    },
-    [onMapClick]
-  );
+    });
 
-  if (loadError) {
+    mapRef.current = map;
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+      setMapLoaded(false);
+    };
+  }, [token, onMapClick]);
+
+  // Create marker element helper
+  const createMarkerElement = useCallback((color: string, isDriver = false) => {
+    const el = document.createElement('div');
+    el.style.width = isDriver ? '32px' : '24px';
+    el.style.height = isDriver ? '32px' : '24px';
+    el.style.borderRadius = '50%';
+    el.style.backgroundColor = color;
+    el.style.border = '3px solid white';
+    el.style.boxShadow = '0 2px 10px rgba(0,0,0,0.3)';
+    if (isDriver) {
+      el.style.display = 'flex';
+      el.style.alignItems = 'center';
+      el.style.justifyContent = 'center';
+      el.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>`;
+    }
+    return el;
+  }, []);
+
+  // Update user location marker
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded || !userLocation) return;
+
+    if (userMarkerRef.current) {
+      userMarkerRef.current.setLngLat([userLocation.lng, userLocation.lat]);
+    } else {
+      const el = document.createElement('div');
+      el.style.width = '16px';
+      el.style.height = '16px';
+      el.style.borderRadius = '50%';
+      el.style.backgroundColor = '#3b82f6';
+      el.style.border = '3px solid white';
+      el.style.boxShadow = '0 0 0 8px rgba(59, 130, 246, 0.2)';
+
+      userMarkerRef.current = new mapboxgl.Marker(el)
+        .setLngLat([userLocation.lng, userLocation.lat])
+        .addTo(mapRef.current);
+    }
+  }, [userLocation, mapLoaded]);
+
+  // Update pickup marker
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+
+    if (pickup) {
+      if (pickupMarkerRef.current) {
+        pickupMarkerRef.current.setLngLat([pickup.lng, pickup.lat]);
+      } else {
+        pickupMarkerRef.current = new mapboxgl.Marker(createMarkerElement('#a855f7'))
+          .setLngLat([pickup.lng, pickup.lat])
+          .addTo(mapRef.current);
+      }
+    } else if (pickupMarkerRef.current) {
+      pickupMarkerRef.current.remove();
+      pickupMarkerRef.current = null;
+    }
+  }, [pickup, mapLoaded, createMarkerElement]);
+
+  // Update dropoff marker
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+
+    if (dropoff) {
+      if (dropoffMarkerRef.current) {
+        dropoffMarkerRef.current.setLngLat([dropoff.lng, dropoff.lat]);
+      } else {
+        dropoffMarkerRef.current = new mapboxgl.Marker(createMarkerElement('#84cc16'))
+          .setLngLat([dropoff.lng, dropoff.lat])
+          .addTo(mapRef.current);
+      }
+    } else if (dropoffMarkerRef.current) {
+      dropoffMarkerRef.current.remove();
+      dropoffMarkerRef.current = null;
+    }
+  }, [dropoff, mapLoaded, createMarkerElement]);
+
+  // Update driver marker
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+
+    if (driverLocation) {
+      if (driverMarkerRef.current) {
+        driverMarkerRef.current.setLngLat([driverLocation.lng, driverLocation.lat]);
+      } else {
+        driverMarkerRef.current = new mapboxgl.Marker(createMarkerElement('#a855f7', true))
+          .setLngLat([driverLocation.lng, driverLocation.lat])
+          .addTo(mapRef.current);
+      }
+    } else if (driverMarkerRef.current) {
+      driverMarkerRef.current.remove();
+      driverMarkerRef.current = null;
+    }
+  }, [driverLocation, mapLoaded, createMarkerElement]);
+
+  // Draw route line between pickup and dropoff
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded || !pickup || !dropoff || !token) return;
+
+    const fetchRoute = async () => {
+      try {
+        const response = await fetch(
+          `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}?geometries=geojson&access_token=${token}`
+        );
+        const data = await response.json();
+
+        if (data.routes && data.routes[0]) {
+          const route = data.routes[0].geometry;
+
+          // Remove existing route layer and source
+          if (mapRef.current?.getLayer('route')) {
+            mapRef.current.removeLayer('route');
+          }
+          if (mapRef.current?.getSource('route')) {
+            mapRef.current.removeSource('route');
+          }
+
+          // Add route source and layer
+          mapRef.current?.addSource('route', {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              properties: {},
+              geometry: route,
+            },
+          });
+
+          mapRef.current?.addLayer({
+            id: 'route',
+            type: 'line',
+            source: 'route',
+            layout: {
+              'line-join': 'round',
+              'line-cap': 'round',
+            },
+            paint: {
+              'line-color': '#a855f7',
+              'line-width': 5,
+              'line-opacity': 0.8,
+            },
+          });
+
+          // Fit map to show entire route
+          const coordinates = route.coordinates;
+          const bounds = coordinates.reduce(
+            (bounds: mapboxgl.LngLatBounds, coord: [number, number]) => {
+              return bounds.extend(coord);
+            },
+            new mapboxgl.LngLatBounds(coordinates[0], coordinates[0])
+          );
+
+          mapRef.current?.fitBounds(bounds, { padding: 50 });
+        }
+      } catch (err) {
+        console.error('Error fetching route:', err);
+      }
+    };
+
+    fetchRoute();
+
+    return () => {
+      if (mapRef.current?.getLayer('route')) {
+        mapRef.current.removeLayer('route');
+      }
+      if (mapRef.current?.getSource('route')) {
+        mapRef.current.removeSource('route');
+      }
+    };
+  }, [pickup, dropoff, mapLoaded, token]);
+
+  // Fit bounds when markers change
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+
+    const points: [number, number][] = [];
+    if (pickup) points.push([pickup.lng, pickup.lat]);
+    if (dropoff) points.push([dropoff.lng, dropoff.lat]);
+    if (driverLocation) points.push([driverLocation.lng, driverLocation.lat]);
+
+    if (points.length >= 2) {
+      const bounds = points.reduce(
+        (bounds, coord) => bounds.extend(coord),
+        new mapboxgl.LngLatBounds(points[0], points[0])
+      );
+      mapRef.current.fitBounds(bounds, { padding: 80 });
+    } else if (points.length === 1) {
+      mapRef.current.flyTo({ center: points[0], zoom: 14 });
+    }
+  }, [pickup, dropoff, driverLocation, mapLoaded]);
+
+  if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-card p-4">
-        <div className="max-w-md text-center space-y-2">
-          <p className="text-foreground font-medium">Error loading maps</p>
-          <p className="text-sm text-muted-foreground break-words">
-            {loadError.message || 'Unknown error'}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Check that billing is enabled, the required Google Maps APIs are enabled (Maps JavaScript, Places, Directions, Geocoding), and your API key referrer restrictions allow this domain.
-          </p>
+      <div className="w-full h-full flex items-center justify-center bg-card">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span>Loading map...</span>
         </div>
       </div>
     );
   }
 
-  if (!isLoaded) {
+  if (error) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-card">
-        <div className="animate-pulse text-muted-foreground">Loading map...</div>
+      <div className="w-full h-full flex items-center justify-center bg-card p-4">
+        <div className="max-w-md text-center space-y-3">
+          <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
+          <p className="text-foreground font-medium">Map configuration error</p>
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <p className="text-xs text-muted-foreground">
+            Please ensure MAPBOX_ACCESS_TOKEN is configured in Cloud → Secrets
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full relative">
-      <GoogleMap
-        mapContainerStyle={mapContainerStyle}
-        center={pickup || defaultCenter}
-        zoom={13}
-        onLoad={onLoad}
-        onClick={handleMapClick}
-        options={{
-          styles: darkMapStyles,
-          disableDefaultUI: true,
-          zoomControl: true,
-          mapTypeControl: false,
-          scaleControl: false,
-          streetViewControl: false,
-          rotateControl: false,
-          fullscreenControl: false,
-        }}
-      >
-        {pickup && (
-          <Marker
-            position={pickup}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 10,
-              fillColor: '#a855f7',
-              fillOpacity: 1,
-              strokeColor: '#ffffff',
-              strokeWeight: 3,
-            }}
-          />
-        )}
-        {dropoff && (
-          <Marker
-            position={dropoff}
-            icon={{
-              path: google.maps.SymbolPath.CIRCLE,
-              scale: 10,
-              fillColor: '#84cc16',
-              fillOpacity: 1,
-              strokeColor: '#ffffff',
-              strokeWeight: 3,
-            }}
-          />
-        )}
-        {driverLocation && (
-          <Marker
-            position={driverLocation}
-            icon={{
-              path: 'M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z',
-              scale: 2,
-              fillColor: '#a855f7',
-              fillOpacity: 1,
-              strokeColor: '#ffffff',
-              strokeWeight: 1,
-              rotation: 0,
-              anchor: new google.maps.Point(12, 12),
-            }}
-          />
-        )}
-        {directions && (
-          <DirectionsRenderer
-            directions={directions}
-            options={{
-              suppressMarkers: true,
-              polylineOptions: {
-                strokeColor: '#a855f7',
-                strokeWeight: 5,
-                strokeOpacity: 0.8,
-              },
-            }}
-          />
-        )}
-      </GoogleMap>
-
-      {authError && (
-        <div className="absolute inset-x-4 top-4 z-10 rounded-lg border border-destructive/30 bg-card/95 p-4 backdrop-blur">
-          <p className="text-sm font-medium text-foreground">Maps setup issue</p>
-          <p className="mt-1 text-xs text-muted-foreground">{authError}</p>
-          <p className="mt-2 text-xs text-muted-foreground">
-            Fix: enable billing, enable Maps JavaScript + Places + Directions + Geocoding APIs, and add HTTP referrers
-            <br />
-            <span className="font-mono">https://*.lovableproject.com/*</span> and <span className="font-mono">https://*.lovable.app/*</span>
-          </p>
-        </div>
-      )}
-    </div>
+    <div ref={mapContainerRef} className="w-full h-full" />
   );
 };
 
