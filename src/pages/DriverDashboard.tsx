@@ -40,7 +40,7 @@ interface RiderInfo {
 
 const DriverDashboard = () => {
   const { t, language } = useLanguage();
-  const { user, session, isDriver, driverProfile, refreshDriverProfile, isLoading: authLoading } = useAuth();
+  const { user, session, roles, isDriver, driverProfile, refreshDriverProfile, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -54,10 +54,21 @@ const DriverDashboard = () => {
 
   // Redirect if not logged in as driver
   useEffect(() => {
-    if (!authLoading && (!user || !isDriver)) {
-      navigate('/login');
+    if (authLoading) return;
+
+    // Not authenticated
+    if (!user) {
+      navigate('/login', { replace: true });
+      return;
     }
-  }, [user, isDriver, authLoading, navigate]);
+
+    // Wait until roles are loaded before deciding access
+    if (roles.length === 0) return;
+
+    if (!isDriver) {
+      navigate('/', { replace: true });
+    }
+  }, [user, isDriver, roles.length, authLoading, navigate]);
 
   // Initialize driver status
   useEffect(() => {
@@ -347,7 +358,8 @@ const DriverDashboard = () => {
 
   const driverEarnings = currentRide ? currentRide.estimated_fare - PLATFORM_FEE : 0;
 
-  if (authLoading) {
+  // While we have a user but haven't loaded roles yet, don't bounce them to /login.
+  if (authLoading || (user && roles.length === 0)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
