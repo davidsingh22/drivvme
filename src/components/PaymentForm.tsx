@@ -194,24 +194,28 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
         </div>
       )}
       
-      <div className="min-h-[200px]">
+      <div className="min-h-[200px] relative">
         {!isElementReady && (
-          <div className="flex items-center justify-center h-[200px]">
+          <div className="absolute inset-0 flex items-center justify-center bg-card z-10">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         )}
-        <div className={isElementReady ? 'block' : 'invisible h-0 overflow-hidden'}>
-          <PaymentElement 
-            options={{
-              layout: 'tabs',
-              wallets: {
-                applePay: 'auto',
-                googlePay: 'auto',
-              },
-            }}
-            onReady={() => setIsElementReady(true)}
-          />
-        </div>
+        <PaymentElement 
+          options={{
+            layout: 'tabs',
+            wallets: {
+              applePay: 'auto',
+              googlePay: 'auto',
+            },
+          }}
+          onReady={() => {
+            console.log('PaymentElement ready');
+            setIsElementReady(true);
+          }}
+          onLoadError={(error) => {
+            console.error('PaymentElement load error:', error);
+          }}
+        />
       </div>
       
       <div className="flex gap-3 pt-4">
