@@ -109,8 +109,16 @@ const MapComponent = ({
 
   if (loadError) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-card">
-        <p className="text-muted-foreground">Error loading maps</p>
+      <div className="w-full h-full flex items-center justify-center bg-card p-4">
+        <div className="max-w-md text-center space-y-2">
+          <p className="text-foreground font-medium">Error loading maps</p>
+          <p className="text-sm text-muted-foreground break-words">
+            {loadError.message || 'Unknown error'}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Check that billing is enabled, the required Google Maps APIs are enabled (Maps JavaScript, Places, Directions, Geocoding), and your API key referrer restrictions allow this domain.
+          </p>
+        </div>
       </div>
     );
   }
