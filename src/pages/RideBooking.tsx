@@ -134,31 +134,42 @@ const RideBooking = () => {
   };
 
   const useCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          
-          // Reverse geocode to get address
+    if (!navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        // NOTE: Reverse-geocoding requires the Google Geocoding API.
+        // To keep the app usable even when that API isn't enabled, we fall back to
+        // using coordinates as the address.
+        const fallbackAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+        setPickupAddress(fallbackAddress);
+        setPickup({ address: fallbackAddress, lat, lng });
+
+        // Try reverse geocode opportunistically (best-effort).
+        try {
           const geocoder = new google.maps.Geocoder();
           geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-            if (status === 'OK' && results?.[0]) {
+            if (status === 'OK' && results?.[0]?.formatted_address) {
               const address = results[0].formatted_address;
               setPickupAddress(address);
               setPickup({ address, lat, lng });
             }
           });
-        },
-        (error) => {
-          toast({
-            title: 'Location error',
-            description: 'Unable to get your current location',
-            variant: 'destructive',
-          });
+        } catch {
+          // ignore
         }
-      );
-    }
+      },
+      () => {
+        toast({
+          title: 'Location error',
+          description: 'Unable to get your current location',
+          variant: 'destructive',
+        });
+      }
+    );
   };
 
   const calculateRoute = useCallback(async () => {
