@@ -119,31 +119,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+      async (_event, nextSession) => {
+        setIsLoading(true);
+        setSession(nextSession);
+        setUser(nextSession?.user ?? null);
 
-        if (session?.user) {
-          // Use setTimeout to prevent race conditions with database triggers
-          setTimeout(() => loadUserData(session.user.id), 100);
+        try {
+          if (nextSession?.user) {
+            // Small delay helps avoid rare timing issues right after auth events
+            await new Promise((r) => setTimeout(r, 100));
+            await loadUserData(nextSession.user.id);
+          } else {
+            setProfile(null);
+            setDriverProfile(null);
+            setRoles([]);
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    );
+
+    // THEN check for existing session
+    (async () => {
+      setIsLoading(true);
+      const { data: { session: existingSession } } = await supabase.auth.getSession();
+      setSession(existingSession);
+      setUser(existingSession?.user ?? null);
+
+      try {
+        if (existingSession?.user) {
+          await loadUserData(existingSession.user.id);
         } else {
           setProfile(null);
           setDriverProfile(null);
           setRoles([]);
         }
+      } finally {
         setIsLoading(false);
       }
-    );
-
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadUserData(session.user.id);
-      }
-      setIsLoading(false);
-    });
+    })();
 
     return () => subscription.unsubscribe();
   }, []);

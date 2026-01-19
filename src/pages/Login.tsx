@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff } from 'lucide-react';
@@ -12,7 +12,7 @@ import LanguageToggle from '@/components/LanguageToggle';
 
 const Login = () => {
   const { t } = useLanguage();
-  const { signIn, isLoading, isRider, isDriver } = useAuth();
+  const { signIn, isLoading, isRider, isDriver, isAdmin, user } = useAuth();
   const navigate = useNavigate();
   
   const [email, setEmail] = useState('');
@@ -20,15 +20,25 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
+  // After auth state + roles load, route user to the right dashboard
+  // (prevents "login then immediately back to login" race)
+  useEffect(() => {
+    if (isLoading) return;
+    if (!user) return;
+
+    if (isAdmin) navigate('/admin', { replace: true });
+    else if (isDriver) navigate('/driver', { replace: true });
+    else if (isRider) navigate('/ride', { replace: true });
+    else navigate('/', { replace: true });
+  }, [user, isLoading, isAdmin, isDriver, isRider, navigate]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     try {
       await signIn(email, password);
-      // Navigate based on role after sign in
-      // This will be handled by auth state change
-      navigate('/');
+      // Navigation is handled by the effect above once roles are loaded
     } catch (err: any) {
       setError(err.message);
     }
