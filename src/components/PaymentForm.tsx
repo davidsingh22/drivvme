@@ -30,6 +30,7 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentRequest, setPaymentRequest] = useState<PaymentRequest | null>(null);
   const [canMakePayment, setCanMakePayment] = useState(false);
+  const [isElementReady, setIsElementReady] = useState(false);
 
   // Set up Apple Pay / Google Pay
   useEffect(() => {
@@ -113,7 +114,11 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!stripe || !elements) {
+    if (!stripe || !elements || !isElementReady) {
+      toast({
+        title: 'Please wait',
+        description: 'Payment form is still loading...',
+      });
       return;
     }
 
@@ -197,6 +202,7 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
             googlePay: 'auto',
           },
         }}
+        onReady={() => setIsElementReady(true)}
       />
       
       <div className="flex gap-3 pt-4">
@@ -211,7 +217,7 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
         </Button>
         <Button
           type="submit"
-          disabled={!stripe || isProcessing}
+          disabled={!stripe || isProcessing || !isElementReady}
           className="flex-1 gradient-primary"
         >
           {isProcessing ? (
@@ -244,7 +250,7 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
   const { toast } = useToast();
 
   // Create payment intent on mount
-  useState(() => {
+  useEffect(() => {
     const createPaymentIntent = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -274,7 +280,7 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     };
 
     createPaymentIntent();
-  });
+  }, [rideId, amount, toast]);
 
   if (error) {
     return (
