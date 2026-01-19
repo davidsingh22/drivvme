@@ -101,13 +101,23 @@ const DriverDashboard = () => {
     if (!isOnline || !user || !session) return;
 
     const fetchRides = async () => {
+      // Refresh session to ensure valid auth token for RLS policies
+      const { data: sessionData } = await supabase.auth.refreshSession();
+      if (!sessionData.session) {
+        console.error('No valid session for fetching rides');
+        return;
+      }
+
       const { data, error } = await supabase
         .from('rides')
         .select('*')
         .eq('status', 'searching')
         .order('requested_at', { ascending: true });
 
-      if (!error && data) {
+      if (error) {
+        console.error('Error fetching rides:', error);
+      } else if (data) {
+        console.log('Available rides:', data.length);
         setAvailableRides(data);
       }
     };
