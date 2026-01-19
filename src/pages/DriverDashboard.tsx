@@ -389,6 +389,19 @@ const DriverDashboard = () => {
           className="w-full lg:w-[420px] bg-card border-l border-border flex flex-col"
         >
           <div className="p-6 flex-1 overflow-y-auto">
+            {/* Go Online/Offline Button */}
+            <Button
+              onClick={toggleOnlineStatus}
+              className={`w-full h-16 text-lg font-bold mb-6 transition-all ${
+                isOnline 
+                  ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' 
+                  : 'gradient-primary'
+              }`}
+            >
+              <Power className={`h-6 w-6 mr-3 ${isOnline ? '' : 'animate-pulse'}`} />
+              {isOnline ? 'Go Offline' : 'Go Online'}
+            </Button>
+
             {/* Today's Stats */}
             <div className="grid grid-cols-2 gap-4 mb-6">
               <Card className="p-4 bg-muted/50">
