@@ -165,7 +165,7 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
       </div>
 
       {/* Apple Pay / Google Pay Button */}
-      {canMakePayment && paymentRequest && (
+      {canMakePayment && paymentRequest && isElementReady && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Smartphone className="h-4 w-4" />
@@ -194,16 +194,25 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
         </div>
       )}
       
-      <PaymentElement 
-        options={{
-          layout: 'tabs',
-          wallets: {
-            applePay: 'auto',
-            googlePay: 'auto',
-          },
-        }}
-        onReady={() => setIsElementReady(true)}
-      />
+      <div className="min-h-[200px]">
+        {!isElementReady && (
+          <div className="flex items-center justify-center h-[200px]">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        )}
+        <div className={isElementReady ? 'block' : 'invisible h-0 overflow-hidden'}>
+          <PaymentElement 
+            options={{
+              layout: 'tabs',
+              wallets: {
+                applePay: 'auto',
+                googlePay: 'auto',
+              },
+            }}
+            onReady={() => setIsElementReady(true)}
+          />
+        </div>
+      </div>
       
       <div className="flex gap-3 pt-4">
         <Button
@@ -217,13 +226,18 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
         </Button>
         <Button
           type="submit"
-          disabled={!stripe || isProcessing || !isElementReady}
+          disabled={!stripe || !elements || isProcessing || !isElementReady}
           className="flex-1 gradient-primary"
         >
           {isProcessing ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
               Processing...
+            </>
+          ) : !isElementReady ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              Loading...
             </>
           ) : (
             <>
@@ -303,6 +317,7 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
 
   return (
     <Elements
+      key={clientSecret}
       stripe={stripePromise}
       options={{
         clientSecret,
