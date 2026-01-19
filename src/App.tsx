@@ -8,6 +8,10 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
+import RideBooking from "./pages/RideBooking";
+import DriverDashboard from "./pages/DriverDashboard";
+import RideHistory from "./pages/RideHistory";
+import Earnings from "./pages/Earnings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,6 +28,10 @@ const App = () => (
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
               <Route path="/signup" element={<Signup />} />
+              <Route path="/ride" element={<RideBooking />} />
+              <Route path="/driver" element={<DriverDashboard />} />
+              <Route path="/history" element={<RideHistory />} />
+              <Route path="/earnings" element={<Earnings />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
