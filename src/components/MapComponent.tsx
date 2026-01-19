@@ -88,7 +88,7 @@ const MapComponent = ({
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: 'AIzaSyDhsXwcBQ71uFGBkRNJm_ZqSXBYQo5eyGA',
     libraries,
   });
 
