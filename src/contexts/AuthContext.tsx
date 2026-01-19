@@ -3,7 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-type UserRole = 'rider' | 'driver';
+type UserRole = 'rider' | 'driver' | 'admin';
 
 interface Profile {
   id: string;
@@ -43,6 +43,7 @@ interface AuthContextType {
   isLoading: boolean;
   isRider: boolean;
   isDriver: boolean;
+  isAdmin: boolean;
   signUp: (email: string, password: string, role: UserRole, firstName?: string, lastName?: string, phone?: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -267,6 +268,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isRider = roles.includes('rider');
   const isDriver = roles.includes('driver');
+  const isAdmin = roles.includes('admin');
 
   return (
     <AuthContext.Provider
@@ -279,6 +281,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isLoading,
         isRider,
         isDriver,
+        isAdmin,
         signUp,
         signIn,
         signOut,
