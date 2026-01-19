@@ -71,6 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching profile:', error);
+      throw error;
     }
     return data;
   };
@@ -84,6 +85,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching driver profile:', error);
+      throw error;
     }
     return data;
   };
@@ -96,24 +98,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error) {
       console.error('Error fetching roles:', error);
-      return [];
+      throw error;
     }
     return data?.map(r => r.role as UserRole) || [];
   };
 
   const loadUserData = async (userId: string) => {
-    const [profileData, rolesData] = await Promise.all([
-      fetchProfile(userId),
-      fetchRoles(userId),
-    ]);
+    let lastError: any = null;
 
-    setProfile(profileData);
-    setRoles(rolesData);
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const [profileData, rolesData] = await Promise.all([
+          fetchProfile(userId),
+          fetchRoles(userId),
+        ]);
 
-    if (rolesData.includes('driver')) {
-      const driverData = await fetchDriverProfile(userId);
-      setDriverProfile(driverData);
+        setProfile(profileData);
+        setRoles(rolesData);
+
+        if (rolesData.includes('driver')) {
+          const driverData = await fetchDriverProfile(userId);
+          setDriverProfile(driverData);
+        } else {
+          setDriverProfile(null);
+        }
+
+        return;
+      } catch (e) {
+        lastError = e;
+        // brief backoff, helps with transient "Load failed" network errors
+        await new Promise((r) => setTimeout(r, 250 * attempt));
+      }
     }
+
+    console.error('Failed to load user data after retries:', lastError);
+    setProfile(null);
+    setDriverProfile(null);
+    setRoles([]);
   };
 
   useEffect(() => {
