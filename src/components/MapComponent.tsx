@@ -14,6 +14,34 @@ interface MapComponentProps {
 
 const defaultCenter: [number, number] = [-73.5673, 45.5017]; // Montreal [lng, lat]
 
+// Animation duration in ms
+const ANIMATION_DURATION = 1000;
+
+// Lerp helper for smooth interpolation
+const lerp = (start: number, end: number, t: number) => start + (end - start) * t;
+
+// Easing function for smooth animation
+const easeInOutCubic = (t: number) => 
+  t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+// Calculate bearing between two points
+const calculateBearing = (
+  start: { lat: number; lng: number },
+  end: { lat: number; lng: number }
+): number => {
+  const startLat = (start.lat * Math.PI) / 180;
+  const startLng = (start.lng * Math.PI) / 180;
+  const endLat = (end.lat * Math.PI) / 180;
+  const endLng = (end.lng * Math.PI) / 180;
+
+  const dLng = endLng - startLng;
+  const x = Math.sin(dLng) * Math.cos(endLat);
+  const y = Math.cos(startLat) * Math.sin(endLat) - Math.sin(startLat) * Math.cos(endLat) * Math.cos(dLng);
+  
+  let bearing = (Math.atan2(x, y) * 180) / Math.PI;
+  return (bearing + 360) % 360;
+};
+
 const MapComponent = ({
   pickup,
   dropoff,
@@ -26,7 +54,10 @@ const MapComponent = ({
   const pickupMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const dropoffMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const driverMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const driverMarkerElementRef = useRef<HTMLDivElement | null>(null);
   const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const previousDriverLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
 
@@ -86,27 +117,82 @@ const MapComponent = ({
     mapRef.current = map;
 
     return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
       map.remove();
       mapRef.current = null;
       setMapLoaded(false);
     };
   }, [token, onMapClick]);
 
+  // Create driver marker element with rotation support
+  const createDriverMarkerElement = useCallback(() => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'driver-marker-wrapper';
+    wrapper.style.width = '48px';
+    wrapper.style.height = '48px';
+    wrapper.style.position = 'relative';
+    wrapper.style.transition = 'transform 0.3s ease-out';
+
+    const pulse = document.createElement('div');
+    pulse.className = 'driver-pulse';
+    pulse.style.position = 'absolute';
+    pulse.style.inset = '0';
+    pulse.style.borderRadius = '50%';
+    pulse.style.backgroundColor = 'rgba(168, 85, 247, 0.3)';
+    pulse.style.animation = 'pulse 2s infinite';
+    
+    const marker = document.createElement('div');
+    marker.style.position = 'absolute';
+    marker.style.top = '50%';
+    marker.style.left = '50%';
+    marker.style.transform = 'translate(-50%, -50%)';
+    marker.style.width = '36px';
+    marker.style.height = '36px';
+    marker.style.borderRadius = '50%';
+    marker.style.backgroundColor = '#a855f7';
+    marker.style.border = '3px solid white';
+    marker.style.boxShadow = '0 4px 14px rgba(168, 85, 247, 0.5)';
+    marker.style.display = 'flex';
+    marker.style.alignItems = 'center';
+    marker.style.justifyContent = 'center';
+    
+    const arrow = document.createElement('div');
+    arrow.className = 'driver-arrow';
+    arrow.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>`;
+    arrow.style.transition = 'transform 0.3s ease-out';
+    
+    marker.appendChild(arrow);
+    wrapper.appendChild(pulse);
+    wrapper.appendChild(marker);
+
+    // Add pulse animation styles
+    if (!document.getElementById('driver-marker-styles')) {
+      const style = document.createElement('style');
+      style.id = 'driver-marker-styles';
+      style.textContent = `
+        @keyframes pulse {
+          0% { transform: scale(0.8); opacity: 1; }
+          50% { transform: scale(1.2); opacity: 0.5; }
+          100% { transform: scale(0.8); opacity: 1; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    return wrapper;
+  }, []);
+
   // Create marker element helper
-  const createMarkerElement = useCallback((color: string, isDriver = false) => {
+  const createMarkerElement = useCallback((color: string) => {
     const el = document.createElement('div');
-    el.style.width = isDriver ? '32px' : '24px';
-    el.style.height = isDriver ? '32px' : '24px';
+    el.style.width = '24px';
+    el.style.height = '24px';
     el.style.borderRadius = '50%';
     el.style.backgroundColor = color;
     el.style.border = '3px solid white';
     el.style.boxShadow = '0 2px 10px rgba(0,0,0,0.3)';
-    if (isDriver) {
-      el.style.display = 'flex';
-      el.style.alignItems = 'center';
-      el.style.justifyContent = 'center';
-      el.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>`;
-    }
     return el;
   }, []);
 
@@ -167,23 +253,81 @@ const MapComponent = ({
     }
   }, [dropoff, mapLoaded, createMarkerElement]);
 
-  // Update driver marker
+  // Update driver marker with smooth animation
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
 
     if (driverLocation) {
-      if (driverMarkerRef.current) {
-        driverMarkerRef.current.setLngLat([driverLocation.lng, driverLocation.lat]);
-      } else {
-        driverMarkerRef.current = new mapboxgl.Marker(createMarkerElement('#a855f7', true))
+      // Create marker if it doesn't exist
+      if (!driverMarkerRef.current) {
+        const el = createDriverMarkerElement();
+        driverMarkerElementRef.current = el;
+        driverMarkerRef.current = new mapboxgl.Marker(el)
           .setLngLat([driverLocation.lng, driverLocation.lat])
           .addTo(mapRef.current);
+        previousDriverLocationRef.current = driverLocation;
+        return;
+      }
+
+      const prevLocation = previousDriverLocationRef.current;
+      
+      // If we have a previous location, animate to new location
+      if (prevLocation && (prevLocation.lat !== driverLocation.lat || prevLocation.lng !== driverLocation.lng)) {
+        // Calculate bearing for arrow rotation
+        const bearing = calculateBearing(prevLocation, driverLocation);
+        
+        // Update arrow rotation
+        if (driverMarkerElementRef.current) {
+          const arrow = driverMarkerElementRef.current.querySelector('.driver-arrow') as HTMLElement;
+          if (arrow) {
+            arrow.style.transform = `rotate(${bearing}deg)`;
+          }
+        }
+
+        // Cancel any ongoing animation
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current);
+        }
+
+        const startTime = performance.now();
+        const startLat = prevLocation.lat;
+        const startLng = prevLocation.lng;
+        const endLat = driverLocation.lat;
+        const endLng = driverLocation.lng;
+
+        const animate = (currentTime: number) => {
+          const elapsed = currentTime - startTime;
+          const progress = Math.min(elapsed / ANIMATION_DURATION, 1);
+          const easedProgress = easeInOutCubic(progress);
+
+          const currentLat = lerp(startLat, endLat, easedProgress);
+          const currentLng = lerp(startLng, endLng, easedProgress);
+
+          driverMarkerRef.current?.setLngLat([currentLng, currentLat]);
+
+          if (progress < 1) {
+            animationFrameRef.current = requestAnimationFrame(animate);
+          } else {
+            previousDriverLocationRef.current = driverLocation;
+          }
+        };
+
+        animationFrameRef.current = requestAnimationFrame(animate);
+      } else {
+        // Just update position without animation (first render or same position)
+        driverMarkerRef.current.setLngLat([driverLocation.lng, driverLocation.lat]);
+        previousDriverLocationRef.current = driverLocation;
       }
     } else if (driverMarkerRef.current) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
       driverMarkerRef.current.remove();
       driverMarkerRef.current = null;
+      driverMarkerElementRef.current = null;
+      previousDriverLocationRef.current = null;
     }
-  }, [driverLocation, mapLoaded, createMarkerElement]);
+  }, [driverLocation, mapLoaded, createDriverMarkerElement]);
 
   // Draw route line between pickup and dropoff
   useEffect(() => {
