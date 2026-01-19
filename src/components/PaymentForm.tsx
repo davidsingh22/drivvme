@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { loadStripe, PaymentRequest } from '@stripe/stripe-js';
+import { loadStripe, PaymentRequest, Stripe } from '@stripe/stripe-js';
 import {
   Elements,
   PaymentElement,
@@ -12,11 +12,6 @@ import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Loader2, CreditCard, Shield, Smartphone } from 'lucide-react';
-
-// Initialize Stripe
-// Prefer env var if available; fallback is intentionally empty to avoid using an invalid key.
-const STRIPE_PUBLISHABLE_KEY = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string | undefined;
-const stripePromise = loadStripe(STRIPE_PUBLISHABLE_KEY ?? '');
 
 interface PaymentFormInnerProps {
   onSuccess: () => void;
@@ -266,13 +261,31 @@ interface PaymentFormProps {
 
 const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) => {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
-  // Create payment intent on mount
+  // Fetch Stripe config and create payment intent on mount
   useEffect(() => {
-    const createPaymentIntent = async () => {
+    const initialize = async () => {
       try {
+        // Fetch the Stripe publishable key from edge function
+        const configResponse = await supabase.functions.invoke('get-stripe-config');
+        
+        if (configResponse.error) {
+          throw new Error(configResponse.error.message || 'Failed to get Stripe config');
+        }
+        
+        const publishableKey = configResponse.data?.publishableKey;
+        if (!publishableKey) {
+          throw new Error('Stripe publishable key not configured');
+        }
+        
+        // Initialize Stripe with the fetched key
+        setStripePromise(loadStripe(publishableKey));
+        
+        // Now create the payment intent
         const { data: { session } } = await supabase.auth.getSession();
         
         if (!session) {
@@ -289,17 +302,19 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
 
         setClientSecret(response.data.clientSecret);
       } catch (err: any) {
-        console.error('Error creating payment intent:', err);
+        console.error('Error initializing payment:', err);
         setError(err.message);
         toast({
           title: 'Error',
           description: 'Failed to initialize payment. Please try again.',
           variant: 'destructive',
         });
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    createPaymentIntent();
+    initialize();
   }, [rideId, amount, toast]);
 
   if (error) {
@@ -313,23 +328,10 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     );
   }
 
-  if (!clientSecret) {
+  if (isLoading || !clientSecret || !stripePromise) {
     return (
       <Card className="p-6 flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </Card>
-    );
-  }
-
-  if (!STRIPE_PUBLISHABLE_KEY) {
-    return (
-      <Card className="p-6">
-        <p className="text-destructive text-center">
-          Stripe publishable key is missing. Add VITE_STRIPE_PUBLISHABLE_KEY and reload.
-        </p>
-        <Button onClick={onCancel} variant="outline" className="w-full mt-4">
-          Go Back
-        </Button>
       </Card>
     );
   }
