@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Car, Clock, Shield, Headphones, TrendingDown, MapPin, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
 
 const features = [
@@ -34,6 +35,7 @@ const features = [
 
 const Landing = () => {
   const { t } = useLanguage();
+  const { user, isRider, isDriver } = useAuth();
 
   return (
     <div className="min-h-screen bg-background">
@@ -103,7 +105,7 @@ const Landing = () => {
                 size="lg"
                 className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group"
               >
-                <Link to="/signup?role=rider">
+                <Link to={user && isRider ? "/ride" : "/signup?role=rider"}>
                   {t('hero.cta.rider')}
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
                 </Link>
@@ -114,7 +116,7 @@ const Landing = () => {
                 variant="outline"
                 className="text-lg px-8 py-6 rounded-xl border-2 hover:bg-accent hover:text-accent-foreground hover:border-accent"
               >
-                <Link to="/signup?role=driver">
+                <Link to={user && isDriver ? "/driver" : "/signup?role=driver"}>
                   <Car className="mr-2 h-5 w-5" />
                   {t('hero.cta.driver')}
                 </Link>
