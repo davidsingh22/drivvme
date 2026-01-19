@@ -40,7 +40,7 @@ interface RiderInfo {
 
 const DriverDashboard = () => {
   const { t, language } = useLanguage();
-  const { user, isDriver, driverProfile, refreshDriverProfile, isLoading: authLoading } = useAuth();
+  const { user, session, isDriver, driverProfile, refreshDriverProfile, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -68,7 +68,7 @@ const DriverDashboard = () => {
 
   // Get driver location
   useEffect(() => {
-    if (!isOnline) return;
+    if (!isOnline || !session) return;
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -94,11 +94,11 @@ const DriverDashboard = () => {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isOnline, user]);
+  }, [isOnline, user, session]);
 
   // Fetch available rides when online
   useEffect(() => {
-    if (!isOnline || !user) return;
+    if (!isOnline || !user || !session) return;
 
     const fetchRides = async () => {
       const { data, error } = await supabase
@@ -134,7 +134,7 @@ const DriverDashboard = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isOnline, user]);
+  }, [isOnline, user, session]);
 
   // Subscribe to current ride updates
   useEffect(() => {
