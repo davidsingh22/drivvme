@@ -209,20 +209,32 @@ const RideBooking = () => {
 
     setIsSubmitting(true);
     try {
-      // Ensure we have a valid session before inserting
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      // Refresh the session to ensure we have a valid token
+      const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
       
-      if (sessionError || !session) {
-        throw new Error('Please sign in again to continue');
+      if (sessionError) {
+        console.error('Session refresh error:', sessionError);
+        // Try getSession as fallback
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
+        if (!existingSession) {
+          toast({
+            title: 'Session expired',
+            description: 'Please sign in again to continue.',
+            variant: 'destructive',
+          });
+          navigate('/login');
+          return;
+        }
       }
 
-      console.log('Creating ride with rider_id:', user.id, 'session user:', session.user.id);
+      const userId = session?.user?.id || user.id;
+      console.log('Creating ride with rider_id:', userId);
 
       // Create the ride first with 'searching' status but don't activate yet
       const { data: ride, error } = await supabase
         .from('rides')
         .insert({
-          rider_id: session.user.id, // Use session.user.id to ensure it matches auth.uid()
+          rider_id: userId,
           pickup_address: pickup.address,
           pickup_lat: pickup.lat,
           pickup_lng: pickup.lng,
@@ -237,7 +249,10 @@ const RideBooking = () => {
         .select()
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Ride insert error:', error);
+        throw error;
+      }
 
       setCurrentRide(ride);
       setStep('payment');
