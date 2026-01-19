@@ -4,6 +4,7 @@ import { MapPin, Navigation } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { GOOGLE_MAPS_API_KEY } from '@/lib/googleMaps';
 
 const libraries: ("places")[] = ["places"];
 
@@ -27,7 +28,7 @@ const LocationInput = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '',
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries,
   });
 

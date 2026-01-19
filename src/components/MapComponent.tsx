@@ -1,5 +1,6 @@
 import { useRef, useCallback, useState } from 'react';
 import { GoogleMap, useJsApiLoader, Marker, DirectionsRenderer } from '@react-google-maps/api';
+import { GOOGLE_MAPS_API_KEY } from '@/lib/googleMaps';
 
 const libraries: ("places" | "geometry" | "drawing" | "visualization")[] = ["places"];
 
@@ -88,7 +89,7 @@ const MapComponent = ({
   const [mapLoaded, setMapLoaded] = useState(false);
 
   const { isLoaded, loadError } = useJsApiLoader({
-    googleMapsApiKey: 'AIzaSyDhsXwcBQ71uFGBkRNJm_ZqSXBYQo5eyGA',
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
     libraries,
   });
 
