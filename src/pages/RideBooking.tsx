@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, Star, Phone, MessageSquare } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, Star, Phone, MessageSquare, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -11,9 +11,10 @@ import { calculateFare, formatCurrency, formatDistance, formatDuration, FareEsti
 import Navbar from '@/components/Navbar';
 import MapComponent from '@/components/MapComponent';
 import LocationInput from '@/components/LocationInput';
+import PaymentForm from '@/components/PaymentForm';
 import { useToast } from '@/hooks/use-toast';
 
-type RideStep = 'input' | 'estimate' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
+type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
 interface Location {
   address: string;
@@ -208,11 +209,12 @@ const RideBooking = () => {
     calculateRoute();
   };
 
-  const handleConfirmRide = async () => {
+  const handleProceedToPayment = async () => {
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
     setIsSubmitting(true);
     try {
+      // Create the ride first with 'searching' status but don't activate yet
       const { data: ride, error } = await supabase
         .from('rides')
         .insert({
@@ -234,12 +236,7 @@ const RideBooking = () => {
       if (error) throw error;
 
       setCurrentRide(ride);
-      setStep('searching');
-      
-      toast({
-        title: t('booking.searching'),
-        description: 'Looking for nearby drivers...',
-      });
+      setStep('payment');
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -249,6 +246,31 @@ const RideBooking = () => {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handlePaymentSuccess = () => {
+    setStep('searching');
+    toast({
+      title: t('booking.searching'),
+      description: 'Payment confirmed! Looking for nearby drivers...',
+    });
+  };
+
+  const handlePaymentCancel = async () => {
+    // Cancel the ride if payment is cancelled
+    if (currentRide) {
+      await supabase
+        .from('rides')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: user?.id,
+          cancellation_reason: 'Payment cancelled',
+        })
+        .eq('id', currentRide.id);
+    }
+    setCurrentRide(null);
+    setStep('estimate');
   };
 
   const handleCancelRide = async () => {
@@ -434,12 +456,52 @@ const RideBooking = () => {
                   </Card>
 
                   <Button
-                    onClick={handleConfirmRide}
+                    onClick={handleProceedToPayment}
                     className="w-full gradient-primary shadow-button py-6 text-lg"
                     disabled={isSubmitting}
                   >
-                    {isSubmitting ? t('common.loading') : t('booking.confirm')}
+                    {isSubmitting ? (
+                      t('common.loading')
+                    ) : (
+                      <>
+                        <CreditCard className="h-5 w-5 mr-2" />
+                        {t('booking.confirm')} & Pay
+                      </>
+                    )}
                   </Button>
+                </motion.div>
+              )}
+
+              {/* Payment Step */}
+              {step === 'payment' && currentRide && fareEstimate && (
+                <motion.div
+                  key="payment"
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="space-y-6"
+                >
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-display text-2xl font-bold">
+                      Payment
+                    </h2>
+                  </div>
+
+                  <Card className="p-4 bg-muted/50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Total</span>
+                      <span className="font-display text-2xl font-bold text-gradient">
+                        {formatCurrency(fareEstimate.total, language)}
+                      </span>
+                    </div>
+                  </Card>
+
+                  <PaymentForm
+                    rideId={currentRide.id}
+                    amount={fareEstimate.total}
+                    onSuccess={handlePaymentSuccess}
+                    onCancel={handlePaymentCancel}
+                  />
                 </motion.div>
               )}
 
