@@ -183,10 +183,66 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
       options={{
         clientSecret,
         appearance: {
-          theme: 'stripe',
+          theme: 'night',
           variables: {
-            colorPrimary: '#06b6d4',
-            borderRadius: '8px',
+            colorPrimary: '#a855f7',
+            colorBackground: '#0f0f12',
+            colorText: '#fafafa',
+            colorTextSecondary: '#a1a1aa',
+            colorTextPlaceholder: '#71717a',
+            colorDanger: '#ef4444',
+            colorSuccess: '#22c55e',
+            fontFamily: 'Inter, system-ui, sans-serif',
+            fontSizeBase: '16px',
+            borderRadius: '12px',
+            spacingUnit: '4px',
+            focusBoxShadow: '0 0 0 2px rgba(168, 85, 247, 0.4)',
+            focusOutline: 'none',
+          },
+          rules: {
+            '.Input': {
+              backgroundColor: '#1a1a1f',
+              border: '1px solid #2a2a32',
+              boxShadow: 'none',
+              padding: '12px 14px',
+            },
+            '.Input:hover': {
+              border: '1px solid #3a3a45',
+            },
+            '.Input:focus': {
+              border: '1px solid #a855f7',
+              boxShadow: '0 0 0 2px rgba(168, 85, 247, 0.2)',
+            },
+            '.Label': {
+              color: '#a1a1aa',
+              fontSize: '14px',
+              fontWeight: '500',
+              marginBottom: '8px',
+            },
+            '.Tab': {
+              backgroundColor: '#1a1a1f',
+              border: '1px solid #2a2a32',
+              color: '#a1a1aa',
+            },
+            '.Tab:hover': {
+              backgroundColor: '#252530',
+              border: '1px solid #3a3a45',
+            },
+            '.Tab--selected': {
+              backgroundColor: '#a855f7',
+              border: '1px solid #a855f7',
+              color: '#ffffff',
+            },
+            '.TabIcon': {
+              fill: '#a1a1aa',
+            },
+            '.TabIcon--selected': {
+              fill: '#ffffff',
+            },
+            '.Error': {
+              color: '#ef4444',
+              fontSize: '14px',
+            },
           },
         },
       }}
