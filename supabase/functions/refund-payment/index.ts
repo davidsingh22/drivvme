@@ -71,9 +71,19 @@ serve(async (req) => {
       throw new Error("Payment not found or already refunded");
     }
 
-    // Verify the user is the rider or driver for this ride
+    // Check if user is an admin
+    const { data: adminRole } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .eq("role", "admin")
+      .single();
+
+    const isAdmin = !!adminRole;
+
+    // Verify the user is the rider, driver, or admin for this ride
     const ride = payment.rides as { rider_id: string; driver_id: string; status: string };
-    if (ride.rider_id !== user.id && ride.driver_id !== user.id) {
+    if (ride.rider_id !== user.id && ride.driver_id !== user.id && !isAdmin) {
       throw new Error("Unauthorized to refund this payment");
     }
 

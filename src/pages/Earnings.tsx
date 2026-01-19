@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { DollarSign, TrendingUp, Calendar, Car, ArrowUp, ArrowDown } from 'lucide-react';
+import { DollarSign, TrendingUp, Calendar, Car, ArrowUp, ArrowDown, Wallet, ExternalLink, Loader2 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { formatCurrency } from '@/lib/pricing';
+import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
 
 const PLATFORM_FEE = 5.00;
@@ -17,6 +21,7 @@ interface EarningsSummary {
   totalFares: number;
   totalPlatformFees: number;
   totalRides: number;
+  availableBalance: number;
 }
 
 interface DailyEarnings {
@@ -28,8 +33,10 @@ interface DailyEarnings {
 
 const Earnings = () => {
   const { t, language } = useLanguage();
-  const { user, isDriver, driverProfile, isLoading: authLoading } = useAuth();
+  const { user, isDriver, driverProfile, isLoading: authLoading, refreshDriverProfile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { toast } = useToast();
 
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'all'>('week');
   const [summary, setSummary] = useState<EarningsSummary>({
@@ -37,15 +44,29 @@ const Earnings = () => {
     totalFares: 0,
     totalPlatformFees: 0,
     totalRides: 0,
+    availableBalance: 0,
   });
   const [dailyData, setDailyData] = useState<DailyEarnings[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [payoutDialog, setPayoutDialog] = useState(false);
+  const [payoutAmount, setPayoutAmount] = useState('');
+  const [isProcessingPayout, setIsProcessingPayout] = useState(false);
 
   useEffect(() => {
     if (!authLoading && (!user || !isDriver)) {
       navigate('/login');
     }
   }, [user, isDriver, authLoading, navigate]);
+
+  useEffect(() => {
+    // Check if returning from Stripe onboarding
+    if (searchParams.get('onboarded') === 'true') {
+      toast({
+        title: 'Payment Setup Complete',
+        description: 'You can now withdraw your earnings!',
+      });
+    }
+  }, [searchParams, toast]);
 
   useEffect(() => {
     if (!user) return;
@@ -90,12 +111,14 @@ const Earnings = () => {
         const totalEarnings = data.reduce((sum, r) => sum + (Number(r.driver_earnings) || 0), 0);
         const totalFares = data.reduce((sum, r) => sum + (Number(r.actual_fare) || 0), 0);
         const totalPlatformFees = data.reduce((sum, r) => sum + (Number(r.platform_fee) || 0), 0);
+        const availableBalance = Number(driverProfile?.total_earnings) || 0;
 
         setSummary({
           totalEarnings,
           totalFares,
           totalPlatformFees,
           totalRides: data.length,
+          availableBalance,
         });
 
         // Group by day
@@ -117,7 +140,80 @@ const Earnings = () => {
     };
 
     fetchEarnings();
-  }, [user, period, language]);
+  }, [user, period, language, driverProfile?.total_earnings]);
+
+  const handlePayout = async () => {
+    const amount = parseFloat(payoutAmount);
+    const availableBalance = Number(driverProfile?.total_earnings) || 0;
+
+    if (isNaN(amount) || amount <= 0) {
+      toast({
+        title: 'Invalid Amount',
+        description: 'Please enter a valid amount to withdraw',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (amount > availableBalance) {
+      toast({
+        title: 'Insufficient Balance',
+        description: `You can only withdraw up to ${formatCurrency(availableBalance, language)}`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsProcessingPayout(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('driver-payout', {
+        body: { amount }
+      });
+
+      if (error) throw error;
+
+      if (data.needsOnboarding) {
+        // Redirect to Stripe onboarding
+        toast({
+          title: 'Setup Required',
+          description: 'Please complete your payment account setup',
+        });
+        window.location.href = data.onboardingUrl;
+        return;
+      }
+
+      toast({
+        title: 'Payout Successful! 🎉',
+        description: data.message,
+      });
+
+      setPayoutDialog(false);
+      setPayoutAmount('');
+      
+      // Refresh driver profile to get updated balance
+      if (refreshDriverProfile) {
+        await refreshDriverProfile();
+      }
+
+      // Update local state
+      setSummary(prev => ({
+        ...prev,
+        availableBalance: data.newBalance
+      }));
+
+    } catch (error: any) {
+      console.error('Payout error:', error);
+      toast({
+        title: 'Payout Failed',
+        description: error.message || 'Failed to process payout',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsProcessingPayout(false);
+    }
+  };
+
+  const availableBalance = Number(driverProfile?.total_earnings) || 0;
 
   if (authLoading) {
     return (
@@ -138,6 +234,33 @@ const Earnings = () => {
         >
           <h1 className="font-display text-3xl font-bold mb-8">{t('nav.earnings')}</h1>
 
+          {/* Available Balance Card with Withdraw Button */}
+          <Card className="p-6 mb-6 gradient-card border-primary/20">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-muted-foreground mb-2">
+                  <Wallet className="h-5 w-5" />
+                  <span>Available Balance</span>
+                </div>
+                <p className="font-display text-4xl font-bold text-accent">
+                  {formatCurrency(availableBalance, language)}
+                </p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Ready to withdraw anytime
+                </p>
+              </div>
+              <Button 
+                size="lg" 
+                onClick={() => setPayoutDialog(true)}
+                disabled={availableBalance <= 0}
+                className="gap-2"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Withdraw
+              </Button>
+            </div>
+          </Card>
+
           {/* Period Tabs */}
           <Tabs value={period} onValueChange={(v) => setPeriod(v as typeof period)} className="mb-6">
             <TabsList className="grid w-full grid-cols-4">
@@ -150,12 +273,12 @@ const Earnings = () => {
 
           {/* Summary Cards */}
           <div className="grid grid-cols-2 gap-4 mb-8">
-            <Card className="p-6 gradient-card border-primary/20">
+            <Card className="p-6">
               <div className="flex items-center gap-2 text-muted-foreground mb-2">
                 <DollarSign className="h-5 w-5" />
-                <span>Total Earnings</span>
+                <span>Period Earnings</span>
               </div>
-              <p className="font-display text-3xl font-bold text-accent">
+              <p className="font-display text-3xl font-bold">
                 {formatCurrency(summary.totalEarnings, language)}
               </p>
             </Card>
@@ -208,7 +331,7 @@ const Earnings = () => {
                   <p className="text-2xl font-bold text-accent">
                     {formatCurrency(Number(driverProfile.total_earnings), language)}
                   </p>
-                  <p className="text-sm text-muted-foreground">Total Earned</p>
+                  <p className="text-sm text-muted-foreground">Available</p>
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-warning">
@@ -263,6 +386,83 @@ const Earnings = () => {
           )}
         </motion.div>
       </div>
+
+      {/* Payout Dialog */}
+      <Dialog open={payoutDialog} onOpenChange={setPayoutDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Withdraw Earnings</DialogTitle>
+            <DialogDescription>
+              Transfer funds directly to your bank account. Available balance: {formatCurrency(availableBalance, language)}
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div>
+              <label className="text-sm font-medium">Amount to withdraw</label>
+              <div className="relative mt-2">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                <Input
+                  type="number"
+                  placeholder="0.00"
+                  value={payoutAmount}
+                  onChange={(e) => setPayoutAmount(e.target.value)}
+                  className="pl-8"
+                  min="0"
+                  max={availableBalance}
+                  step="0.01"
+                />
+              </div>
+              <div className="flex gap-2 mt-2">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setPayoutAmount((availableBalance * 0.25).toFixed(2))}
+                >
+                  25%
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setPayoutAmount((availableBalance * 0.5).toFixed(2))}
+                >
+                  50%
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setPayoutAmount((availableBalance * 0.75).toFixed(2))}
+                >
+                  75%
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => setPayoutAmount(availableBalance.toFixed(2))}
+                >
+                  Max
+                </Button>
+              </div>
+            </div>
+            
+            <div className="p-4 bg-muted rounded-lg">
+              <p className="text-sm text-muted-foreground">
+                Funds will be transferred to your connected bank account. First-time users will need to complete a quick setup process.
+              </p>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPayoutDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handlePayout} disabled={isProcessingPayout || !payoutAmount}>
+              {isProcessingPayout && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Withdraw {payoutAmount ? formatCurrency(parseFloat(payoutAmount) || 0, language) : ''}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
