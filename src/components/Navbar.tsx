@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Menu, X, User, LogOut } from 'lucide-react';
+import { Menu, X, User, LogOut, Shield } from 'lucide-react';
 import { useState } from 'react';
 import Logo from './Logo';
 import LanguageToggle from './LanguageToggle';
@@ -19,7 +19,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const { t } = useLanguage();
-  const { user, profile, isRider, isDriver, signOut } = useAuth();
+  const { user, profile, isRider, isDriver, isAdmin, signOut } = useAuth();
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
@@ -81,6 +81,15 @@ const Navbar = () => {
                 >
                   {t('nav.history')}
                 </Link>
+                {isAdmin && (
+                  <Link
+                    to="/admin"
+                    className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                  >
+                    <Shield className="h-4 w-4" />
+                    Admin
+                  </Link>
+                )}
               </>
             ) : (
               <>
@@ -207,6 +216,16 @@ const Navbar = () => {
                   >
                     {t('nav.history')}
                   </Link>
+                  {isAdmin && (
+                    <Link
+                      to="/admin"
+                      className="px-4 py-2 text-muted-foreground hover:text-foreground flex items-center gap-2"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <Shield className="h-4 w-4" />
+                      Admin Dashboard
+                    </Link>
+                  )}
                   <Link
                     to="/profile"
                     className="px-4 py-2 text-muted-foreground hover:text-foreground"
