@@ -80,8 +80,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .from('profiles')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
+    // If there's no profile yet, return null (app can still proceed)
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching profile:', error);
       throw error;
@@ -94,7 +95,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .from('driver_profiles')
       .select('*')
       .eq('user_id', userId)
-      .single();
+      .maybeSingle();
 
     if (error && error.code !== 'PGRST116') {
       console.error('Error fetching driver profile:', error);
@@ -104,16 +105,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const fetchRoles = async (userId: string): Promise<UserRole[]> => {
+    // Primary path: read roles table
     const { data, error } = await supabase
       .from('user_roles')
       .select('role')
       .eq('user_id', userId);
 
-    if (error) {
-      console.error('Error fetching roles:', error);
-      throw error;
+    if (!error) {
+      return data?.map((r) => r.role as UserRole) || [];
     }
-    return data?.map(r => r.role as UserRole) || [];
+
+    // Fallback path: use SECURITY DEFINER functions (avoids RLS recursion / missing policies)
+    console.warn('Direct roles query failed, falling back to role RPC checks:', error);
+    const [isAdminRes, isDriverRes, isRiderRes] = await Promise.all([
+      supabase.rpc('is_admin', { _user_id: userId }),
+      supabase.rpc('is_driver', { _user_id: userId }),
+      supabase.rpc('is_rider', { _user_id: userId }),
+    ]);
+
+    const resolved: UserRole[] = [];
+    if (isAdminRes.data) resolved.push('admin');
+    if (isDriverRes.data) resolved.push('driver');
+    if (isRiderRes.data) resolved.push('rider');
+
+    // If RPC also errors, surface the original error
+    if (resolved.length === 0 && (isAdminRes.error || isDriverRes.error || isRiderRes.error)) {
+      throw (isAdminRes.error || isDriverRes.error || isRiderRes.error) as any;
+    }
+
+    return resolved;
   };
 
   const loadUserData = async (userId: string) => {
@@ -126,12 +146,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           withTimeout(fetchRoles(userId), 8000),
         ]);
 
-        setProfile(profileData);
+        setProfile(profileData ?? null);
         setRoles(rolesData);
 
         if (rolesData.includes('driver')) {
           const driverData = await withTimeout(fetchDriverProfile(userId), 8000);
-          setDriverProfile(driverData);
+          setDriverProfile(driverData ?? null);
         } else {
           setDriverProfile(null);
         }
