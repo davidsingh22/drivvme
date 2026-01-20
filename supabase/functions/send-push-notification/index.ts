@@ -1,8 +1,7 @@
-/// <reference lib="deno.unstable" />
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import webpush from "https://esm.sh/web-push@3.6.7?target=deno";
+import { buildPushPayload } from "https://esm.sh/@block65/webcrypto-web-push@1.0.2";
+import type { PushSubscription, VapidKeys, PushMessage } from "https://esm.sh/@block65/webcrypto-web-push@1.0.2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,6 +20,9 @@ serve(async (req) => {
     const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY")!;
 
     const { userId, title, body, data, url } = await req.json();
+
+    console.log("Sending push notification to user:", userId);
+    console.log("Title:", title, "Body:", body);
 
     if (!userId || !title) {
       return new Response(JSON.stringify({ error: "userId and title are required" }), {
@@ -52,9 +54,12 @@ serve(async (req) => {
       });
     }
 
-    // Configure VAPID (required for real Web Push)
-    // Subject can be a mailto: or https URL.
-    webpush.setVapidDetails("mailto:support@drivvme.app", vapidPublicKey, vapidPrivateKey);
+    // VAPID configuration
+    const vapid: VapidKeys = {
+      subject: "mailto:support@drivvme.app",
+      publicKey: vapidPublicKey,
+      privateKey: vapidPrivateKey,
+    };
 
     const payload = JSON.stringify({
       title,
@@ -67,32 +72,50 @@ serve(async (req) => {
     const results: Array<{ id: string; success: boolean; reason?: string; status?: number }> = [];
 
     for (const sub of subscriptions) {
-      const subscription = {
-        endpoint: sub.endpoint,
-        keys: {
-          p256dh: sub.p256dh,
-          auth: sub.auth,
-        },
-      };
-
       try {
-        const res = await webpush.sendNotification(subscription as any, payload, {
-          TTL: 60 * 60 * 24,
+        const subscription: PushSubscription = {
+          endpoint: sub.endpoint,
+          expirationTime: null,
+          keys: {
+            p256dh: sub.p256dh,
+            auth: sub.auth,
+          },
+        };
+
+        const message: PushMessage = {
+          data: payload,
+          options: {
+            ttl: 86400, // 24 hours
+          },
+        };
+
+        const pushPayload = await buildPushPayload(message, subscription, vapid);
+
+        const response = await fetch(subscription.endpoint, {
+          ...pushPayload,
+          body: pushPayload.body as BodyInit,
         });
 
-        results.push({ id: sub.id, success: true, status: (res as any)?.statusCode });
-      } catch (e: any) {
-        const statusCode = e?.statusCode;
-        const bodyText = e?.body ? String(e.body) : String(e);
-        console.error("Push send failed:", statusCode, bodyText);
+        console.log("Push sent, status:", response.status);
 
-        // Subscription expired/invalid: clean it up.
-        if (statusCode === 404 || statusCode === 410) {
-          await supabase.from("push_subscriptions").delete().eq("id", sub.id);
-          results.push({ id: sub.id, success: false, reason: "expired", status: statusCode });
+        if (response.ok) {
+          results.push({ id: sub.id, success: true, status: response.status });
         } else {
-          results.push({ id: sub.id, success: false, reason: bodyText, status: statusCode });
+          const errorText = await response.text();
+          console.error("Push failed:", response.status, errorText);
+          
+          // Subscription expired/invalid: clean it up
+          if (response.status === 404 || response.status === 410) {
+            await supabase.from("push_subscriptions").delete().eq("id", sub.id);
+            results.push({ id: sub.id, success: false, reason: "expired", status: response.status });
+          } else {
+            results.push({ id: sub.id, success: false, reason: errorText, status: response.status });
+          }
         }
+      } catch (e: unknown) {
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        console.error("Push send failed:", errorMessage);
+        results.push({ id: sub.id, success: false, reason: errorMessage });
       }
     }
 
