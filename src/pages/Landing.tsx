@@ -105,7 +105,7 @@ const Landing = () => {
                 size="lg"
                 className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group"
               >
-                <Link to={user && isRider ? "/ride" : "/signup?role=rider"}>
+                <Link to={user && isRider ? "/ride" : "/login"}>
                   {t('hero.cta.rider')}
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
                 </Link>
@@ -116,7 +116,7 @@ const Landing = () => {
                 variant="outline"
                 className="text-lg px-8 py-6 rounded-xl border-2 hover:bg-accent hover:text-accent-foreground hover:border-accent"
               >
-                <Link to={user && isDriver ? "/driver" : "/signup?role=driver"}>
+                <Link to={user && isDriver ? "/driver" : "/login"}>
                   <Car className="mr-2 h-5 w-5" />
                   {t('hero.cta.driver')}
                 </Link>
