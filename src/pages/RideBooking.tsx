@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, Star, Phone, MessageSquare, CreditCard } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, Star, Phone, MessageSquare, CreditCard, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -13,6 +13,7 @@ import MapComponent from '@/components/MapComponent';
 import LocationInput from '@/components/LocationInput';
 import PaymentForm from '@/components/PaymentForm';
 import { useToast } from '@/hooks/use-toast';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -30,6 +31,7 @@ const RideBooking = () => {
   const { user, profile, roles, isRider, isDriver, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { isSupported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribeToPush, isLoading: pushLoading } = usePushNotifications();
 
   const [step, setStep] = useState<RideStep>('input');
   const [pickup, setPickup] = useState<Location | null>(null);
@@ -43,6 +45,7 @@ const RideBooking = () => {
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
 
   // Check if current user is a test account - use email from profile or auth user as fallback
   const userEmail = profile?.email || user?.email;
@@ -559,6 +562,27 @@ const RideBooking = () => {
                       </div>
                     )}
                   </Card>
+
+                  {/* Push Notification Prompt */}
+                  {pushSupported && !pushSubscribed && (
+                    <Card className="p-4 bg-primary/5 border-primary/20">
+                      <div className="flex items-center gap-3">
+                        <Bell className="h-5 w-5 text-primary" />
+                        <div className="flex-1">
+                          <p className="font-medium text-sm">Get notified when your driver arrives</p>
+                          <p className="text-xs text-muted-foreground">Enable notifications to stay updated</p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={subscribeToPush}
+                          disabled={pushLoading}
+                        >
+                          {pushLoading ? 'Enabling...' : 'Enable'}
+                        </Button>
+                      </div>
+                    </Card>
+                  )}
 
                   <Button
                     onClick={handleProceedToPayment}
