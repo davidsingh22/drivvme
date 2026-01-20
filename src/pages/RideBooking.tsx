@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, Star, Phone, MessageSquare, CreditCard, Bell } from 'lucide-react';
@@ -15,6 +15,8 @@ import PaymentForm from '@/components/PaymentForm';
 import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
+import { useActiveRide } from '@/hooks/useActiveRide';
+import { RideStatusBanner } from '@/components/RideStatusBanner';
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -42,6 +44,10 @@ const RideBooking = () => {
   } = usePushNotifications();
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
+  // Active ride persistence hook
+  const { activeRide, isLoading: activeRideLoading, updateRide, clearRide } = useActiveRide(user?.id);
+  const hasRestoredRide = useRef(false);
+
   const [step, setStep] = useState<RideStep>('input');
   const [pickup, setPickup] = useState<Location | null>(null);
   const [dropoff, setDropoff] = useState<Location | null>(null);
@@ -54,7 +60,7 @@ const RideBooking = () => {
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showNotificationPrompt, setShowNotificationPrompt] = useState(false);
+  const [showStatusBanner, setShowStatusBanner] = useState(false);
 
   // Check if current user is a test account - use email from profile or auth user as fallback
   const userEmail = profile?.email || user?.email;
@@ -78,6 +84,54 @@ const RideBooking = () => {
     }
   }, [user, authLoading, roles.length, isDriver, isRider, navigate]);
 
+  // Restore active ride when returning to the app (especially on iOS)
+  useEffect(() => {
+    if (activeRideLoading || !activeRide || hasRestoredRide.current) return;
+    
+    hasRestoredRide.current = true;
+    console.log('Restoring active ride:', activeRide.id, activeRide.status);
+    
+    setCurrentRide(activeRide);
+    setShowStatusBanner(true);
+    
+    // Restore locations
+    setPickup({
+      address: activeRide.pickup_address,
+      lat: activeRide.pickup_lat,
+      lng: activeRide.pickup_lng,
+    });
+    setDropoff({
+      address: activeRide.dropoff_address,
+      lat: activeRide.dropoff_lat,
+      lng: activeRide.dropoff_lng,
+    });
+    setPickupAddress(activeRide.pickup_address);
+    setDropoffAddress(activeRide.dropoff_address);
+    
+    // Restore step based on status
+    const statusToStep: Record<string, RideStep> = {
+      searching: 'searching',
+      driver_assigned: 'matched',
+      driver_en_route: 'arriving',
+      arrived: 'arrived',
+      in_progress: 'inProgress',
+      completed: 'completed',
+    };
+    const newStep = statusToStep[activeRide.status] || 'searching';
+    setStep(newStep);
+    
+    // Fetch driver info if assigned
+    if (activeRide.driver_id) {
+      fetchDriverInfo(activeRide.driver_id);
+    }
+    
+    // Show a prominent alert about the current ride
+    toast({
+      title: 'Active ride restored',
+      description: `Status: ${activeRide.status.replace('_', ' ')}`,
+    });
+  }, [activeRide, activeRideLoading, toast]);
+
   // Subscribe to ride updates
   useEffect(() => {
     if (!currentRide?.id) return;
@@ -93,8 +147,10 @@ const RideBooking = () => {
           filter: `id=eq.${currentRide.id}`,
         },
         (payload) => {
-          const updatedRide = payload.new;
+          const updatedRide = payload.new as any;
           setCurrentRide(updatedRide);
+          updateRide(updatedRide); // Persist to localStorage
+          setShowStatusBanner(true);
           
           // Update step based on status
           switch (updatedRide.status) {
@@ -130,12 +186,14 @@ const RideBooking = () => {
               break;
             case 'completed':
               setStep('completed');
+              clearRide(); // Clear from localStorage
               break;
             case 'cancelled':
               toast({
                 title: t('booking.cancelled'),
                 variant: 'destructive',
               });
+              clearRide(); // Clear from localStorage
               resetBooking();
               break;
           }
@@ -349,6 +407,8 @@ const RideBooking = () => {
       }
 
       setCurrentRide(ride);
+      updateRide(ride); // Persist to localStorage
+      setShowStatusBanner(true);
     } catch (error: any) {
       console.error('Error creating ride:', error);
       toast({
@@ -425,6 +485,9 @@ const RideBooking = () => {
     setCurrentRide(null);
     setDriverInfo(null);
     setDriverLocation(null);
+    setShowStatusBanner(false);
+    clearRide(); // Clear from localStorage
+    hasRestoredRide.current = false;
   };
 
   // Avoid blocking the whole page during background token refreshes.
@@ -440,6 +503,16 @@ const RideBooking = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
+      
+      {/* Persistent status banner for active rides */}
+      {showStatusBanner && currentRide && !['completed', 'cancelled'].includes(currentRide.status) && (
+        <RideStatusBanner
+          status={currentRide.status}
+          driverName={driverInfo ? `${driverInfo.first_name || ''} ${driverInfo.last_name || ''}`.trim() : undefined}
+          pickupAddress={currentRide.pickup_address}
+          onDismiss={() => setShowStatusBanner(false)}
+        />
+      )}
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
         {/* Map */}
