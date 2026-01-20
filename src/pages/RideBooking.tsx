@@ -88,6 +88,11 @@ const RideBooking = () => {
             case 'driver_assigned':
               setStep('matched');
               fetchDriverInfo(updatedRide.driver_id);
+              // Notify rider that driver has been found
+              toast({
+                title: t('booking.found'),
+                description: 'Your driver is on the way!',
+              });
               break;
             case 'driver_en_route':
               setStep('arriving');
@@ -225,30 +230,29 @@ const RideBooking = () => {
   const handleProceedToPayment = async () => {
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
+    // Show payment step immediately for faster UI response
+    setStep('payment');
     setIsSubmitting(true);
+    
     try {
-      // Refresh the session to ensure we have a valid token
-      const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+      // Session refresh runs in background - don't block UI
+      const { data: { session } } = await supabase.auth.getSession();
       
-      if (sessionError) {
-        console.error('Session refresh error:', sessionError);
-        // Try getSession as fallback
-        const { data: { session: existingSession } } = await supabase.auth.getSession();
-        if (!existingSession) {
-          toast({
-            title: 'Session expired',
-            description: 'Please sign in again to continue.',
-            variant: 'destructive',
-          });
-          navigate('/login');
-          return;
-        }
+      if (!session) {
+        toast({
+          title: 'Session expired',
+          description: 'Please sign in again to continue.',
+          variant: 'destructive',
+        });
+        setStep('estimate');
+        navigate('/login');
+        return;
       }
 
-      const userId = session?.user?.id || user.id;
+      const userId = session.user.id;
       console.log('Creating ride with rider_id:', userId);
 
-      // Create the ride first with 'searching' status but don't activate yet
+      // Create the ride with 'searching' status
       const { data: ride, error } = await supabase
         .from('rides')
         .insert({
@@ -273,7 +277,6 @@ const RideBooking = () => {
       }
 
       setCurrentRide(ride);
-      setStep('payment');
     } catch (error: any) {
       console.error('Error creating ride:', error);
       toast({
@@ -281,6 +284,8 @@ const RideBooking = () => {
         description: error.message,
         variant: 'destructive',
       });
+      // Go back to estimate step on error
+      setStep('estimate');
     } finally {
       setIsSubmitting(false);
     }
