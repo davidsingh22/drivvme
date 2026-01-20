@@ -78,6 +78,11 @@ export function usePushNotifications() {
     return registration;
   };
 
+  const refreshPermission = useCallback(() => {
+    if (!isSupported) return;
+    setPermission(Notification.permission);
+  }, [isSupported]);
+
   const subscribe = useCallback(async () => {
     if (!isSupported || !user) {
       toast.error('Push notifications are not supported');
@@ -88,6 +93,13 @@ export function usePushNotifications() {
     setIsLoading(true);
 
     try {
+      // If the user has previously denied, the browser will not show the prompt again.
+      if (Notification.permission === 'denied') {
+        setPermission('denied');
+        toast.error('Notifications are blocked in your browser settings');
+        return false;
+      }
+
       // Request permission
       const permissionResult = await Notification.requestPermission();
       setPermission(permissionResult);
@@ -192,6 +204,7 @@ export function usePushNotifications() {
     isSubscribed,
     isLoading,
     permission,
+    refreshPermission,
     subscribe,
     unsubscribe,
   };
