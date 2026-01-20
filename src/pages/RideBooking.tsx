@@ -14,6 +14,7 @@ import LocationInput from '@/components/LocationInput';
 import PaymentForm from '@/components/PaymentForm';
 import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -31,7 +32,15 @@ const RideBooking = () => {
   const { user, profile, roles, isRider, isDriver, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { isSupported: pushSupported, isSubscribed: pushSubscribed, subscribe: subscribeToPush, isLoading: pushLoading } = usePushNotifications();
+  const {
+    isSupported: pushSupported,
+    isSubscribed: pushSubscribed,
+    permission: pushPermission,
+    subscribe: subscribeToPush,
+    isLoading: pushLoading,
+    refreshPermission: refreshPushPermission,
+  } = usePushNotifications();
+  const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
   const [step, setStep] = useState<RideStep>('input');
   const [pickup, setPickup] = useState<Location | null>(null);
@@ -570,41 +579,73 @@ const RideBooking = () => {
                         <Bell className="h-5 w-5 text-primary" />
                         <div className="flex-1">
                           <p className="font-medium text-sm">Get notified when your driver arrives</p>
-                          <p className="text-xs text-muted-foreground">Enable notifications to stay updated</p>
+                          {pushPermission === 'denied' ? (
+                            <p className="text-xs text-muted-foreground">
+                              Notifications are blocked in your browser settings.
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Enable notifications to stay updated</p>
+                          )}
                         </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={async () => {
-                            const ok = await subscribeToPush();
-                            if (!ok) return;
 
-                            const { data, error } = await supabase.functions.invoke('send-push-notification', {
-                              body: {
-                                userId: user?.id,
-                                title: 'Test notification',
-                                body: 'Notifications are working for your account.',
-                                url: '/ride',
-                              },
-                            });
+                        {pushPermission === 'denied' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              refreshPushPermission();
+                              setNotificationHelpOpen(true);
+                            }}
+                          >
+                            Fix settings
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              const ok = await subscribeToPush();
+                              if (!ok) return;
 
-                            if (error) {
-                              toast({ title: 'Test notification failed', description: error.message, variant: 'destructive' });
-                              return;
-                            }
+                              const { data, error } = await supabase.functions.invoke('send-push-notification', {
+                                body: {
+                                  userId: user?.id,
+                                  title: 'Test notification',
+                                  body: 'Notifications are working for your account.',
+                                  url: '/ride',
+                                },
+                              });
 
-                            if (!data?.sent) {
-                              toast({ title: 'Not subscribed yet', description: 'No subscription found for your device. Try enabling again.', variant: 'destructive' });
-                              return;
-                            }
+                              if (error) {
+                                toast({ title: 'Test notification failed', description: error.message, variant: 'destructive' });
+                                return;
+                              }
 
-                            toast({ title: 'Test notification sent', description: 'If you don\'t see it, check browser notification settings.', });
-                          }}
-                          disabled={pushLoading}
-                        >
-                          {pushLoading ? 'Enabling...' : 'Enable & Test'}
-                        </Button>
+                              if (!data?.sent) {
+                                toast({
+                                  title: 'Not subscribed yet',
+                                  description: 'No subscription found for your device. Try enabling again.',
+                                  variant: 'destructive',
+                                });
+                                return;
+                              }
+
+                              toast({
+                                title: 'Test notification sent',
+                                description: "If you don't see it, check browser notification settings.",
+                              });
+                            }}
+                            disabled={pushLoading}
+                          >
+                            {pushLoading ? 'Enabling...' : 'Enable & Test'}
+                          </Button>
+                        )}
                       </div>
+
+                      <NotificationPermissionHelpDialog
+                        open={notificationHelpOpen}
+                        onOpenChange={setNotificationHelpOpen}
+                      />
                     </Card>
                   )}
 
