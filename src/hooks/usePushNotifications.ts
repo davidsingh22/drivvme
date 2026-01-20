@@ -77,14 +77,17 @@ export function usePushNotifications() {
   const subscribe = useCallback(async () => {
     if (!isSupported || !user) {
       toast.error('Push notifications are not supported');
+      console.error('Push not supported or no user', { isSupported, user: !!user });
       return false;
     }
 
     setIsLoading(true);
+    console.log('Starting push subscription...');
 
     try {
       // Request permission
       const permissionResult = await Notification.requestPermission();
+      console.log('Permission result:', permissionResult);
       setPermission(permissionResult);
 
       if (permissionResult !== 'granted') {
@@ -93,17 +96,23 @@ export function usePushNotifications() {
       }
 
       // Register service worker
+      console.log('Registering service worker...');
       const registration = await registerServiceWorker();
+      console.log('Service worker registered:', registration);
 
       // Subscribe to push notifications
+      console.log('Subscribing to push manager...');
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
+      console.log('Push subscription created:', subscription);
 
       const subscriptionJson = subscription.toJSON();
+      console.log('Subscription JSON:', subscriptionJson);
 
       // Save subscription to database
+      console.log('Saving subscription to database for user:', user.id);
       const { error } = await supabase
         .from('push_subscriptions')
         .upsert({
@@ -117,10 +126,11 @@ export function usePushNotifications() {
 
       if (error) {
         console.error('Error saving subscription:', error);
-        toast.error('Failed to save notification subscription');
+        toast.error('Failed to save notification subscription: ' + error.message);
         return false;
       }
 
+      console.log('Subscription saved successfully!');
       setIsSubscribed(true);
       toast.success('Push notifications enabled!');
       return true;
