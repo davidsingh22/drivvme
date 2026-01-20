@@ -43,8 +43,9 @@ const RideBooking = () => {
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Check if current user is a test account
-  const isTestAccount = profile?.email && TEST_ACCOUNTS.includes(profile.email.toLowerCase());
+  // Check if current user is a test account - use email from profile or auth user as fallback
+  const userEmail = profile?.email || user?.email;
+  const isTestAccount = userEmail && TEST_ACCOUNTS.includes(userEmail.toLowerCase());
 
   // Route guard
   useEffect(() => {
