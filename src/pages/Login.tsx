@@ -19,14 +19,14 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // After auth state + roles load, route user to the right dashboard
-  // (prevents "login then immediately back to login" race)
   useEffect(() => {
     if (isLoading) return;
     if (!user) return;
 
-    // Wait until roles are loaded so we don't mis-route and appear "logged out"
+    // Wait until roles are loaded so we don't mis-route
     if (roles.length === 0) return;
 
     if (isAdmin) navigate('/admin', { replace: true });
@@ -38,12 +38,14 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsSubmitting(true);
 
     try {
       await signIn(email, password);
       // Navigation is handled by the effect above once roles are loaded
     } catch (err: any) {
       setError(err.message);
+      setIsSubmitting(false);
     }
   };
 
@@ -119,9 +121,9 @@ const Login = () => {
               <Button
                 type="submit"
                 className="w-full gradient-primary shadow-button py-6"
-                disabled={isLoading}
+                disabled={isSubmitting || isLoading}
               >
-                {isLoading ? t('common.loading') : t('auth.loginBtn')}
+                {isSubmitting || isLoading ? t('common.loading') : t('auth.loginBtn')}
               </Button>
             </form>
 
