@@ -254,6 +254,16 @@ const DriverDashboard = () => {
     }
   };
 
+  const sendPushNotification = async (userId: string, title: string, body: string, url?: string) => {
+    try {
+      await supabase.functions.invoke('send-push-notification', {
+        body: { userId, title, body, url }
+      });
+    } catch (error) {
+      console.error('Failed to send push notification:', error);
+    }
+  };
+
   const acceptRide = async (ride: RideRequest) => {
     if (!user) return;
 
@@ -279,6 +289,14 @@ const DriverDashboard = () => {
     setCurrentRide({ ...ride, status: 'driver_assigned' });
     await fetchRiderInfo(ride.rider_id);
     setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id));
+
+    // Send push notification to rider
+    await sendPushNotification(
+      ride.rider_id,
+      'Driver Found! 🚗',
+      'Your driver is on the way to pick you up.',
+      '/ride'
+    );
 
     toast({
       title: 'Ride accepted!',
@@ -315,6 +333,23 @@ const DriverDashboard = () => {
         variant: 'destructive',
       });
       return;
+    }
+
+    // Send push notification to rider based on status
+    const notifications: Record<string, { title: string; body: string }> = {
+      driver_en_route: { title: 'Driver On The Way 🚗', body: 'Your driver is heading to your pickup location.' },
+      arrived: { title: 'Driver Has Arrived! 📍', body: 'Your driver is waiting at the pickup location.' },
+      in_progress: { title: 'Ride Started 🎉', body: 'Enjoy your trip!' },
+      completed: { title: 'Ride Completed ✅', body: 'Thanks for riding with DrivvMe!' },
+    };
+
+    if (notifications[status]) {
+      await sendPushNotification(
+        currentRide.rider_id,
+        notifications[status].title,
+        notifications[status].body,
+        '/ride'
+      );
     }
 
     if (status === 'completed') {
