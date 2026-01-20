@@ -409,6 +409,19 @@ const RideBooking = () => {
       setCurrentRide(ride);
       updateRide(ride); // Persist to localStorage
       setShowStatusBanner(true);
+
+      // Create notification for rider
+      const { error: notifErr } = await supabase.from('notifications').insert({
+        user_id: userId,
+        ride_id: ride.id,
+        type: 'ride_booked',
+        title: 'Ride requested ✅',
+        message: "We're looking for a driver now. You'll be notified when a driver accepts.",
+      });
+
+      if (notifErr) {
+        console.error('Notification insert failed:', notifErr);
+      }
     } catch (error: any) {
       console.error('Error creating ride:', error);
       toast({
