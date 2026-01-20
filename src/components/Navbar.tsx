@@ -5,6 +5,7 @@ import { useState } from 'react';
 import Logo from './Logo';
 import LanguageToggle from './LanguageToggle';
 import { PushNotificationToggle } from './PushNotificationToggle';
+import NotificationsBell from './NotificationsBell';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -112,6 +113,7 @@ const Navbar = () => {
 
           {/* Right side */}
           <div className="hidden md:flex items-center gap-4">
+            {user && <NotificationsBell userId={user.id} />}
             <PushNotificationToggle />
             <LanguageToggle />
             
