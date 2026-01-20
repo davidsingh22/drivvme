@@ -4,6 +4,7 @@ import { Menu, X, User, LogOut, Shield } from 'lucide-react';
 import { useState } from 'react';
 import Logo from './Logo';
 import LanguageToggle from './LanguageToggle';
+import { PushNotificationToggle } from './PushNotificationToggle';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -111,6 +112,7 @@ const Navbar = () => {
 
           {/* Right side */}
           <div className="hidden md:flex items-center gap-4">
+            <PushNotificationToggle />
             <LanguageToggle />
             
             {user ? (
