@@ -3,7 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
-const withTimeout = async <T,>(promise: Promise<T>, ms = 8000): Promise<T> => {
+const withTimeout = async <T,>(promise: Promise<T>, ms = 12000): Promise<T> => {
   let timeoutId: number | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = window.setTimeout(() => reject(new Error('Request timeout')), ms);
@@ -57,7 +57,20 @@ interface AuthContextType {
   isRider: boolean;
   isDriver: boolean;
   isAdmin: boolean;
-  signUp: (email: string, password: string, role: UserRole, firstName?: string, lastName?: string, phone?: string, vehicleInfo?: { vehicleMake: string; vehicleModel: string; vehicleColor: string; licensePlate: string }) => Promise<void>;
+  signUp: (
+    email: string,
+    password: string,
+    role: UserRole,
+    firstName?: string,
+    lastName?: string,
+    phone?: string,
+    vehicleInfo?: {
+      vehicleMake: string;
+      vehicleModel: string;
+      vehicleColor: string;
+      licensePlate: string;
+    }
+  ) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -65,6 +78,33 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+type CachedAuthUserData = {
+  profile: Profile | null;
+  roles: UserRole[];
+  driverProfile: DriverProfile | null;
+  cachedAt: number;
+};
+
+const getAuthCacheKey = (userId: string) => `auth-cache:${userId}`;
+
+const readAuthCache = (userId: string): CachedAuthUserData | null => {
+  try {
+    const raw = localStorage.getItem(getAuthCacheKey(userId));
+    if (!raw) return null;
+    return JSON.parse(raw) as CachedAuthUserData;
+  } catch {
+    return null;
+  }
+};
+
+const writeAuthCache = (userId: string, value: CachedAuthUserData) => {
+  try {
+    localStorage.setItem(getAuthCacheKey(userId), JSON.stringify(value));
+  } catch {
+    // ignore (Safari private mode / storage full)
+  }
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -78,11 +118,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const { toast } = useToast();
 
   const fetchProfile = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const { data, error } = await supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle();
 
     // If there's no profile yet, return null (app can still proceed)
     if (error && error.code !== 'PGRST116') {
@@ -108,10 +144,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchRoles = async (userId: string): Promise<UserRole[]> => {
     // Primary path: read roles table
-    const { data, error } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId);
+    const { data, error } = await supabase.from('user_roles').select('role').eq('user_id', userId);
 
     if (!error) {
       return data?.map((r) => r.role as UserRole) || [];
@@ -138,25 +171,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return resolved;
   };
 
+  const hydrateFromCache = (userId: string) => {
+    const cached = readAuthCache(userId);
+    if (!cached) return false;
+
+    // If we have something recent-ish, use it to avoid spinners on return visits.
+    // (Even if it's a bit stale, we'll refresh immediately after.)
+    setProfile(cached.profile);
+    setRoles(cached.roles);
+    setDriverProfile(cached.driverProfile);
+    return true;
+  };
+
   const loadUserData = async (userId: string) => {
     let lastError: any = null;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const [profileData, rolesData] = await Promise.all([
-          withTimeout(fetchProfile(userId), 8000),
-          withTimeout(fetchRoles(userId), 8000),
+          withTimeout(fetchProfile(userId), 12000),
+          withTimeout(fetchRoles(userId), 12000),
         ]);
+
+        let driverData: DriverProfile | null = null;
+        if (rolesData.includes('driver')) {
+          driverData = (await withTimeout(fetchDriverProfile(userId), 12000)) ?? null;
+        }
 
         setProfile(profileData ?? null);
         setRoles(rolesData);
+        setDriverProfile(driverData);
 
-        if (rolesData.includes('driver')) {
-          const driverData = await withTimeout(fetchDriverProfile(userId), 8000);
-          setDriverProfile(driverData ?? null);
-        } else {
-          setDriverProfile(null);
-        }
+        writeAuthCache(userId, {
+          profile: (profileData ?? null) as any,
+          roles: rolesData,
+          driverProfile: driverData,
+          cachedAt: Date.now(),
+        });
 
         return;
       } catch (e) {
@@ -167,6 +218,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     console.error('Failed to load user data after retries:', lastError);
+
+    // IMPORTANT: don't "wipe" the app state on transient mobile/Safari network issues.
+    // If we already had roles/profile, keep them and just warn.
+    if (hasInitialized && user?.id === userId && roles.length > 0) {
+      toast({
+        title: 'Connection issue',
+        description: 'We had trouble refreshing your account data. Retrying in the background…',
+      });
+      return;
+    }
+
     setProfile(null);
     setDriverProfile(null);
     setRoles([]);
@@ -174,45 +236,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, nextSession) => {
-        // Only show loading on initial load or actual sign-in/sign-out
-        // Skip loading for background token refreshes when we already have user data
-        const isBackgroundRefresh = event === 'TOKEN_REFRESHED' && hasInitialized;
-        
-        if (!isBackgroundRefresh) {
-          setIsLoading(true);
-        }
-        
-        setSession(nextSession);
-        setUser(nextSession?.user ?? null);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      // Only show loading on initial load or actual sign-in/sign-out
+      // Skip loading for background token refreshes when we already have user data
+      const isBackgroundRefresh = event === 'TOKEN_REFRESHED' && hasInitialized;
 
-        try {
-          if (nextSession?.user) {
-            // Small delay helps avoid rare timing issues right after auth events
-            await new Promise((r) => setTimeout(r, 100));
-            await loadUserData(nextSession.user.id);
-          } else {
-            setProfile(null);
-            setDriverProfile(null);
-            setRoles([]);
-          }
-        } finally {
-          setIsLoading(false);
-          setHasInitialized(true);
-        }
+      if (!isBackgroundRefresh) {
+        setIsLoading(true);
       }
-    );
+
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+
+      try {
+        if (nextSession?.user) {
+          // If we have cached data, apply it immediately to avoid "reset" feel.
+          hydrateFromCache(nextSession.user.id);
+          // Small delay helps avoid rare timing issues right after auth events
+          await new Promise((r) => setTimeout(r, 100));
+          await loadUserData(nextSession.user.id);
+        } else {
+          setProfile(null);
+          setDriverProfile(null);
+          setRoles([]);
+        }
+      } finally {
+        setIsLoading(false);
+        setHasInitialized(true);
+      }
+    });
 
     // THEN check for existing session
     (async () => {
       setIsLoading(true);
-      const { data: { session: existingSession } } = await supabase.auth.getSession();
+      const {
+        data: { session: existingSession },
+      } = await supabase.auth.getSession();
       setSession(existingSession);
       setUser(existingSession?.user ?? null);
 
       try {
         if (existingSession?.user) {
+          // Hydrate from cache immediately so Safari doesn't look like it "reset".
+          const hydrated = hydrateFromCache(existingSession.user.id);
+          // If we hydrated, don't block the UI while we refresh.
+          if (hydrated) setIsLoading(false);
           await loadUserData(existingSession.user.id);
         } else {
           setProfile(null);
