@@ -73,6 +73,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [driverProfile, setDriverProfile] = useState<DriverProfile | null>(null);
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // Track if we've done the initial load to avoid resetting during background refreshes
+  const [hasInitialized, setHasInitialized] = useState(false);
   const { toast } = useToast();
 
   const fetchProfile = async (userId: string) => {
@@ -173,8 +175,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, nextSession) => {
-        setIsLoading(true);
+      async (event, nextSession) => {
+        // Only show loading on initial load or actual sign-in/sign-out
+        // Skip loading for background token refreshes when we already have user data
+        const isBackgroundRefresh = event === 'TOKEN_REFRESHED' && hasInitialized;
+        
+        if (!isBackgroundRefresh) {
+          setIsLoading(true);
+        }
+        
         setSession(nextSession);
         setUser(nextSession?.user ?? null);
 
@@ -190,6 +199,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         } finally {
           setIsLoading(false);
+          setHasInitialized(true);
         }
       }
     );
@@ -211,6 +221,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } finally {
         setIsLoading(false);
+        setHasInitialized(true);
       }
     })();
 
