@@ -28,8 +28,14 @@ export function NotificationPermissionHelpDialog({ open, onOpenChange }: Props) 
           <section className="space-y-1">
             <h3 className="font-medium">Safari (iPhone / iPad)</h3>
             <p className="text-muted-foreground">
-              Settings app → Notifications → Safari (or “Web Apps”) → Allow, and ensure Focus/Do Not Disturb is off.
+              On iOS/iPadOS, web push only works for an installed web app.
             </p>
+            <ol className="list-decimal pl-5 text-muted-foreground space-y-1">
+              <li>Open this site in Safari.</li>
+              <li>Tap Share → <span className="font-medium">Add to Home Screen</span>.</li>
+              <li>Open the app from your Home Screen.</li>
+              <li>When prompted, allow notifications (and ensure Focus/Do Not Disturb is off).</li>
+            </ol>
           </section>
 
           <div className="flex justify-end">
