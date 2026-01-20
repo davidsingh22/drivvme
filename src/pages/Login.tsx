@@ -21,6 +21,13 @@ const Login = () => {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // If auth completes (even before routing), stop the button spinner
+  useEffect(() => {
+    if (!isSubmitting) return;
+    if (isLoading) return;
+    if (user) setIsSubmitting(false);
+  }, [isSubmitting, isLoading, user]);
+
   // After auth state + roles load, route user to the right dashboard
   useEffect(() => {
     if (isLoading) return;
