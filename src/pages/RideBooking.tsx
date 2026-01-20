@@ -573,13 +573,17 @@ const RideBooking = () => {
                   </Card>
 
                   {/* Push Notification Prompt */}
-                  {pushSupported && !pushSubscribed && (
+                  {!pushSubscribed && (
                     <Card className="p-4 bg-primary/5 border-primary/20">
                       <div className="flex items-center gap-3">
                         <Bell className="h-5 w-5 text-primary" />
                         <div className="flex-1">
                           <p className="font-medium text-sm">Get notified when your driver arrives</p>
-                          {pushPermission === 'denied' ? (
+                          {!pushSupported ? (
+                            <p className="text-xs text-muted-foreground">
+                              Push notifications aren9t available in this browser mode. On iPhone/iPad, install the app (Add to Home Screen) to enable push.
+                            </p>
+                          ) : pushPermission === 'denied' ? (
                             <p className="text-xs text-muted-foreground">
                               Notifications are blocked in your browser settings.
                             </p>
@@ -588,7 +592,15 @@ const RideBooking = () => {
                           )}
                         </div>
 
-                        {pushPermission === 'denied' ? (
+                        {!pushSupported ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setNotificationHelpOpen(true)}
+                          >
+                            How to enable
+                          </Button>
+                        ) : pushPermission === 'denied' ? (
                           <Button
                             size="sm"
                             variant="outline"
@@ -632,7 +644,7 @@ const RideBooking = () => {
 
                               toast({
                                 title: 'Test notification sent',
-                                description: "If you don't see it, check browser notification settings.",
+                                description: "If you don't see it, check notification settings (and iPhone requires Add to Home Screen).",
                               });
                             }}
                             disabled={pushLoading}

@@ -20,9 +20,17 @@ export function PushNotificationToggle() {
 
   if (!isSupported) {
     return (
-      <Button variant="ghost" size="icon" disabled title={title}>
-        <BellOff className="h-5 w-5 text-muted-foreground" />
-      </Button>
+      <>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setHelpOpen(true)}
+          title={title}
+        >
+          <BellOff className="h-5 w-5 text-muted-foreground" />
+        </Button>
+        <NotificationPermissionHelpDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      </>
     );
   }
 
