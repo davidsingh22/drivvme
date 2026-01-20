@@ -3,6 +3,19 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+const withTimeout = async <T,>(promise: Promise<T>, ms = 8000): Promise<T> => {
+  let timeoutId: number | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error('Request timeout')), ms);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
+};
+
 type UserRole = 'rider' | 'driver' | 'admin';
 
 interface Profile {
@@ -109,15 +122,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const [profileData, rolesData] = await Promise.all([
-          fetchProfile(userId),
-          fetchRoles(userId),
+          withTimeout(fetchProfile(userId), 8000),
+          withTimeout(fetchRoles(userId), 8000),
         ]);
 
         setProfile(profileData);
         setRoles(rolesData);
 
         if (rolesData.includes('driver')) {
-          const driverData = await fetchDriverProfile(userId);
+          const driverData = await withTimeout(fetchDriverProfile(userId), 8000);
           setDriverProfile(driverData);
         } else {
           setDriverProfile(null);
@@ -126,7 +139,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       } catch (e) {
         lastError = e;
-        // brief backoff, helps with transient "Load failed" network errors
+        // brief backoff, helps with transient network errors
         await new Promise((r) => setTimeout(r, 250 * attempt));
       }
     }
