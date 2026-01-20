@@ -575,10 +575,34 @@ const RideBooking = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={subscribeToPush}
+                          onClick={async () => {
+                            const ok = await subscribeToPush();
+                            if (!ok) return;
+
+                            const { data, error } = await supabase.functions.invoke('send-push-notification', {
+                              body: {
+                                userId: user?.id,
+                                title: 'Test notification',
+                                body: 'Notifications are working for your account.',
+                                url: '/ride',
+                              },
+                            });
+
+                            if (error) {
+                              toast({ title: 'Test notification failed', description: error.message, variant: 'destructive' });
+                              return;
+                            }
+
+                            if (!data?.sent) {
+                              toast({ title: 'Not subscribed yet', description: 'No subscription found for your device. Try enabling again.', variant: 'destructive' });
+                              return;
+                            }
+
+                            toast({ title: 'Test notification sent', description: 'If you don\'t see it, check browser notification settings.', });
+                          }}
                           disabled={pushLoading}
                         >
-                          {pushLoading ? 'Enabling...' : 'Enable'}
+                          {pushLoading ? 'Enabling...' : 'Enable & Test'}
                         </Button>
                       </div>
                     </Card>

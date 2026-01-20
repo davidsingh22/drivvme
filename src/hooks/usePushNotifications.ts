@@ -3,8 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 
-// VAPID public key - this is safe to expose in frontend
-const VAPID_PUBLIC_KEY = 'BBYK8_pg5sDejTBa7UVsjvE_MzUbI9p8aU3AtopqoGZFv67fd0jyUBZ6_MoZRpZE0y1kmrJuLjgw65ixm0kLyJc';
+// VAPID public key is fetched from backend (safe to expose, avoids mismatches)
+let cachedVapidPublicKey: string | null = null;
 
 function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -49,16 +49,20 @@ export function usePushNotifications() {
     try {
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.getSubscription();
-      
+
       if (subscription) {
         // Verify it exists in our database
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from('push_subscriptions')
           .select('id')
           .eq('user_id', user?.id)
           .eq('endpoint', subscription.endpoint)
-          .single();
-        
+          .maybeSingle();
+
+        if (error) {
+          console.error('Error checking subscription in database:', error);
+        }
+
         setIsSubscribed(!!data);
       } else {
         setIsSubscribed(false);
@@ -82,12 +86,10 @@ export function usePushNotifications() {
     }
 
     setIsLoading(true);
-    console.log('Starting push subscription...');
 
     try {
       // Request permission
       const permissionResult = await Notification.requestPermission();
-      console.log('Permission result:', permissionResult);
       setPermission(permissionResult);
 
       if (permissionResult !== 'granted') {
@@ -96,47 +98,57 @@ export function usePushNotifications() {
       }
 
       // Register service worker
-      console.log('Registering service worker...');
       const registration = await registerServiceWorker();
-      console.log('Service worker registered:', registration);
 
-      // Subscribe to push notifications
-      console.log('Subscribing to push manager...');
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-      console.log('Push subscription created:', subscription);
-
-      const subscriptionJson = subscription.toJSON();
-      console.log('Subscription JSON:', subscriptionJson);
-
-      // Save subscription to database
-      console.log('Saving subscription to database for user:', user.id);
-      const { error } = await supabase
-        .from('push_subscriptions')
-        .upsert({
-          user_id: user.id,
-          endpoint: subscriptionJson.endpoint!,
-          p256dh: subscriptionJson.keys!.p256dh,
-          auth: subscriptionJson.keys!.auth,
-        }, {
-          onConflict: 'user_id,endpoint'
-        });
-
-      if (error) {
-        console.error('Error saving subscription:', error);
-        toast.error('Failed to save notification subscription: ' + error.message);
-        return false;
+      // Fetch VAPID public key (avoid hardcoded mismatch)
+      if (!cachedVapidPublicKey) {
+        const { data, error } = await supabase.functions.invoke('get-vapid-public-key');
+        if (error) throw new Error(`Failed to fetch VAPID key: ${error.message}`);
+        cachedVapidPublicKey = data?.publicKey;
       }
 
-      console.log('Subscription saved successfully!');
+      if (!cachedVapidPublicKey) {
+        throw new Error('Missing VAPID public key');
+      }
+
+      // Subscribe to push notifications
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(cachedVapidPublicKey),
+      });
+
+      const subscriptionJson = subscription.toJSON();
+
+      if (!subscriptionJson.endpoint || !subscriptionJson.keys?.p256dh || !subscriptionJson.keys?.auth) {
+        throw new Error('Invalid push subscription payload');
+      }
+
+      // Save subscription to database
+      const { error: saveError } = await supabase
+        .from('push_subscriptions')
+        .upsert(
+          {
+            user_id: user.id,
+            endpoint: subscriptionJson.endpoint,
+            p256dh: subscriptionJson.keys.p256dh,
+            auth: subscriptionJson.keys.auth,
+          },
+          {
+            onConflict: 'user_id,endpoint',
+          }
+        );
+
+      if (saveError) {
+        throw new Error(`Failed to save subscription: ${saveError.message}`);
+      }
+
       setIsSubscribed(true);
       toast.success('Push notifications enabled!');
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error('Error subscribing to push:', error);
-      toast.error('Failed to enable push notifications');
+      toast.error(message);
       return false;
     } finally {
       setIsLoading(false);
