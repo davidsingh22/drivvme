@@ -266,18 +266,34 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
-  // Fetch Stripe config and create payment intent on mount
+  // Fetch Stripe config and create payment intent on mount with retry logic
   useEffect(() => {
+    let isMounted = true;
+    let retryCount = 0;
+    const maxRetries = 3;
+
     const initialize = async () => {
       try {
-        // Fetch the Stripe publishable key from edge function
-        const configResponse = await supabase.functions.invoke('get-stripe-config');
+        // Fetch the Stripe publishable key from edge function with retry
+        let configResponse;
+        while (retryCount < maxRetries) {
+          configResponse = await supabase.functions.invoke('get-stripe-config');
+          
+          if (!configResponse.error) break;
+          
+          retryCount++;
+          if (retryCount < maxRetries) {
+            await new Promise(r => setTimeout(r, 500 * retryCount));
+          }
+        }
         
-        if (configResponse.error) {
+        if (!isMounted) return;
+        
+        if (configResponse?.error) {
           throw new Error(configResponse.error.message || 'Failed to get Stripe config');
         }
         
-        const publishableKey = configResponse.data?.publishableKey;
+        const publishableKey = configResponse?.data?.publishableKey;
         if (!publishableKey) {
           throw new Error('Stripe publishable key not configured');
         }
@@ -292,16 +308,31 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
           throw new Error('Not authenticated');
         }
 
-        const response = await supabase.functions.invoke('create-payment-intent', {
-          body: { rideId, amount },
-        });
+        // Retry payment intent creation as well
+        let paymentResponse;
+        retryCount = 0;
+        while (retryCount < maxRetries) {
+          paymentResponse = await supabase.functions.invoke('create-payment-intent', {
+            body: { rideId, amount },
+          });
 
-        if (response.error) {
-          throw new Error(response.error.message);
+          if (!paymentResponse.error) break;
+          
+          retryCount++;
+          if (retryCount < maxRetries) {
+            await new Promise(r => setTimeout(r, 500 * retryCount));
+          }
         }
 
-        setClientSecret(response.data.clientSecret);
+        if (!isMounted) return;
+
+        if (paymentResponse?.error) {
+          throw new Error(paymentResponse.error.message);
+        }
+
+        setClientSecret(paymentResponse.data.clientSecret);
       } catch (err: any) {
+        if (!isMounted) return;
         console.error('Error initializing payment:', err);
         setError(err.message);
         toast({
@@ -310,11 +341,17 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
           variant: 'destructive',
         });
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     initialize();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [rideId, amount, toast]);
 
   if (error) {
