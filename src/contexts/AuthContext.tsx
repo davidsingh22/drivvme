@@ -57,7 +57,7 @@ interface AuthContextType {
   isRider: boolean;
   isDriver: boolean;
   isAdmin: boolean;
-  signUp: (email: string, password: string, role: UserRole, firstName?: string, lastName?: string, phone?: string) => Promise<void>;
+  signUp: (email: string, password: string, role: UserRole, firstName?: string, lastName?: string, phone?: string, vehicleInfo?: { vehicleMake: string; vehicleModel: string; vehicleColor: string; licensePlate: string }) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -223,7 +223,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     role: UserRole,
     firstName?: string,
     lastName?: string,
-    phone?: string
+    phone?: string,
+    vehicleInfo?: { vehicleMake: string; vehicleModel: string; vehicleColor: string; licensePlate: string }
   ) => {
     setIsLoading(true);
     try {
@@ -255,11 +256,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           .from('user_roles')
           .insert({ user_id: data.user.id, role });
 
-        // If driver, create driver profile
+        // If driver, create driver profile with vehicle info
         if (role === 'driver') {
           await supabase
             .from('driver_profiles')
-            .insert({ user_id: data.user.id });
+            .insert({ 
+              user_id: data.user.id,
+              vehicle_make: vehicleInfo?.vehicleMake || null,
+              vehicle_model: vehicleInfo?.vehicleModel || null,
+              vehicle_color: vehicleInfo?.vehicleColor || null,
+              license_plate: vehicleInfo?.licensePlate || null,
+            });
         }
 
         toast({

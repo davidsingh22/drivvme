@@ -27,6 +27,12 @@ const Signup = () => {
   const [phone, setPhone] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  
+  // Driver-specific fields
+  const [vehicleMake, setVehicleMake] = useState('');
+  const [vehicleModel, setVehicleModel] = useState('');
+  const [vehicleColor, setVehicleColor] = useState('');
+  const [licensePlate, setLicensePlate] = useState('');
 
   const [signupComplete, setSignupComplete] = useState(false);
   const [targetRoute, setTargetRoute] = useState<string | null>(null);
@@ -53,8 +59,17 @@ const Signup = () => {
       return;
     }
 
+    // Driver-specific validation
+    if (role === 'driver') {
+      if (!vehicleMake.trim() || !vehicleModel.trim() || !vehicleColor.trim() || !licensePlate.trim()) {
+        setError('Please fill in all vehicle information');
+        return;
+      }
+    }
+
     try {
-      await signUp(email, password, role, firstName, lastName, phone);
+      await signUp(email, password, role, firstName, lastName, phone, 
+        role === 'driver' ? { vehicleMake, vehicleModel, vehicleColor, licensePlate } : undefined);
       // Set the target route and mark signup complete - navigation will happen via useEffect once roles load
       setTargetRoute(role === 'driver' ? '/driver' : '/ride');
       setSignupComplete(true);
@@ -164,6 +179,69 @@ const Signup = () => {
                   className="bg-background"
                 />
               </div>
+
+              {/* Driver-specific fields */}
+              {role === 'driver' && (
+                <>
+                  <div className="pt-4 border-t border-border">
+                    <p className="text-sm font-medium text-muted-foreground mb-3">Vehicle Information</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="vehicleMake">Vehicle Make *</Label>
+                      <Input
+                        id="vehicleMake"
+                        type="text"
+                        placeholder="e.g., Toyota"
+                        value={vehicleMake}
+                        onChange={(e) => setVehicleMake(e.target.value)}
+                        required
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="vehicleModel">Vehicle Model *</Label>
+                      <Input
+                        id="vehicleModel"
+                        type="text"
+                        placeholder="e.g., Camry"
+                        value={vehicleModel}
+                        onChange={(e) => setVehicleModel(e.target.value)}
+                        required
+                        className="bg-background"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="vehicleColor">Vehicle Color *</Label>
+                      <Input
+                        id="vehicleColor"
+                        type="text"
+                        placeholder="e.g., Silver"
+                        value={vehicleColor}
+                        onChange={(e) => setVehicleColor(e.target.value)}
+                        required
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="licensePlate">License Plate *</Label>
+                      <Input
+                        id="licensePlate"
+                        type="text"
+                        placeholder="e.g., ABC 123"
+                        value={licensePlate}
+                        onChange={(e) => setLicensePlate(e.target.value.toUpperCase())}
+                        required
+                        className="bg-background"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="password">{t('auth.password')}</Label>
