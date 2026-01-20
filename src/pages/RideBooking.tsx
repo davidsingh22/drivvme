@@ -41,6 +41,7 @@ const RideBooking = () => {
   const [durationMinutes, setDurationMinutes] = useState(0);
   const [currentRide, setCurrentRide] = useState<any>(null);
   const [driverInfo, setDriverInfo] = useState<any>(null);
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Check if current user is a test account - use email from profile or auth user as fallback
@@ -96,12 +97,24 @@ const RideBooking = () => {
               break;
             case 'driver_en_route':
               setStep('arriving');
+              toast({
+                title: 'Driver on the way',
+                description: 'Your driver is heading to your pickup location.',
+              });
               break;
             case 'arrived':
               setStep('arrived');
+              toast({
+                title: 'Driver has arrived!',
+                description: 'Your driver is waiting at the pickup location.',
+              });
               break;
             case 'in_progress':
               setStep('inProgress');
+              toast({
+                title: 'Ride started',
+                description: 'Enjoy your trip!',
+              });
               break;
             case 'completed':
               setStep('completed');
@@ -121,7 +134,54 @@ const RideBooking = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentRide?.id]);
+  }, [currentRide?.id, t, toast]);
+
+  // Subscribe to driver location updates
+  useEffect(() => {
+    if (!currentRide?.driver_id) {
+      setDriverLocation(null);
+      return;
+    }
+
+    // Fetch initial driver location
+    const fetchDriverLocation = async () => {
+      const { data } = await supabase
+        .from('driver_profiles')
+        .select('current_lat, current_lng')
+        .eq('user_id', currentRide.driver_id)
+        .single();
+
+      if (data?.current_lat && data?.current_lng) {
+        setDriverLocation({ lat: data.current_lat, lng: data.current_lng });
+      }
+    };
+
+    fetchDriverLocation();
+
+    // Subscribe to real-time location updates
+    const channel = supabase
+      .channel(`driver-location-${currentRide.driver_id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'driver_profiles',
+          filter: `user_id=eq.${currentRide.driver_id}`,
+        },
+        (payload) => {
+          const updated = payload.new as { current_lat: number | null; current_lng: number | null };
+          if (updated.current_lat && updated.current_lng) {
+            setDriverLocation({ lat: updated.current_lat, lng: updated.current_lng });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentRide?.driver_id]);
 
   const fetchDriverInfo = async (driverId: string) => {
     const { data: profile } = await supabase
@@ -352,6 +412,7 @@ const RideBooking = () => {
     setFareEstimate(null);
     setCurrentRide(null);
     setDriverInfo(null);
+    setDriverLocation(null);
   };
 
   // Avoid blocking the whole page during background token refreshes.
@@ -374,6 +435,7 @@ const RideBooking = () => {
           <MapComponent
             pickup={pickup}
             dropoff={dropoff}
+            driverLocation={driverLocation}
           />
         </div>
 
