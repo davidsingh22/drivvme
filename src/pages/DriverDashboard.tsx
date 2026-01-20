@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle } from 'lucide-react';
+import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -11,6 +11,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import Navbar from '@/components/Navbar';
 import MapComponent from '@/components/MapComponent';
+import DriverProfileModal from '@/components/DriverProfileModal';
 import { useToast } from '@/hooks/use-toast';
 
 const PLATFORM_FEE = 5.00;
@@ -51,6 +52,7 @@ const DriverDashboard = () => {
   const [todayEarnings, setTodayEarnings] = useState(0);
   const [todayRides, setTodayRides] = useState(0);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   // Redirect if not logged in as driver
   useEffect(() => {
@@ -405,6 +407,16 @@ const DriverDashboard = () => {
           className="w-full lg:w-[420px] bg-card border-l border-border flex flex-col"
         >
           <div className="p-6 flex-1 overflow-y-auto">
+            {/* Profile Button */}
+            <Button
+              variant="outline"
+              className="w-full mb-4"
+              onClick={() => setIsProfileModalOpen(true)}
+            >
+              <UserCircle className="h-5 w-5 mr-2" />
+              Edit Profile
+            </Button>
+
             {/* Go Online/Offline Button */}
             <Button
               onClick={toggleOnlineStatus}
@@ -662,6 +674,12 @@ const DriverDashboard = () => {
           </div>
         </motion.div>
       </div>
+
+      {/* Profile Edit Modal */}
+      <DriverProfileModal 
+        open={isProfileModalOpen} 
+        onOpenChange={setIsProfileModalOpen} 
+      />
     </div>
   );
 };
