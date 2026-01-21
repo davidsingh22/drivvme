@@ -134,9 +134,11 @@ const RideBooking = () => {
     });
   }, [activeRide, activeRideLoading, toast]);
 
-  // Subscribe to ride updates
+  // Subscribe to ride updates via realtime
   useEffect(() => {
     if (!currentRide?.id) return;
+
+    console.log('[RideBooking] Subscribing to realtime for ride:', currentRide.id);
 
     const channel = supabase
       .channel(`ride-${currentRide.id}`)
@@ -149,6 +151,7 @@ const RideBooking = () => {
           filter: `id=eq.${currentRide.id}`,
         },
         (payload) => {
+          console.log('[RideBooking] Realtime UPDATE received:', payload.new);
           const updatedRide = payload.new as any;
           setCurrentRide(updatedRide);
           updateRide(updatedRide); // Persist to localStorage
@@ -201,12 +204,54 @@ const RideBooking = () => {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[RideBooking] Realtime subscription status:', status);
+      });
 
     return () => {
+      console.log('[RideBooking] Unsubscribing from realtime');
       supabase.removeChannel(channel);
     };
   }, [currentRide?.id, t, toast]);
+
+  // Fallback polling: if realtime misses updates, poll every 5 seconds
+  useEffect(() => {
+    if (!currentRide?.id) return;
+    // Only poll when in 'searching' status
+    if (currentRide.status !== 'searching') return;
+
+    const pollInterval = setInterval(async () => {
+      console.log('[RideBooking] Polling ride status...');
+      const { data, error } = await supabase
+        .from('rides')
+        .select('*')
+        .eq('id', currentRide.id)
+        .single();
+
+      if (error) {
+        console.error('[RideBooking] Poll error:', error);
+        return;
+      }
+
+      if (data && data.status !== currentRide.status) {
+        console.log('[RideBooking] Poll detected status change:', data.status);
+        setCurrentRide(data);
+        updateRide(data);
+        setShowStatusBanner(true);
+
+        if (data.status === 'driver_assigned') {
+          setStep('matched');
+          fetchDriverInfo(data.driver_id);
+          toast({
+            title: t('booking.found'),
+            description: 'Your driver is on the way!',
+          });
+        }
+      }
+    }, 5000);
+
+    return () => clearInterval(pollInterval);
+  }, [currentRide?.id, currentRide?.status, t, toast]);
 
   // Subscribe to driver location updates
   useEffect(() => {
