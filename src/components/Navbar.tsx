@@ -6,6 +6,7 @@ import Logo from './Logo';
 import LanguageToggle from './LanguageToggle';
 import { PushNotificationToggle } from './PushNotificationToggle';
 import NotificationsBell from './NotificationsBell';
+import RiderProfileModal from './RiderProfileModal';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,6 +21,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
   const { t } = useLanguage();
   const { user, profile, isRider, isDriver, isAdmin, signOut } = useAuth();
   const navigate = useNavigate();
@@ -141,11 +143,12 @@ const Navbar = () => {
                     </div>
                   </div>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem asChild>
-                    <Link to="/profile" className="cursor-pointer">
-                      <User className="mr-2 h-4 w-4" />
-                      {t('nav.profile')}
-                    </Link>
+                  <DropdownMenuItem 
+                    className="cursor-pointer"
+                    onClick={() => setProfileModalOpen(true)}
+                  >
+                    <User className="mr-2 h-4 w-4" />
+                    {t('nav.profile')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-destructive">
@@ -230,13 +233,15 @@ const Navbar = () => {
                       Admin Dashboard
                     </Link>
                   )}
-                  <Link
-                    to="/profile"
-                    className="px-4 py-2 text-muted-foreground hover:text-foreground"
-                    onClick={() => setIsOpen(false)}
+                  <button
+                    onClick={() => {
+                      setProfileModalOpen(true);
+                      setIsOpen(false);
+                    }}
+                    className="px-4 py-2 text-left text-muted-foreground hover:text-foreground w-full"
                   >
                     {t('nav.profile')}
-                  </Link>
+                  </button>
                   <button
                     onClick={() => {
                       handleSignOut();
@@ -284,6 +289,9 @@ const Navbar = () => {
           </motion.div>
         )}
       </div>
+      
+      {/* Rider Profile Modal */}
+      <RiderProfileModal open={profileModalOpen} onOpenChange={setProfileModalOpen} />
     </motion.nav>
   );
 };
