@@ -49,22 +49,34 @@ export const calculateFare = (
   const hour = new Date().getHours();
   const surgeMultiplier = applySurge ? getSurgeMultiplier(hour) : 1.0;
 
-  const baseFare = BASE_FARE;
-  const bookingFee = BOOKING_FEE;
-  const distanceFare = distanceKm * PER_KM_RATE;
-  const timeFare = durationMinutes * PER_MINUTE_RATE;
-  
-  let subtotal = (baseFare + bookingFee + distanceFare + timeFare) * surgeMultiplier;
-  
-  // Apply minimum fare
-  if (subtotal < MINIMUM_FARE) {
-    subtotal = MINIMUM_FARE;
+  // IMPORTANT: To keep the "15% cheaper" promise mathematically consistent,
+  // we first compute an Uber-equivalent estimate from our Uber calibration,
+  // then apply the discount and only round at the very end.
+  const uberBaseFare = UBER_BASE_FARE;
+  const uberBookingFee = UBER_BOOKING_FEE;
+  const uberDistanceFare = distanceKm * UBER_PER_KM_RATE;
+  const uberTimeFare = durationMinutes * UBER_PER_MINUTE_RATE;
+
+  let uberSubtotal = (uberBaseFare + uberBookingFee + uberDistanceFare + uberTimeFare) * surgeMultiplier;
+  if (uberSubtotal < UBER_MINIMUM_FARE) {
+    uberSubtotal = UBER_MINIMUM_FARE;
   }
 
-  const total = Math.round(subtotal * 100) / 100;
-  
-  // Calculate what Uber would charge (our price / 0.85 = Uber equivalent)
-  const uberEquivalent = Math.round((total / DISCOUNT_FACTOR) * 100) / 100;
+  const uberEquivalent = Math.round(uberSubtotal * 100) / 100;
+
+  // Drivveme is always 15% cheaper than the Uber-equivalent estimate.
+  let drivvemeSubtotal = uberSubtotal * DISCOUNT_FACTOR;
+  if (drivvemeSubtotal < MINIMUM_FARE) {
+    drivvemeSubtotal = MINIMUM_FARE;
+  }
+
+  const total = Math.round(drivvemeSubtotal * 100) / 100;
+
+  // Breakdowns (un-rounded for computation, rounded for display)
+  const baseFare = BASE_FARE;
+  const distanceFare = distanceKm * PER_KM_RATE;
+  const timeFare = durationMinutes * PER_MINUTE_RATE;
+
   const savings = Math.round((uberEquivalent - total) * 100) / 100;
   const savingsPercent = Math.round((1 - DISCOUNT_FACTOR) * 100);
 
@@ -76,7 +88,7 @@ export const calculateFare = (
     distanceFare: Math.round(distanceFare * 100) / 100,
     timeFare: Math.round(timeFare * 100) / 100,
     surgeMultiplier,
-    subtotal: Math.round(subtotal * 100) / 100,
+    subtotal: Math.round(drivvemeSubtotal * 100) / 100,
     total,
     platformFee: PLATFORM_FEE,
     driverEarnings: Math.round(driverEarnings * 100) / 100,
