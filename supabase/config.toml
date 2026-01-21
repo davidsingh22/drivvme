@@ -1,1 +1,4 @@
 project_id = "siadshsaiuecesydqzqo"
+
+[functions.notify-drivers-new-ride]
+verify_jwt = false
