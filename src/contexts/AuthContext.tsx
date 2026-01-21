@@ -117,7 +117,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [hasInitialized, setHasInitialized] = useState(false);
   const { toast } = useToast();
   const resumeCheckInFlight = useRef<Promise<void> | null>(null);
-  const pendingClearTimer = useRef<number | null>(null);
   const userRef = useRef<User | null>(null);
   const rolesRef = useRef<UserRole[]>([]);
   const hasInitializedRef = useRef(false);
@@ -322,23 +321,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
           const { data } = await supabase.auth.getSession();
 
-          // If session is temporarily missing, don't instantly wipe state; recheck shortly.
-          if (!data.session) {
-            if (hasInitializedRef.current && userRef.current && !pendingClearTimer.current) {
-              pendingClearTimer.current = window.setTimeout(async () => {
-                pendingClearTimer.current = null;
-                const { data: retry } = await supabase.auth.getSession();
-                if (!retry.session) {
-                  setSession(null);
-                  setUser(null);
-                  setProfile(null);
-                  setDriverProfile(null);
-                  setRoles([]);
-                }
-              }, 2000);
-            }
-            return;
-          }
+          // On mobile lock/unlock, browsers can briefly fail to read storage/network.
+          // Do NOT force a sign-out here; only the auth system should emit SIGNED_OUT.
+          if (!data.session) return;
 
           // Session exists: ensure state is hydrated and refresh tokens silently.
           if (!userRef.current || userRef.current.id !== data.session.user.id) {
@@ -371,7 +356,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       subscription.unsubscribe();
       window.removeEventListener('focus', resumeCheck);
       document.removeEventListener('visibilitychange', onVisibility);
-      if (pendingClearTimer.current) window.clearTimeout(pendingClearTimer.current);
     };
   }, []);
 

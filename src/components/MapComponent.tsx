@@ -4,6 +4,8 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
+type GeoJSONSourceLike = mapboxgl.GeoJSONSource;
+
 interface MapComponentProps {
   pickup?: { lat: number; lng: number } | null;
   dropoff?: { lat: number; lng: number } | null;
@@ -331,97 +333,99 @@ const MapComponent = ({
 
   // Draw route line between pickup and dropoff
   useEffect(() => {
-    if (!mapRef.current || !mapLoaded || !pickup || !dropoff || !token) return;
+    if (!mapRef.current || !mapLoaded || !token) return;
+
+    // If we don't have both points, remove any existing route to avoid extra work.
+    if (!pickup || !dropoff) {
+      if (mapRef.current.getLayer('route')) mapRef.current.removeLayer('route');
+      if (mapRef.current.getSource('route')) mapRef.current.removeSource('route');
+      return;
+    }
+
+    const abort = new AbortController();
 
     const fetchRoute = async () => {
       try {
         const response = await fetch(
-          `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}?geometries=geojson&access_token=${token}`
+          `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}?geometries=geojson&access_token=${token}`,
+          { signal: abort.signal }
         );
         const data = await response.json();
 
-        if (data.routes && data.routes[0]) {
-          const route = data.routes[0].geometry;
+        const route = data?.routes?.[0]?.geometry;
+        if (!route) return;
 
-          // Remove existing route layer and source
-          if (mapRef.current?.getLayer('route')) {
-            mapRef.current.removeLayer('route');
-          }
-          if (mapRef.current?.getSource('route')) {
-            mapRef.current.removeSource('route');
-          }
+        const feature: GeoJSON.Feature<GeoJSON.LineString> = {
+          type: 'Feature',
+          properties: {},
+          geometry: route,
+        };
 
-          // Add route source and layer
-          mapRef.current?.addSource('route', {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              properties: {},
-              geometry: route,
-            },
-          });
-
-          mapRef.current?.addLayer({
-            id: 'route',
-            type: 'line',
-            source: 'route',
-            layout: {
-              'line-join': 'round',
-              'line-cap': 'round',
-            },
-            paint: {
-              'line-color': '#a855f7',
-              'line-width': 5,
-              'line-opacity': 0.8,
-            },
-          });
-
-          // Fit map to show entire route
-          const coordinates = route.coordinates;
-          const bounds = coordinates.reduce(
-            (bounds: mapboxgl.LngLatBounds, coord: [number, number]) => {
-              return bounds.extend(coord);
-            },
-            new mapboxgl.LngLatBounds(coordinates[0], coordinates[0])
-          );
-
-          mapRef.current?.fitBounds(bounds, { padding: 50 });
+        // Update existing source instead of removing/re-adding layers (reduces UI freezes on mobile).
+        const existingSource = mapRef.current?.getSource('route') as GeoJSONSourceLike | undefined;
+        if (existingSource) {
+          existingSource.setData(feature as any);
+          return;
         }
+
+        mapRef.current?.addSource('route', {
+          type: 'geojson',
+          data: feature as any,
+        });
+
+        mapRef.current?.addLayer({
+          id: 'route',
+          type: 'line',
+          source: 'route',
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'round',
+          },
+          paint: {
+            'line-color': '#a855f7',
+            'line-width': 5,
+            'line-opacity': 0.8,
+          },
+        });
       } catch (err) {
+        // Ignore abort errors
+        if ((err as any)?.name === 'AbortError') return;
         console.error('Error fetching route:', err);
       }
     };
 
     fetchRoute();
 
-    return () => {
-      if (mapRef.current?.getLayer('route')) {
-        mapRef.current.removeLayer('route');
-      }
-      if (mapRef.current?.getSource('route')) {
-        mapRef.current.removeSource('route');
-      }
-    };
+    return () => abort.abort();
   }, [pickup, dropoff, mapLoaded, token]);
 
   // Fit bounds when markers change
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
 
-    const points: [number, number][] = [];
-    if (pickup) points.push([pickup.lng, pickup.lat]);
-    if (dropoff) points.push([dropoff.lng, dropoff.lat]);
-    if (driverLocation) points.push([driverLocation.lng, driverLocation.lat]);
+    let raf = 0;
 
-    if (points.length >= 2) {
-      const bounds = points.reduce(
-        (bounds, coord) => bounds.extend(coord),
-        new mapboxgl.LngLatBounds(points[0], points[0])
-      );
-      mapRef.current.fitBounds(bounds, { padding: 80 });
-    } else if (points.length === 1) {
-      mapRef.current.flyTo({ center: points[0], zoom: 14 });
-    }
+    // Throttle to a frame; fitBounds can be heavy on mobile.
+    raf = requestAnimationFrame(() => {
+      const points: [number, number][] = [];
+      if (pickup) points.push([pickup.lng, pickup.lat]);
+      if (dropoff) points.push([dropoff.lng, dropoff.lat]);
+      if (driverLocation) points.push([driverLocation.lng, driverLocation.lat]);
+
+      if (points.length >= 2) {
+        const bounds = points.reduce(
+          (bounds, coord) => bounds.extend(coord),
+          new mapboxgl.LngLatBounds(points[0], points[0])
+        );
+        mapRef.current?.fitBounds(bounds, { padding: 80, duration: 600 });
+      } else if (points.length === 1) {
+        mapRef.current?.flyTo({ center: points[0], zoom: 14, duration: 600 });
+      }
+    });
+
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [pickup, dropoff, driverLocation, mapLoaded]);
 
   if (loading) {

@@ -499,7 +499,7 @@ const RideBooking = () => {
   const handlePaymentCancel = async () => {
     // Cancel the ride if payment is cancelled
     if (currentRide) {
-      await supabase
+      const { error } = await supabase
         .from('rides')
         .update({
           status: 'cancelled',
@@ -508,8 +508,13 @@ const RideBooking = () => {
           cancellation_reason: 'Payment cancelled',
         })
         .eq('id', currentRide.id);
+
+      if (error) {
+        toast({ title: 'Cancel failed', description: error.message, variant: 'destructive' });
+      }
     }
     setCurrentRide(null);
+    clearRide();
     setStep('estimate');
   };
 
@@ -517,7 +522,7 @@ const RideBooking = () => {
     if (!currentRide) return;
 
     try {
-      await supabase
+      const { error } = await supabase
         .from('rides')
         .update({
           status: 'cancelled',
@@ -526,6 +531,8 @@ const RideBooking = () => {
           cancellation_reason: 'Cancelled by rider',
         })
         .eq('id', currentRide.id);
+
+      if (error) throw error;
 
       resetBooking();
       toast({

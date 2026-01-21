@@ -107,7 +107,7 @@ const DriverDashboard = () => {
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isOnline, user, session]);
+  }, [isOnline, user, session, currentRide, toast]);
 
   // Fetch available rides when online
   useEffect(() => {
@@ -143,6 +143,18 @@ const DriverDashboard = () => {
           filter: 'status=eq.searching',
         },
         () => {
+          // Reliable in-app fallback alert (works even when system push is flaky on mobile browsers)
+          if (!currentRide) {
+            toast({
+              title: 'New ride request',
+              description: 'A rider is looking for a driver now.',
+            });
+
+            if ('vibrate' in navigator) {
+              // best-effort
+              (navigator as any).vibrate?.([200, 100, 200]);
+            }
+          }
           fetchRides();
         }
       )
