@@ -24,9 +24,10 @@ const Login = () => {
   // If auth completes (even before routing), stop the button spinner
   useEffect(() => {
     if (!isSubmitting) return;
-    if (isLoading) return;
+    // IMPORTANT: don't block UI on global auth data loading (roles/profile can be slow on mobile).
+    // As soon as we have a user session, stop the local submit spinner.
     if (user) setIsSubmitting(false);
-  }, [isSubmitting, isLoading, user]);
+  }, [isSubmitting, user]);
 
   // After auth completes, route user based on roles
   useEffect(() => {
@@ -139,9 +140,10 @@ const Login = () => {
               <Button
                 type="submit"
                 className="w-full gradient-primary shadow-button py-6"
-                disabled={isSubmitting || isLoading}
+                // Only block on the local submit; global auth loading can be slow on mobile.
+                disabled={isSubmitting}
               >
-                {isSubmitting || isLoading ? t('common.loading') : t('auth.loginBtn')}
+                {isSubmitting ? t('common.loading') : t('auth.loginBtn')}
               </Button>
             </form>
 
