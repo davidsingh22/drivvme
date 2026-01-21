@@ -237,7 +237,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // IMPORTANT: don't "wipe" the app state on transient mobile/Safari network issues.
     // If we already had roles/profile, keep them and just warn.
-    if (hasInitialized && user?.id === userId && roles.length > 0) {
+    if (hasInitializedRef.current && userRef.current?.id === userId && rolesRef.current.length > 0) {
       toast({
         title: 'Connection issue',
         description: 'We had trouble refreshing your account data. Retrying in the background…',
@@ -257,7 +257,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
       // Only show loading on initial load or actual sign-in/sign-out
       // Skip loading for background token refreshes when we already have user data
-      const isBackgroundRefresh = event === 'TOKEN_REFRESHED' && hasInitialized;
+      // IMPORTANT: this effect has an empty dep array, so we must use refs here.
+      // Otherwise `hasInitialized` is always the initial value (false) and drivers/riders
+      // can get stuck on a loading screen during periodic TOKEN_REFRESHED events.
+      const isBackgroundRefresh = event === 'TOKEN_REFRESHED' && hasInitializedRef.current;
 
       if (!isBackgroundRefresh) {
         setIsLoading(true);

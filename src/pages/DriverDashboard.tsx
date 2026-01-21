@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle } from 'lucide-react';
+import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -13,6 +13,8 @@ import Navbar from '@/components/Navbar';
 import MapComponent from '@/components/MapComponent';
 import DriverProfileModal from '@/components/DriverProfileModal';
 import { useToast } from '@/hooks/use-toast';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
+import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
 
 const PLATFORM_FEE = 5.00;
 
@@ -44,6 +46,15 @@ const DriverDashboard = () => {
   const { user, session, roles, isDriver, driverProfile, refreshDriverProfile, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const {
+    isSupported: pushSupported,
+    isSubscribed: pushSubscribed,
+    permission: pushPermission,
+    subscribe: subscribeToPush,
+    isLoading: pushLoading,
+    refreshPermission: refreshPushPermission,
+  } = usePushNotifications();
+  const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
   const [isOnline, setIsOnline] = useState(false);
   const [availableRides, setAvailableRides] = useState<RideRequest[]>([]);
@@ -473,6 +484,83 @@ const DriverDashboard = () => {
               <UserCircle className="h-5 w-5 mr-2" />
               Edit Profile
             </Button>
+
+            {/* Push Notifications (critical for new ride alerts when app is backgrounded) */}
+            {!pushSubscribed && (
+              <Card className="p-4 mb-4 bg-primary/5 border-primary/20">
+                <div className="flex items-start gap-3">
+                  <Bell className="h-5 w-5 text-primary mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-medium text-sm">Enable notifications for new ride requests</p>
+                    {!pushSupported ? (
+                      <p className="text-xs text-muted-foreground">
+                        Push isn’t available in this browser mode. On iPhone/iPad you must install the app (Add to Home Screen).
+                      </p>
+                    ) : pushPermission === 'denied' ? (
+                      <p className="text-xs text-muted-foreground">Notifications are blocked in your device/browser settings.</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Turn on notifications so you don’t miss trips.</p>
+                    )}
+                  </div>
+
+                  {!pushSupported ? (
+                    <Button size="sm" variant="outline" onClick={() => setNotificationHelpOpen(true)}>
+                      How to enable
+                    </Button>
+                  ) : pushPermission === 'denied' ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        refreshPushPermission();
+                        setNotificationHelpOpen(true);
+                      }}
+                    >
+                      Fix settings
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={pushLoading}
+                      onClick={async () => {
+                        const ok = await subscribeToPush();
+                        if (!ok) return;
+
+                        const { data, error } = await supabase.functions.invoke('send-push-notification', {
+                          body: {
+                            userId: user?.id,
+                            title: 'Driver alerts enabled',
+                            body: 'You will receive new ride request notifications.',
+                            url: '/driver',
+                          },
+                        });
+
+                        if (error) {
+                          toast({ title: 'Test notification failed', description: error.message, variant: 'destructive' });
+                          return;
+                        }
+
+                        if (!data?.sent) {
+                          toast({
+                            title: 'Not subscribed yet',
+                            description: 'No subscription found for this device. Try enabling again.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+
+                        toast({ title: 'Test notification sent' });
+                      }}
+                    >
+                      {pushLoading ? 'Enabling…' : 'Enable & Test'}
+                    </Button>
+                  )}
+                </div>
+
+                <NotificationPermissionHelpDialog open={notificationHelpOpen} onOpenChange={setNotificationHelpOpen} />
+              </Card>
+            )}
 
             {/* Go Online/Offline Button */}
             <Button
