@@ -489,6 +489,18 @@ const RideBooking = () => {
       if (notifErr) {
         console.error('Notification insert failed:', notifErr);
       }
+
+      // Notify all online drivers about the new ride (fire and forget)
+      supabase.functions.invoke('notify-drivers-new-ride', {
+        body: {
+          rideId: ride.id,
+          pickupAddress: pickup.address,
+          dropoffAddress: dropoff.address,
+          estimatedFare: fareEstimate.total,
+        },
+      }).then(({ error: notifyErr }) => {
+        if (notifyErr) console.error('Driver notification failed:', notifyErr);
+      });
     } catch (error: any) {
       console.error('Error creating ride:', error);
       toast({
