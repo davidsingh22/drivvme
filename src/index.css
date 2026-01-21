@@ -3,98 +3,98 @@
 @tailwind utilities;
 
 /* Drivveme Design System
-   Bold yellow & black rideshare aesthetic
+   Bold, modern rideshare aesthetic with electric accents
    All colors in HSL format
 */
 
 @layer base {
   :root {
-    /* Core Brand Colors - Bold Yellow & Black */
-    --background: 0 0% 0%;
-    --foreground: 50 100% 95%;
+    /* Core Brand Colors - Electric Purple & Lime */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
 
-    --card: 45 5% 6%;
-    --card-foreground: 50 100% 95%;
+    --card: 240 10% 6%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 45 5% 6%;
-    --popover-foreground: 50 100% 95%;
+    --popover: 240 10% 6%;
+    --popover-foreground: 0 0% 98%;
 
-    /* Electric Yellow Primary */
-    --primary: 48 100% 50%;
-    --primary-foreground: 0 0% 0%;
-    --primary-glow: 48 100% 60%;
+    /* Electric Purple Primary */
+    --primary: 271 91% 65%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 271 91% 75%;
 
-    /* Gold Accent */
-    --accent: 40 95% 50%;
-    --accent-foreground: 0 0% 0%;
+    /* Lime Accent */
+    --accent: 82 85% 55%;
+    --accent-foreground: 240 10% 3.9%;
 
-    --secondary: 45 5% 12%;
-    --secondary-foreground: 50 100% 95%;
+    --secondary: 240 5% 15%;
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 45 5% 15%;
-    --muted-foreground: 45 5% 60%;
+    --muted: 240 5% 20%;
+    --muted-foreground: 240 5% 65%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
     /* Success Green */
     --success: 142 76% 45%;
-    --success-foreground: 0 0% 0%;
+    --success-foreground: 0 0% 100%;
 
     /* Warning Orange */
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 0%;
 
-    --border: 45 10% 18%;
-    --input: 45 10% 18%;
-    --ring: 48 100% 50%;
+    --border: 240 5% 17%;
+    --input: 240 5% 17%;
+    --ring: 271 91% 65%;
 
     --radius: 0.75rem;
 
     /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(48, 100%, 50%), hsl(40, 95%, 45%));
-    --gradient-accent: linear-gradient(135deg, hsl(40, 95%, 50%), hsl(35, 90%, 40%));
-    --gradient-card: linear-gradient(180deg, hsl(45, 5%, 8%), hsl(0, 0%, 0%));
-    --gradient-hero: linear-gradient(135deg, hsl(48, 50%, 8%), hsl(0, 0%, 0%));
+    --gradient-primary: linear-gradient(135deg, hsl(271, 91%, 65%), hsl(271, 91%, 45%));
+    --gradient-accent: linear-gradient(135deg, hsl(82, 85%, 55%), hsl(82, 85%, 45%));
+    --gradient-card: linear-gradient(180deg, hsl(240, 10%, 8%), hsl(240, 10%, 4%));
+    --gradient-hero: linear-gradient(135deg, hsl(271, 91%, 15%), hsl(240, 10%, 3.9%));
 
     /* Shadows */
-    --shadow-glow: 0 0 40px hsl(48 100% 50% / 0.35);
-    --shadow-card: 0 4px 24px hsl(0 0% 0% / 0.5);
-    --shadow-button: 0 4px 16px hsl(48 100% 50% / 0.4);
+    --shadow-glow: 0 0 40px hsl(271 91% 65% / 0.3);
+    --shadow-card: 0 4px 24px hsl(0 0% 0% / 0.4);
+    --shadow-button: 0 4px 16px hsl(271 91% 65% / 0.4);
 
     /* Sidebar */
-    --sidebar-background: 45 5% 6%;
-    --sidebar-foreground: 50 100% 95%;
-    --sidebar-primary: 48 100% 50%;
-    --sidebar-primary-foreground: 0 0% 0%;
-    --sidebar-accent: 45 5% 12%;
-    --sidebar-accent-foreground: 50 100% 95%;
-    --sidebar-border: 45 10% 18%;
-    --sidebar-ring: 48 100% 50%;
+    --sidebar-background: 240 10% 6%;
+    --sidebar-foreground: 0 0% 98%;
+    --sidebar-primary: 271 91% 65%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 15%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 240 5% 17%;
+    --sidebar-ring: 271 91% 65%;
   }
 
   .light {
-    --background: 50 20% 97%;
-    --foreground: 0 0% 5%;
+    --background: 0 0% 98%;
+    --foreground: 240 10% 3.9%;
 
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 5%;
+    --card-foreground: 240 10% 3.9%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 5%;
+    --popover-foreground: 240 10% 3.9%;
 
-    --primary: 48 100% 45%;
-    --primary-foreground: 0 0% 0%;
-    --primary-glow: 48 100% 55%;
+    --primary: 271 91% 55%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 271 91% 65%;
 
-    --accent: 40 95% 45%;
-    --accent-foreground: 0 0% 0%;
+    --accent: 82 85% 45%;
+    --accent-foreground: 0 0% 100%;
 
-    --secondary: 45 10% 92%;
-    --secondary-foreground: 0 0% 5%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 240 10% 3.9%;
 
-    --muted: 45 10% 88%;
-    --muted-foreground: 45 10% 40%;
+    --muted: 240 5% 92%;
+    --muted-foreground: 240 5% 45%;
 
     --destructive: 0 84% 55%;
     --destructive-foreground: 0 0% 100%;
@@ -105,27 +105,27 @@
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 0%;
 
-    --border: 45 10% 85%;
-    --input: 45 10% 85%;
-    --ring: 48 100% 45%;
+    --border: 240 5% 87%;
+    --input: 240 5% 87%;
+    --ring: 271 91% 55%;
 
-    --gradient-primary: linear-gradient(135deg, hsl(48, 100%, 45%), hsl(40, 95%, 40%));
-    --gradient-accent: linear-gradient(135deg, hsl(40, 95%, 45%), hsl(35, 90%, 35%));
-    --gradient-card: linear-gradient(180deg, hsl(0, 0%, 100%), hsl(45, 10%, 96%));
-    --gradient-hero: linear-gradient(135deg, hsl(48, 60%, 95%), hsl(50, 20%, 97%));
+    --gradient-primary: linear-gradient(135deg, hsl(271, 91%, 55%), hsl(271, 91%, 45%));
+    --gradient-accent: linear-gradient(135deg, hsl(82, 85%, 45%), hsl(82, 85%, 35%));
+    --gradient-card: linear-gradient(180deg, hsl(0, 0%, 100%), hsl(240, 5%, 98%));
+    --gradient-hero: linear-gradient(135deg, hsl(271, 91%, 95%), hsl(0, 0%, 100%));
 
-    --shadow-glow: 0 0 40px hsl(48 100% 45% / 0.25);
+    --shadow-glow: 0 0 40px hsl(271 91% 55% / 0.2);
     --shadow-card: 0 4px 24px hsl(0 0% 0% / 0.1);
-    --shadow-button: 0 4px 16px hsl(48 100% 45% / 0.35);
+    --shadow-button: 0 4px 16px hsl(271 91% 55% / 0.3);
 
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 0 0% 5%;
-    --sidebar-primary: 48 100% 45%;
-    --sidebar-primary-foreground: 0 0% 0%;
-    --sidebar-accent: 45 10% 92%;
-    --sidebar-accent-foreground: 0 0% 5%;
-    --sidebar-border: 45 10% 85%;
-    --sidebar-ring: 48 100% 45%;
+    --sidebar-foreground: 240 10% 3.9%;
+    --sidebar-primary: 271 91% 55%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 5% 96%;
+    --sidebar-accent-foreground: 240 10% 3.9%;
+    --sidebar-border: 240 5% 87%;
+    --sidebar-ring: 271 91% 55%;
   }
 }
 
@@ -174,7 +174,7 @@
   }
 
   .text-gradient {
-    background: linear-gradient(135deg, hsl(48, 100%, 50%), hsl(40, 95%, 50%));
+    background: linear-gradient(135deg, hsl(271, 91%, 65%), hsl(82, 85%, 55%));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
