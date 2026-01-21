@@ -521,6 +521,12 @@ const RideBooking = () => {
   const handleCancelRide = async () => {
     if (!currentRide) return;
 
+    // Optimistic UI update first — makes cancel feel instant
+    const rideId = currentRide.id;
+    resetBooking();
+
+    toast({ title: 'Cancelling ride…' });
+
     try {
       const { error } = await supabase
         .from('rides')
@@ -530,17 +536,15 @@ const RideBooking = () => {
           cancelled_by: user?.id,
           cancellation_reason: 'Cancelled by rider',
         })
-        .eq('id', currentRide.id);
+        .eq('id', rideId);
 
       if (error) throw error;
 
-      resetBooking();
-      toast({
-        title: 'Ride cancelled',
-      });
+      toast({ title: 'Ride cancelled' });
     } catch (error: any) {
+      console.error('Cancel ride error:', error);
       toast({
-        title: 'Error',
+        title: 'Cancel may have failed',
         description: error.message,
         variant: 'destructive',
       });

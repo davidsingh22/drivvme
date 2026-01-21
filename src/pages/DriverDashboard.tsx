@@ -309,31 +309,32 @@ const DriverDashboard = () => {
       return;
     }
 
+    // Update UI immediately — don't wait for notifications
     setCurrentRide({ ...ride, status: 'driver_assigned' });
-    await fetchRiderInfo(ride.rider_id);
     setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id));
+    toast({
+      title: 'Ride accepted!',
+      description: 'Navigate to pickup location',
+    });
 
-    // Insert in-app notification for rider (triggers real-time UI update)
-    await supabase.from('notifications').insert({
+    // Background: fetch rider info + send notifications (non-blocking)
+    fetchRiderInfo(ride.rider_id);
+
+    // Fire-and-forget notification tasks (don't await)
+    supabase.from('notifications').insert({
       user_id: ride.rider_id,
       ride_id: ride.id,
       type: 'driver_assigned',
       title: 'Driver Found! 🚗',
       message: 'Your driver is on the way to pick you up.',
-    });
+    }).then(() => {});
 
-    // Also send push notification to rider
-    await sendPushNotification(
+    sendPushNotification(
       ride.rider_id,
       'Driver Found! 🚗',
       'Your driver is on the way to pick you up.',
       '/ride'
     );
-
-    toast({
-      title: 'Ride accepted!',
-      description: 'Navigate to pickup location',
-    });
   };
 
   const updateRideStatus = async (status: string) => {
