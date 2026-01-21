@@ -1,22 +1,32 @@
 // Drivveme Pricing Engine
 // 15% cheaper than Uber, with a flat $5 platform fee per ride
+// Calibrated against real Uber Quebec rates (Jan 2026)
 
-// Base rates (similar to Uber Quebec, but 15% cheaper)
-const BASE_FARE = 2.50 * 0.85; // Base fare in CAD
-const PER_KM_RATE = 1.25 * 0.85; // Per km rate in CAD
-const PER_MINUTE_RATE = 0.30 * 0.85; // Per minute rate in CAD
-const MINIMUM_FARE = 5.00 * 0.85; // Minimum fare in CAD
-const PLATFORM_FEE = 5.00; // Fixed platform fee in CAD
+// Uber Quebec base rates (UberX)
+const UBER_BASE_FARE = 3.50; // Uber base fare in CAD
+const UBER_PER_KM_RATE = 1.45; // Uber per km rate in CAD
+const UBER_PER_MINUTE_RATE = 0.38; // Uber per minute rate in CAD
+const UBER_BOOKING_FEE = 2.85; // Uber booking fee in CAD
+const UBER_MINIMUM_FARE = 7.50; // Uber minimum fare in CAD
 
-// Time-based surge multipliers
+// Drivveme rates: 15% cheaper than Uber
+const DISCOUNT_FACTOR = 0.85;
+const BASE_FARE = UBER_BASE_FARE * DISCOUNT_FACTOR;
+const PER_KM_RATE = UBER_PER_KM_RATE * DISCOUNT_FACTOR;
+const PER_MINUTE_RATE = UBER_PER_MINUTE_RATE * DISCOUNT_FACTOR;
+const BOOKING_FEE = UBER_BOOKING_FEE * DISCOUNT_FACTOR;
+const MINIMUM_FARE = UBER_MINIMUM_FARE * DISCOUNT_FACTOR;
+const PLATFORM_FEE = 5.00; // Fixed platform fee to driver in CAD
+
+// Time-based surge multipliers (matching Uber surge patterns)
 const getSurgeMultiplier = (hour: number): number => {
   // Rush hours: 7-9 AM and 5-7 PM
   if ((hour >= 7 && hour < 9) || (hour >= 17 && hour < 19)) {
-    return 1.25;
+    return 1.20;
   }
   // Late night: 11 PM - 5 AM
   if (hour >= 23 || hour < 5) {
-    return 1.5;
+    return 1.35;
   }
   return 1.0;
 };
@@ -44,10 +54,11 @@ export const calculateFare = (
   const surgeMultiplier = applySurge ? getSurgeMultiplier(hour) : 1.0;
 
   const baseFare = BASE_FARE;
+  const bookingFee = BOOKING_FEE;
   const distanceFare = distanceKm * PER_KM_RATE;
   const timeFare = durationMinutes * PER_MINUTE_RATE;
   
-  let subtotal = (baseFare + distanceFare + timeFare) * surgeMultiplier;
+  let subtotal = (baseFare + bookingFee + distanceFare + timeFare) * surgeMultiplier;
   
   // Apply minimum fare
   if (subtotal < MINIMUM_FARE) {
@@ -56,10 +67,10 @@ export const calculateFare = (
 
   const total = Math.round(subtotal * 100) / 100;
   
-  // Calculate what Uber would charge (15% more)
-  const uberEquivalent = Math.round((total / 0.85) * 100) / 100;
+  // Calculate what Uber would charge (our price / 0.85 = Uber equivalent)
+  const uberEquivalent = Math.round((total / DISCOUNT_FACTOR) * 100) / 100;
   const savings = Math.round((uberEquivalent - total) * 100) / 100;
-  const savingsPercent = 15;
+  const savingsPercent = Math.round((1 - DISCOUNT_FACTOR) * 100);
 
   // Driver earnings = total fare - $5 platform fee
   const driverEarnings = Math.max(0, total - PLATFORM_FEE);
