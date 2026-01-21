@@ -700,20 +700,45 @@ const RideBooking = () => {
                     </Card>
                   </div>
 
-                  {/* Price */}
+                  {/* Price Comparison */}
                   <Card className="p-6 gradient-card border-primary/20">
-                    <div className="flex items-center justify-between mb-4">
-                      <span className="text-lg">Total</span>
-                      <span className="font-display text-3xl font-bold text-gradient">
-                        {formatCurrency(fareEstimate.total, language)}
-                      </span>
+                    {/* Uber Equivalent */}
+                    <div className="mb-4 pb-4 border-b border-border/50">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm text-muted-foreground">Uber Equivalent</span>
+                        <span className="text-lg line-through text-muted-foreground">
+                          {formatCurrency(fareEstimate.uberEquivalent, language)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground/70">
+                        <span>Base fare: {formatCurrency(fareEstimate.uberBaseFare, language)}</span>
+                        <span>Booking fee: {formatCurrency(fareEstimate.uberBookingFee, language)}</span>
+                        <span>Distance: {formatCurrency(fareEstimate.uberDistanceFare, language)}</span>
+                        <span>Time: {formatCurrency(fareEstimate.uberTimeFare, language)}</span>
+                      </div>
+                    </div>
+
+                    {/* Drivveme Price */}
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-lg font-medium">Drivveme Price</span>
+                        <span className="font-display text-3xl font-bold text-gradient">
+                          {formatCurrency(fareEstimate.total, language)}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                        <span>Base fare: {formatCurrency(fareEstimate.baseFare, language)}</span>
+                        <span>Booking fee: {formatCurrency(fareEstimate.bookingFee, language)}</span>
+                        <span>Distance: {formatCurrency(fareEstimate.distanceFare, language)}</span>
+                        <span>Time: {formatCurrency(fareEstimate.timeFare, language)}</span>
+                      </div>
                     </div>
                     
                     {/* Savings highlight */}
-                    <div className="flex items-center gap-2 text-accent">
+                    <div className="flex items-center gap-2 text-accent bg-accent/10 rounded-lg p-3">
                       <TrendingDown className="h-5 w-5" />
                       <span className="font-medium">
-                        {t('pricing.savings')}: {formatCurrency(fareEstimate.savings, language)} ({fareEstimate.savingsPercent}%)
+                        You save {formatCurrency(fareEstimate.savings, language)} ({fareEstimate.savingsPercent}% cheaper!)
                       </span>
                     </div>
 
