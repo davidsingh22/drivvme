@@ -17,6 +17,7 @@ import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
 import { useActiveRide } from '@/hooks/useActiveRide';
 import { RideStatusBanner } from '@/components/RideStatusBanner';
+import { useMapboxToken } from '@/hooks/useMapboxToken';
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -61,6 +62,8 @@ const RideBooking = () => {
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showStatusBanner, setShowStatusBanner] = useState(false);
+
+  const { token: mapboxToken } = useMapboxToken();
 
   // Check if current user is a test account - use email from profile or auth user as fallback
   const userEmail = profile?.email || user?.email;
@@ -357,24 +360,41 @@ const RideBooking = () => {
     if (!pickup || !dropoff) return;
 
     try {
-      // Use Mapbox Directions API directly via the token hook in MapComponent
-      // For estimation, calculate rough distance using Haversine formula
-      const R = 6371; // Earth's radius in km
-      const dLat = ((dropoff.lat - pickup.lat) * Math.PI) / 180;
-      const dLon = ((dropoff.lng - pickup.lng) * Math.PI) / 180;
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((pickup.lat * Math.PI) / 180) *
-          Math.cos((dropoff.lat * Math.PI) / 180) *
-          Math.sin(dLon / 2) *
-          Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const straightLineDistance = R * c;
-      
-      // Adjust for road distance (typically 1.3-1.5x straight line)
-      const estimatedDistance = straightLineDistance * 1.4;
-      // Estimate duration: average urban speed ~30km/h
-      const estimatedDuration = (estimatedDistance / 30) * 60;
+      // Use the same Directions API as the map rendering so the estimate matches the real route.
+      // Fallback to a rough estimate only if we don't have a token.
+      let estimatedDistance = 0;
+      let estimatedDuration = 0;
+
+      if (mapboxToken) {
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}?overview=false&alternatives=false&access_token=${mapboxToken}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const route = data?.routes?.[0];
+
+        // Mapbox returns distance in meters, duration in seconds
+        if (!route?.distance || !route?.duration) {
+          throw new Error('No route returned');
+        }
+
+        estimatedDistance = route.distance / 1000;
+        estimatedDuration = route.duration / 60;
+      } else {
+        // Rough fallback (straight-line with a road factor)
+        const R = 6371; // Earth's radius in km
+        const dLat = ((dropoff.lat - pickup.lat) * Math.PI) / 180;
+        const dLon = ((dropoff.lng - pickup.lng) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((pickup.lat * Math.PI) / 180) *
+            Math.cos((dropoff.lat * Math.PI) / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const straightLineDistance = R * c;
+
+        estimatedDistance = straightLineDistance * 1.4;
+        estimatedDuration = (estimatedDistance / 30) * 60;
+      }
 
       setDistanceKm(estimatedDistance);
       setDurationMinutes(estimatedDuration);
@@ -389,7 +409,7 @@ const RideBooking = () => {
         variant: 'destructive',
       });
     }
-  }, [pickup, dropoff, toast]);
+  }, [pickup, dropoff, toast, mapboxToken]);
 
   const handleGetEstimate = async () => {
     if (!pickup || !dropoff) {
