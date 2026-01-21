@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -116,6 +116,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Track if we've done the initial load to avoid resetting during background refreshes
   const [hasInitialized, setHasInitialized] = useState(false);
   const { toast } = useToast();
+  const resumeCheckInFlight = useRef<Promise<void> | null>(null);
+  const pendingClearTimer = useRef<number | null>(null);
+  const userRef = useRef<User | null>(null);
+  const rolesRef = useRef<UserRole[]>([]);
+  const hasInitializedRef = useRef(false);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
+    rolesRef.current = roles;
+  }, [roles]);
+
+  useEffect(() => {
+    hasInitializedRef.current = hasInitialized;
+  }, [hasInitialized]);
 
   const fetchProfile = async (userId: string) => {
     const { data, error } = await supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle();
@@ -295,7 +312,67 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     })();
 
-    return () => subscription.unsubscribe();
+    // When the app returns from background (lock screen, app switcher),
+    // mobile browsers can briefly report a null session while storage/network wakes up.
+    // This avoids forcing a re-login by re-checking and refreshing in the background.
+    const resumeCheck = () => {
+      if (resumeCheckInFlight.current) return;
+
+      resumeCheckInFlight.current = (async () => {
+        try {
+          const { data } = await supabase.auth.getSession();
+
+          // If session is temporarily missing, don't instantly wipe state; recheck shortly.
+          if (!data.session) {
+            if (hasInitializedRef.current && userRef.current && !pendingClearTimer.current) {
+              pendingClearTimer.current = window.setTimeout(async () => {
+                pendingClearTimer.current = null;
+                const { data: retry } = await supabase.auth.getSession();
+                if (!retry.session) {
+                  setSession(null);
+                  setUser(null);
+                  setProfile(null);
+                  setDriverProfile(null);
+                  setRoles([]);
+                }
+              }, 2000);
+            }
+            return;
+          }
+
+          // Session exists: ensure state is hydrated and refresh tokens silently.
+          if (!userRef.current || userRef.current.id !== data.session.user.id) {
+            setSession(data.session);
+            setUser(data.session.user);
+            hydrateFromCache(data.session.user.id);
+          }
+
+          // Refresh tokens in the background (best-effort)
+          await withTimeout(supabase.auth.refreshSession(), 8000).catch(() => undefined);
+
+          // If we were missing roles/profile (e.g., first wake), reload without blocking UI
+          if (data.session?.user && rolesRef.current.length === 0) {
+            await loadUserData(data.session.user.id);
+          }
+        } finally {
+          resumeCheckInFlight.current = null;
+        }
+      })();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') resumeCheck();
+    };
+
+    window.addEventListener('focus', resumeCheck);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      subscription.unsubscribe();
+      window.removeEventListener('focus', resumeCheck);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (pendingClearTimer.current) window.clearTimeout(pendingClearTimer.current);
+    };
   }, []);
 
   const signUp = async (
