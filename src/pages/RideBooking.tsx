@@ -427,65 +427,61 @@ const RideBooking = () => {
   const handleProceedToPayment = async () => {
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
-    // Show payment step immediately for faster UI response
+    // Optimistic: switch UI to payment immediately — no network wait
     setStep('payment');
     setIsSubmitting(true);
-    
-    try {
-      // Session refresh runs in background - don't block UI
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
+
+    // Fire ride creation in background so user sees "Payment" step instantly
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          toast({
+            title: 'Session expired',
+            description: 'Please sign in again to continue.',
+            variant: 'destructive',
+          });
+          setStep('estimate');
+          navigate('/login');
+          return;
+        }
+
+        const { data, error } = await supabase.functions.invoke('create-ride-and-notify-drivers', {
+          body: {
+            pickup,
+            dropoff,
+            distanceKm,
+            durationMinutes,
+            estimatedFare: fareEstimate.total,
+          },
+        });
+
+        const ride = data?.ride;
+
+        if (error) {
+          console.error('Ride insert error:', error);
+          throw error;
+        }
+
+        if (!ride?.id) {
+          throw new Error('Ride creation failed');
+        }
+
+        setCurrentRide(ride);
+        updateRide(ride);
+        setShowStatusBanner(true);
+      } catch (err: any) {
+        console.error('Error creating ride:', err);
         toast({
-          title: 'Session expired',
-          description: 'Please sign in again to continue.',
+          title: 'Error booking ride',
+          description: err.message,
           variant: 'destructive',
         });
         setStep('estimate');
-        navigate('/login');
-        return;
+      } finally {
+        setIsSubmitting(false);
       }
-
-      const userId = session.user.id;
-      console.log('Creating ride with rider_id:', userId);
-
-      // Create the ride + notify drivers server-side (more reliable than client-only notify)
-      const { data, error } = await supabase.functions.invoke('create-ride-and-notify-drivers', {
-        body: {
-          pickup,
-          dropoff,
-          distanceKm,
-          durationMinutes,
-          estimatedFare: fareEstimate.total,
-        },
-      });
-
-      const ride = data?.ride;
-
-      if (error) {
-        console.error('Ride insert error:', error);
-        throw error;
-      }
-
-      if (!ride?.id) {
-        throw new Error('Ride creation failed');
-      }
-
-      setCurrentRide(ride);
-      updateRide(ride); // Persist to localStorage
-      setShowStatusBanner(true);
-    } catch (error: any) {
-      console.error('Error creating ride:', error);
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-      // Go back to estimate step on error
-      setStep('estimate');
-    } finally {
-      setIsSubmitting(false);
-    }
+    })();
   };
 
   const handlePaymentSuccess = () => {

@@ -11,8 +11,8 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  console.log('Push notification received:', event);
-  
+  console.log('[SW] Push received:', event);
+
   let data = {
     title: 'DrivvMe',
     body: 'You have a new notification',
@@ -24,6 +24,7 @@ self.addEventListener('push', (event) => {
   try {
     if (event.data) {
       const payload = event.data.json();
+      console.log('[SW] Push payload:', payload);
       data = {
         title: payload.title || data.title,
         body: payload.body || data.body,
@@ -33,14 +34,16 @@ self.addEventListener('push', (event) => {
       };
     }
   } catch (e) {
-    console.error('Error parsing push data:', e);
+    console.error('[SW] Error parsing push data:', e);
   }
 
   const options = {
     body: data.body,
     icon: data.icon,
     badge: data.badge,
-    vibrate: [100, 50, 100],
+    vibrate: [300, 100, 300, 100, 300],
+    tag: 'ride-request',
+    requireInteraction: true, // Keep notification visible until user dismisses
     data: data.data,
     actions: [
       { action: 'open', title: 'Open App' },
