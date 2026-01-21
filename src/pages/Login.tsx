@@ -28,19 +28,26 @@ const Login = () => {
     if (user) setIsSubmitting(false);
   }, [isSubmitting, isLoading, user]);
 
-  // After auth state + roles load, route user to the right dashboard
+  // After auth completes, route user immediately based on cached roles or wait briefly
   useEffect(() => {
-    if (isLoading) return;
     if (!user) return;
-
-    // Wait until roles are loaded so we don't mis-route
-    if (roles.length === 0) return;
-
-    if (isAdmin) navigate('/admin', { replace: true });
-    else if (isDriver) navigate('/driver', { replace: true });
-    else if (isRider) navigate('/ride', { replace: true });
-    else navigate('/', { replace: true });
-  }, [user, isLoading, roles.length, isAdmin, isDriver, isRider, navigate]);
+    
+    // If roles are already cached, route immediately
+    if (roles.length > 0) {
+      if (isAdmin) navigate('/admin', { replace: true });
+      else if (isDriver) navigate('/driver', { replace: true });
+      else if (isRider) navigate('/ride', { replace: true });
+      else navigate('/ride', { replace: true }); // Default to ride for new users
+      return;
+    }
+    
+    // If no cached roles yet, wait max 1.5s then default to /ride (rider is most common)
+    const timeout = setTimeout(() => {
+      navigate('/ride', { replace: true });
+    }, 1500);
+    
+    return () => clearTimeout(timeout);
+  }, [user, roles.length, isAdmin, isDriver, isRider, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
