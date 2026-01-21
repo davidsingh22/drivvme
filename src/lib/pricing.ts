@@ -1,15 +1,16 @@
 // Drivveme Pricing Engine
-// 15% cheaper than Uber, with a flat $5 platform fee per ride
+// Always 15% cheaper than Uber, with a flat $5 platform fee per ride
 // Calibrated against real Uber Quebec rates (Jan 2026)
 
-// Uber Quebec base rates (UberX)
-const UBER_BASE_FARE = 3.50; // Uber base fare in CAD
-const UBER_PER_KM_RATE = 1.45; // Uber per km rate in CAD
-const UBER_PER_MINUTE_RATE = 0.38; // Uber per minute rate in CAD
-const UBER_BOOKING_FEE = 2.85; // Uber booking fee in CAD
-const UBER_MINIMUM_FARE = 7.50; // Uber minimum fare in CAD
+// Uber Quebec base rates (UberX) - calibrated from actual Uber app
+// Uber charges ~$18.92 for a 7 min (~4km) trip during surge
+const UBER_BASE_FARE = 2.50; // Uber base fare in CAD
+const UBER_PER_KM_RATE = 0.95; // Uber per km rate in CAD
+const UBER_PER_MINUTE_RATE = 0.25; // Uber per minute rate in CAD
+const UBER_BOOKING_FEE = 2.50; // Uber booking fee in CAD
+const UBER_MINIMUM_FARE = 6.00; // Uber minimum fare in CAD
 
-// Drivveme rates: 15% cheaper than Uber
+// Drivveme rates: 15% cheaper than Uber (always)
 const DISCOUNT_FACTOR = 0.85;
 const BASE_FARE = UBER_BASE_FARE * DISCOUNT_FACTOR;
 const PER_KM_RATE = UBER_PER_KM_RATE * DISCOUNT_FACTOR;
@@ -18,16 +19,9 @@ const BOOKING_FEE = UBER_BOOKING_FEE * DISCOUNT_FACTOR;
 const MINIMUM_FARE = UBER_MINIMUM_FARE * DISCOUNT_FACTOR;
 const PLATFORM_FEE = 5.00; // Fixed platform fee to driver in CAD
 
-// Time-based surge multipliers (matching Uber surge patterns)
-const getSurgeMultiplier = (hour: number): number => {
-  // Rush hours: 7-9 AM and 5-7 PM
-  if ((hour >= 7 && hour < 9) || (hour >= 17 && hour < 19)) {
-    return 1.20;
-  }
-  // Late night: 11 PM - 5 AM
-  if (hour >= 23 || hour < 5) {
-    return 1.35;
-  }
+// NO surge pricing for Drivveme - we stay flat while Uber surges
+const getSurgeMultiplier = (_hour: number): number => {
+  // Drivveme doesn't apply surge - this is our competitive advantage
   return 1.0;
 };
 
