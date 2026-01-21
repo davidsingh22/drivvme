@@ -449,58 +449,31 @@ const RideBooking = () => {
       const userId = session.user.id;
       console.log('Creating ride with rider_id:', userId);
 
-      // Create the ride with 'searching' status
-      const { data: ride, error } = await supabase
-        .from('rides')
-        .insert({
-          rider_id: userId,
-          pickup_address: pickup.address,
-          pickup_lat: pickup.lat,
-          pickup_lng: pickup.lng,
-          dropoff_address: dropoff.address,
-          dropoff_lat: dropoff.lat,
-          dropoff_lng: dropoff.lng,
-          distance_km: distanceKm,
-          estimated_duration_minutes: Math.round(durationMinutes),
-          estimated_fare: fareEstimate.total,
-          status: 'searching',
-        })
-        .select()
-        .single();
+      // Create the ride + notify drivers server-side (more reliable than client-only notify)
+      const { data, error } = await supabase.functions.invoke('create-ride-and-notify-drivers', {
+        body: {
+          pickup,
+          dropoff,
+          distanceKm,
+          durationMinutes,
+          estimatedFare: fareEstimate.total,
+        },
+      });
+
+      const ride = data?.ride;
 
       if (error) {
         console.error('Ride insert error:', error);
         throw error;
       }
 
+      if (!ride?.id) {
+        throw new Error('Ride creation failed');
+      }
+
       setCurrentRide(ride);
       updateRide(ride); // Persist to localStorage
       setShowStatusBanner(true);
-
-      // Create notification for rider
-      const { error: notifErr } = await supabase.from('notifications').insert({
-        user_id: userId,
-        ride_id: ride.id,
-        type: 'ride_booked',
-        title: 'Ride requested ✅',
-        message: "We're looking for a driver now. You'll be notified when a driver accepts.",
-      });
-
-      if (notifErr) {
-        console.error('Notification insert failed:', notifErr);
-      }
-
-      // Notify all online drivers about the new ride (fire and forget)
-      supabase.functions.invoke('notify-drivers-new-ride', {
-        body: {
-          rideId: ride.id,
-          pickupAddress: pickup.address,
-          dropoffAddress: dropoff.address,
-          estimatedFare: fareEstimate.total,
-        },
-      }).then(({ error: notifyErr }) => {
-        if (notifyErr) console.error('Driver notification failed:', notifyErr);
-      });
     } catch (error: any) {
       console.error('Error creating ride:', error);
       toast({
@@ -1029,13 +1002,33 @@ const RideBooking = () => {
 
                     {/* Contact Buttons */}
                     <div className="grid grid-cols-2 gap-3">
-                      <Button variant="outline" className="gap-2">
-                        <Phone className="h-4 w-4" />
-                        Call
+                      <Button
+                        asChild
+                        variant="outline"
+                        className="gap-2"
+                        disabled={!driverInfo.phone_number}
+                      >
+                        <a
+                          href={driverInfo.phone_number ? `tel:${driverInfo.phone_number}` : undefined}
+                          aria-disabled={!driverInfo.phone_number}
+                        >
+                          <Phone className="h-4 w-4" />
+                          Call
+                        </a>
                       </Button>
-                      <Button variant="outline" className="gap-2">
-                        <MessageSquare className="h-4 w-4" />
-                        Message
+                      <Button
+                        asChild
+                        variant="outline"
+                        className="gap-2"
+                        disabled={!driverInfo.phone_number}
+                      >
+                        <a
+                          href={driverInfo.phone_number ? `sms:${driverInfo.phone_number}` : undefined}
+                          aria-disabled={!driverInfo.phone_number}
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          Message
+                        </a>
                       </Button>
                     </div>
                   </Card>
