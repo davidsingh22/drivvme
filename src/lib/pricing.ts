@@ -31,12 +31,17 @@ export interface FareEstimate {
   baseFare: number;
   distanceFare: number;
   timeFare: number;
+  bookingFee: number;
   surgeMultiplier: number;
   subtotal: number;
   total: number;
   platformFee: number;
   driverEarnings: number;
   uberEquivalent: number;
+  uberBaseFare: number;
+  uberBookingFee: number;
+  uberDistanceFare: number;
+  uberTimeFare: number;
   savings: number;
   savingsPercent: number;
 }
@@ -74,6 +79,7 @@ export const calculateFare = (
 
   // Breakdowns (un-rounded for computation, rounded for display)
   const baseFare = BASE_FARE;
+  const bookingFee = BOOKING_FEE;
   const distanceFare = distanceKm * PER_KM_RATE;
   const timeFare = durationMinutes * PER_MINUTE_RATE;
 
@@ -85,6 +91,7 @@ export const calculateFare = (
 
   return {
     baseFare: Math.round(baseFare * 100) / 100,
+    bookingFee: Math.round(bookingFee * 100) / 100,
     distanceFare: Math.round(distanceFare * 100) / 100,
     timeFare: Math.round(timeFare * 100) / 100,
     surgeMultiplier,
@@ -93,6 +100,10 @@ export const calculateFare = (
     platformFee: PLATFORM_FEE,
     driverEarnings: Math.round(driverEarnings * 100) / 100,
     uberEquivalent,
+    uberBaseFare: Math.round(uberBaseFare * 100) / 100,
+    uberBookingFee: Math.round(uberBookingFee * 100) / 100,
+    uberDistanceFare: Math.round(uberDistanceFare * 100) / 100,
+    uberTimeFare: Math.round(uberTimeFare * 100) / 100,
     savings,
     savingsPercent,
   };
