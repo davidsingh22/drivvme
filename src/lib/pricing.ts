@@ -12,12 +12,14 @@ const UBER_PER_MINUTE_RATE = 0.185; // Uber per minute rate in CAD
 const UBER_BOOKING_FEE = 2.50; // Uber booking fee in CAD
 const UBER_MINIMUM_FARE = 6.00; // Uber minimum fare in CAD
 
+// Uber app totals typically include additional fees/taxes that aren't captured
+// by a simple base+booking+distance+time model. We apply a single multiplier
+// to better match real screenshots in our market.
+// Example: 9.8km / 15min → model $14.78, Uber shows $17.66 → factor ~1.195.
+const UBER_CALIBRATION_MULTIPLIER = 1.195;
+
 // Drivveme rates: 15% cheaper than Uber (always)
 const DISCOUNT_FACTOR = 0.85;
-const BASE_FARE = UBER_BASE_FARE * DISCOUNT_FACTOR;
-const PER_KM_RATE = UBER_PER_KM_RATE * DISCOUNT_FACTOR;
-const PER_MINUTE_RATE = UBER_PER_MINUTE_RATE * DISCOUNT_FACTOR;
-const BOOKING_FEE = UBER_BOOKING_FEE * DISCOUNT_FACTOR;
 const MINIMUM_FARE = UBER_MINIMUM_FARE * DISCOUNT_FACTOR;
 const PLATFORM_FEE = 5.00; // Fixed platform fee to driver in CAD
 
@@ -57,10 +59,10 @@ export const calculateFare = (
   // IMPORTANT: To keep the "15% cheaper" promise mathematically consistent,
   // we first compute an Uber-equivalent estimate from our Uber calibration,
   // then apply the discount and only round at the very end.
-  const uberBaseFare = UBER_BASE_FARE;
-  const uberBookingFee = UBER_BOOKING_FEE;
-  const uberDistanceFare = distanceKm * UBER_PER_KM_RATE;
-  const uberTimeFare = durationMinutes * UBER_PER_MINUTE_RATE;
+  const uberBaseFare = UBER_BASE_FARE * UBER_CALIBRATION_MULTIPLIER;
+  const uberBookingFee = UBER_BOOKING_FEE * UBER_CALIBRATION_MULTIPLIER;
+  const uberDistanceFare = distanceKm * UBER_PER_KM_RATE * UBER_CALIBRATION_MULTIPLIER;
+  const uberTimeFare = durationMinutes * UBER_PER_MINUTE_RATE * UBER_CALIBRATION_MULTIPLIER;
 
   let uberSubtotal = (uberBaseFare + uberBookingFee + uberDistanceFare + uberTimeFare) * surgeMultiplier;
   if (uberSubtotal < UBER_MINIMUM_FARE) {
@@ -77,11 +79,12 @@ export const calculateFare = (
 
   const total = Math.round(drivvemeSubtotal * 100) / 100;
 
-  // Breakdowns (un-rounded for computation, rounded for display)
-  const baseFare = BASE_FARE;
-  const bookingFee = BOOKING_FEE;
-  const distanceFare = distanceKm * PER_KM_RATE;
-  const timeFare = durationMinutes * PER_MINUTE_RATE;
+  // Breakdowns: derive directly from Uber breakdown to guarantee exactly -15%
+  // for every component (and therefore the total).
+  const baseFare = uberBaseFare * DISCOUNT_FACTOR;
+  const bookingFee = uberBookingFee * DISCOUNT_FACTOR;
+  const distanceFare = uberDistanceFare * DISCOUNT_FACTOR;
+  const timeFare = uberTimeFare * DISCOUNT_FACTOR;
 
   const savings = Math.round((uberEquivalent - total) * 100) / 100;
   const savingsPercent = Math.round((1 - DISCOUNT_FACTOR) * 100);
