@@ -2,3 +2,6 @@ project_id = "siadshsaiuecesydqzqo"
 
 [functions.notify-drivers-new-ride]
 verify_jwt = false
+
+[functions.create-ride-and-notify-drivers]
+verify_jwt = false
