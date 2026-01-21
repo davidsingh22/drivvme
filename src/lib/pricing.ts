@@ -6,8 +6,8 @@
 // NOTE: We price off distance+time; keep these tuned so our totals stay
 // consistently below Uber for common Montreal routes.
 const UBER_BASE_FARE = 2.50; // Uber base fare in CAD
-// Tuned so that a typical 11.6km / 23min trip lands ~15% below the UberX quote
-const UBER_PER_KM_RATE = 0.70; // Uber per km rate in CAD
+// Calibrated so 11.6km / 23min = $17.55 Uber → $14.92 Drivveme (15% off)
+const UBER_PER_KM_RATE = 0.715; // Uber per km rate in CAD
 const UBER_PER_MINUTE_RATE = 0.185; // Uber per minute rate in CAD
 const UBER_BOOKING_FEE = 2.50; // Uber booking fee in CAD
 const UBER_MINIMUM_FARE = 6.00; // Uber minimum fare in CAD
