@@ -4,7 +4,7 @@ import { Database } from '@/integrations/supabase/types';
 
 type Ride = Database['public']['Tables']['rides']['Row'];
 
-const ACTIVE_RIDE_KEY = 'drivvme_active_ride';
+const getActiveRideKey = (userId: string) => `drivvme_active_ride:${userId}`;
 
 interface ActiveRideState {
   rideId: string;
@@ -19,10 +19,12 @@ export function useActiveRide(userId: string | undefined) {
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Persist ride to localStorage
+  // Persist ride to localStorage (user-specific key)
   const persistRide = useCallback((ride: Ride | null) => {
+    if (!userId) return;
+    
     if (!ride || ['completed', 'cancelled'].includes(ride.status)) {
-      localStorage.removeItem(ACTIVE_RIDE_KEY);
+      localStorage.removeItem(getActiveRideKey(userId));
       return;
     }
     
@@ -34,8 +36,8 @@ export function useActiveRide(userId: string | undefined) {
       dropoffAddress: ride.dropoff_address,
       lastUpdated: Date.now(),
     };
-    localStorage.setItem(ACTIVE_RIDE_KEY, JSON.stringify(state));
-  }, []);
+    localStorage.setItem(getActiveRideKey(userId), JSON.stringify(state));
+  }, [userId]);
 
   // Load persisted ride on mount
   useEffect(() => {
@@ -48,15 +50,15 @@ export function useActiveRide(userId: string | undefined) {
       setIsLoading(true);
       
       try {
-        // First check localStorage for cached ride
-        const cached = localStorage.getItem(ACTIVE_RIDE_KEY);
+        // First check localStorage for cached ride (user-specific)
+        const cached = localStorage.getItem(getActiveRideKey(userId));
         let cachedState: ActiveRideState | null = null;
         
         if (cached) {
           try {
             cachedState = JSON.parse(cached);
           } catch {
-            localStorage.removeItem(ACTIVE_RIDE_KEY);
+            localStorage.removeItem(getActiveRideKey(userId));
           }
         }
 
@@ -97,8 +99,10 @@ export function useActiveRide(userId: string | undefined) {
   // Clear ride (on completion/cancel)
   const clearRide = useCallback(() => {
     setActiveRide(null);
-    localStorage.removeItem(ACTIVE_RIDE_KEY);
-  }, []);
+    if (userId) {
+      localStorage.removeItem(getActiveRideKey(userId));
+    }
+  }, [userId]);
 
   return {
     activeRide,

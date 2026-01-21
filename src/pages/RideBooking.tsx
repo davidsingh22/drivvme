@@ -66,23 +66,25 @@ const RideBooking = () => {
   const userEmail = profile?.email || user?.email;
   const isTestAccount = userEmail && TEST_ACCOUNTS.includes(userEmail.toLowerCase());
 
-  // Route guard
+  // Route guard - drivers go to /driver, only pure riders stay here
   useEffect(() => {
-    if (authLoading) return;
+    // Don't redirect during initial auth load unless we have cached roles
+    if (authLoading && roles.length === 0) return;
 
     if (!user) {
       navigate('/login', { replace: true });
       return;
     }
 
-    // Wait for roles to be loaded
+    // Wait for roles to be loaded before deciding
     if (roles.length === 0) return;
 
-    // Drivers should not use the rider booking page
-    if (isDriver && !isRider) {
+    // Drivers (even those also registered as riders) should use the driver dashboard
+    // This prevents drivers from accidentally seeing the rider "Finding your driver" UI
+    if (isDriver) {
       navigate('/driver', { replace: true });
     }
-  }, [user, authLoading, roles.length, isDriver, isRider, navigate]);
+  }, [user, authLoading, roles.length, isDriver, navigate]);
 
   // Restore active ride when returning to the app (especially on iOS)
   useEffect(() => {
