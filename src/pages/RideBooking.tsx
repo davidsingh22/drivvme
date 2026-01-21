@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, Star, Phone, MessageSquare, CreditCard, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -55,8 +57,10 @@ const RideBooking = () => {
   const [pickupAddress, setPickupAddress] = useState('');
   const [dropoffAddress, setDropoffAddress] = useState('');
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
+  const [baseFareEstimate, setBaseFareEstimate] = useState<FareEstimate | null>(null);
   const [distanceKm, setDistanceKm] = useState(0);
   const [durationMinutes, setDurationMinutes] = useState(0);
+  const [uberPriceInput, setUberPriceInput] = useState('');
   const [currentRide, setCurrentRide] = useState<any>(null);
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -401,6 +405,8 @@ const RideBooking = () => {
 
       const estimate = calculateFare(estimatedDistance, estimatedDuration);
       setFareEstimate(estimate);
+      setBaseFareEstimate(estimate);
+      setUberPriceInput('');
       setStep('estimate');
     } catch (error) {
       toast({
@@ -699,6 +705,59 @@ const RideBooking = () => {
                       <p className="text-xl font-bold">{formatDuration(durationMinutes, language)}</p>
                     </Card>
                   </div>
+
+                   {/* Optional Uber price override to guarantee exactly -15% */}
+                   <Card className="p-4 bg-muted/50">
+                     <div className="space-y-2">
+                       <Label htmlFor="uberPrice" className="text-sm">Uber price for this exact route (optional)</Label>
+                       <div className="flex gap-2 items-center">
+                         <Input
+                           id="uberPrice"
+                           inputMode="decimal"
+                           placeholder="e.g. 17.66"
+                           value={uberPriceInput}
+                           onChange={(e) => {
+                             const raw = e.target.value;
+                             setUberPriceInput(raw);
+
+                             const normalized = raw.replace(/[^0-9.,]/g, '').replace(',', '.');
+                             const uber = Number.parseFloat(normalized);
+
+                             if (!baseFareEstimate || !Number.isFinite(uber) || uber <= 0) {
+                               setFareEstimate(baseFareEstimate || fareEstimate);
+                               return;
+                             }
+
+                             const round2 = (n: number) => Math.round(n * 100) / 100;
+                             const total = round2(uber * 0.85);
+                             const savings = round2(uber - total);
+
+                             setFareEstimate({
+                               ...baseFareEstimate,
+                               uberEquivalent: round2(uber),
+                               subtotal: total,
+                               total,
+                               savings,
+                               savingsPercent: 15,
+                             });
+                           }}
+                         />
+                         <Button
+                           type="button"
+                           variant="outline"
+                           onClick={() => {
+                             setUberPriceInput('');
+                             if (baseFareEstimate) setFareEstimate(baseFareEstimate);
+                           }}
+                         >
+                           Clear
+                         </Button>
+                       </div>
+                       <p className="text-xs text-muted-foreground">
+                         If you enter the Uber price from your screenshot, we’ll set your total to exactly 15% less.
+                       </p>
+                     </div>
+                   </Card>
 
                   {/* Price Comparison */}
                   <Card className="p-6 gradient-card border-primary/20">
