@@ -290,7 +290,16 @@ const DriverDashboard = () => {
     await fetchRiderInfo(ride.rider_id);
     setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id));
 
-    // Send push notification to rider
+    // Insert in-app notification for rider (triggers real-time UI update)
+    await supabase.from('notifications').insert({
+      user_id: ride.rider_id,
+      ride_id: ride.id,
+      type: 'driver_assigned',
+      title: 'Driver Found! 🚗',
+      message: 'Your driver is on the way to pick you up.',
+    });
+
+    // Also send push notification to rider
     await sendPushNotification(
       ride.rider_id,
       'Driver Found! 🚗',
@@ -395,8 +404,9 @@ const DriverDashboard = () => {
 
   const driverEarnings = currentRide ? currentRide.estimated_fare - PLATFORM_FEE : 0;
 
-  // While we have a user but haven't loaded roles yet, don't bounce them to /login.
-  if (authLoading || (user && roles.length === 0)) {
+  // Only block on truly initial load - never block if we already have driver profile from cache
+  // This prevents the loading screen from showing when drivers reopen the app
+  if (!user && authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
