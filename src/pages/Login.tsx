@@ -28,23 +28,27 @@ const Login = () => {
     if (user) setIsSubmitting(false);
   }, [isSubmitting, isLoading, user]);
 
-  // After auth completes, route user immediately based on cached roles or wait briefly
+  // After auth completes, route user based on roles
   useEffect(() => {
     if (!user) return;
     
-    // If roles are already cached, route immediately
+    // If roles are already loaded, route immediately
     if (roles.length > 0) {
       if (isAdmin) navigate('/admin', { replace: true });
       else if (isDriver) navigate('/driver', { replace: true });
       else if (isRider) navigate('/ride', { replace: true });
-      else navigate('/ride', { replace: true }); // Default to ride for new users
+      else navigate('/ride', { replace: true }); // Default for new users
       return;
     }
     
-    // If no cached roles yet, wait max 1.5s then default to /ride (rider is most common)
+    // Give roles more time to load (especially on slow mobile connections)
+    // After 5s, check one more time then route
     const timeout = setTimeout(() => {
-      navigate('/ride', { replace: true });
-    }, 1500);
+      // Final check - if still no roles, route based on what we have
+      if (isAdmin) navigate('/admin', { replace: true });
+      else if (isDriver) navigate('/driver', { replace: true });
+      else navigate('/ride', { replace: true });
+    }, 5000);
     
     return () => clearTimeout(timeout);
   }, [user, roles.length, isAdmin, isDriver, isRider, navigate]);
