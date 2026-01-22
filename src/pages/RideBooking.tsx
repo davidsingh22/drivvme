@@ -27,8 +27,6 @@ interface Location {
   lng: number;
 }
 
-// Test accounts that can bypass payment
-const TEST_ACCOUNTS = ['alsenesa@hotmail.com', 'davidsingh22@hotmail.com'];
 
 const RideBooking = () => {
   const { t, language } = useLanguage();
@@ -65,9 +63,6 @@ const RideBooking = () => {
 
   const { token: mapboxToken } = useMapboxToken();
 
-  // Check if current user is a test account - use email from profile or auth user as fallback
-  const userEmail = profile?.email || user?.email;
-  const isTestAccount = userEmail && TEST_ACCOUNTS.includes(userEmail.toLowerCase());
 
   // Route guard - drivers go to /driver, only pure riders stay here
   useEffect(() => {
@@ -872,46 +867,12 @@ const RideBooking = () => {
                     </div>
                   </Card>
 
-                  {/* Test Mode Payment Bypass */}
-                  {isTestAccount ? (
-                    <div className="space-y-4">
-                      <Card className="p-4 bg-success/10 border-success/30">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-success/20 flex items-center justify-center">
-                            <CreditCard className="h-5 w-5 text-success" />
-                          </div>
-                          <div>
-                            <p className="font-semibold text-success">Test Mode Active</p>
-                            <p className="text-sm text-muted-foreground">
-                              Payment will be simulated for testing
-                            </p>
-                          </div>
-                        </div>
-                      </Card>
-                      <div className="flex gap-3">
-                        <Button
-                          variant="outline"
-                          onClick={handlePaymentCancel}
-                          className="flex-1"
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          onClick={handlePaymentSuccess}
-                          className="flex-1 gradient-primary shadow-button"
-                        >
-                          Simulate Payment
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <PaymentForm
-                      rideId={currentRide.id}
-                      amount={fareEstimate.total}
-                      onSuccess={handlePaymentSuccess}
-                      onCancel={handlePaymentCancel}
-                    />
-                  )}
+                  <PaymentForm
+                    rideId={currentRide.id}
+                    amount={fareEstimate.total}
+                    onSuccess={handlePaymentSuccess}
+                    onCancel={handlePaymentCancel}
+                  />
                 </motion.div>
               )}
 
