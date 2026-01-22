@@ -10,6 +10,7 @@ interface TokenState {
 // Cache token in memory for instant reuse
 let cachedToken: string | null = null;
 let tokenFetchPromise: Promise<string | null> | null = null;
+let prefetchStarted = false;
 
 // Also cache in sessionStorage for page refreshes
 const CACHE_KEY = 'mapbox_token_cache';
@@ -39,6 +40,73 @@ const setSessionCache = (token: string) => {
   }
 };
 
+// Fetch token function that can be called early
+const fetchTokenInternal = async (): Promise<string | null> => {
+  // Check cache first
+  const cached = cachedToken || getSessionCache();
+  if (cached) {
+    cachedToken = cached;
+    return cached;
+  }
+
+  // If already fetching, return that promise
+  if (tokenFetchPromise) {
+    return tokenFetchPromise;
+  }
+
+  // Start new fetch
+  tokenFetchPromise = (async () => {
+    try {
+      const { data, error } = await supabase.functions.invoke('get-mapbox-token');
+
+      if (error) {
+        console.error('Mapbox token fetch error:', error.message);
+        return null;
+      }
+
+      if (data?.error) {
+        console.error('Mapbox token error:', data.error);
+        return null;
+      }
+
+      if (data?.token) {
+        cachedToken = data.token;
+        setSessionCache(data.token);
+        return data.token;
+      } else {
+        console.error('No mapbox token returned');
+        return null;
+      }
+    } catch (err: any) {
+      console.error('Mapbox token fetch failed:', err.message);
+      return null;
+    } finally {
+      tokenFetchPromise = null;
+    }
+  })();
+
+  return tokenFetchPromise;
+};
+
+// Prefetch token on module load - runs immediately when JS loads
+export const prefetchMapboxToken = () => {
+  if (prefetchStarted) return;
+  prefetchStarted = true;
+  
+  // Check session cache first for instant availability
+  const sessionToken = getSessionCache();
+  if (sessionToken) {
+    cachedToken = sessionToken;
+    return;
+  }
+  
+  // Start fetching in background
+  fetchTokenInternal();
+};
+
+// Auto-prefetch on module import
+prefetchMapboxToken();
+
 export const useMapboxToken = (): TokenState => {
   const [state, setState] = useState<TokenState>(() => {
     // Check memory cache first, then session cache
@@ -54,52 +122,25 @@ export const useMapboxToken = (): TokenState => {
     // Already have token from cache
     if (state.token) return;
 
+    let mounted = true;
+
     const fetchToken = async () => {
-      // If there's already a fetch in progress, wait for it
-      if (tokenFetchPromise) {
-        const token = await tokenFetchPromise;
+      const token = await fetchTokenInternal();
+      
+      if (mounted) {
         if (token) {
           setState({ token, loading: false, error: null });
+        } else {
+          setState({ token: null, loading: false, error: 'Failed to load map token' });
         }
-        return;
       }
-
-      // Start new fetch
-      tokenFetchPromise = (async () => {
-        try {
-          const { data, error } = await supabase.functions.invoke('get-mapbox-token');
-
-          if (error) {
-            setState({ token: null, loading: false, error: error.message });
-            return null;
-          }
-
-          if (data?.error) {
-            setState({ token: null, loading: false, error: data.error });
-            return null;
-          }
-
-          if (data?.token) {
-            cachedToken = data.token;
-            setSessionCache(data.token);
-            setState({ token: data.token, loading: false, error: null });
-            return data.token;
-          } else {
-            setState({ token: null, loading: false, error: 'No token returned' });
-            return null;
-          }
-        } catch (err: any) {
-          setState({ token: null, loading: false, error: err.message || 'Failed to fetch token' });
-          return null;
-        } finally {
-          tokenFetchPromise = null;
-        }
-      })();
-
-      await tokenFetchPromise;
     };
 
     fetchToken();
+
+    return () => {
+      mounted = false;
+    };
   }, [state.token]);
 
   return state;
