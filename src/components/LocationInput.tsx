@@ -56,9 +56,11 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       const params = new URLSearchParams({
         access_token: token,
         country: 'ca',
-        types: 'address,poi,place,locality,neighborhood',
-        limit: '8',
+        // Include all POI types for landmarks, airports, train stations, malls, etc.
+        types: 'address,poi,poi.landmark,place,locality,neighborhood,region',
+        limit: '10',
         fuzzyMatch: 'true',
+        autocomplete: 'true',
         proximity: '-73.5673,45.5017', // Montreal center for better local results
         language: 'en,fr', // Support both languages
       });

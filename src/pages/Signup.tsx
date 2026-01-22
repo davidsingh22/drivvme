@@ -34,17 +34,6 @@ const Signup = () => {
   const [vehicleColor, setVehicleColor] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
 
-  const [signupComplete, setSignupComplete] = useState(false);
-  const [targetRoute, setTargetRoute] = useState<string | null>(null);
-  const { user, roles, isLoading: authLoading } = useAuth();
-
-  // Wait for roles to load after signup before navigating
-  useEffect(() => {
-    if (signupComplete && user && !authLoading && roles.length > 0 && targetRoute) {
-      navigate(targetRoute, { replace: true });
-    }
-  }, [signupComplete, user, authLoading, roles.length, targetRoute, navigate]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -70,9 +59,8 @@ const Signup = () => {
     try {
       await signUp(email, password, role, firstName, lastName, phone, 
         role === 'driver' ? { vehicleMake, vehicleModel, vehicleColor, licensePlate } : undefined);
-      // Set the target route and mark signup complete - navigation will happen via useEffect once roles load
-      setTargetRoute(role === 'driver' ? '/driver' : '/ride');
-      setSignupComplete(true);
+      // Navigate immediately after signup - don't wait for roles to load
+      navigate(role === 'driver' ? '/driver' : '/ride', { replace: true });
     } catch (err: any) {
       setError(err.message);
     }
