@@ -520,59 +520,73 @@ const RideBooking = () => {
   const handleProceedToPayment = async () => {
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
+    // Show payment UI immediately (no perceived delay)
+    setStep('payment');
     setIsSubmitting(true);
 
-    try {
-      // Verify session first
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+    // Create the ride in the background as fast as possible.
+    // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          toast({
+            title: 'Session expired',
+            description: 'Please sign in again to continue.',
+            variant: 'destructive',
+          });
+          setStep('estimate');
+          navigate('/login');
+          return;
+        }
+
+        const { data: ride, error: rideErr } = await supabase
+          .from('rides')
+          .insert({
+            rider_id: user.id,
+            pickup_address: pickup.address,
+            pickup_lat: pickup.lat,
+            pickup_lng: pickup.lng,
+            dropoff_address: dropoff.address,
+            dropoff_lat: dropoff.lat,
+            dropoff_lng: dropoff.lng,
+            distance_km: distanceKm,
+            estimated_duration_minutes: Math.round(durationMinutes),
+            estimated_fare: fareEstimate.total,
+            status: 'pending_payment',
+          })
+          .select('*')
+          .single();
+
+        if (rideErr || !ride?.id) {
+          console.error('Ride insert error:', rideErr);
+          throw new Error(rideErr?.message || 'Ride creation failed');
+        }
+
+        // Optional rider notification (non-blocking)
+        void supabase.from('notifications').insert({
+          user_id: user.id,
+          ride_id: ride.id,
+          type: 'ride_booked',
+          title: 'Payment required',
+          message: 'Complete payment to find a driver.',
+        });
+
+        setCurrentRide(ride);
+        updateRide(ride);
+        setShowStatusBanner(true);
+      } catch (err: any) {
+        console.error('Error creating ride:', err);
         toast({
-          title: 'Session expired',
-          description: 'Please sign in again to continue.',
+          title: 'Error booking ride',
+          description: err.message,
           variant: 'destructive',
         });
-        navigate('/login');
-        return;
+        setStep('estimate');
+      } finally {
+        setIsSubmitting(false);
       }
-
-      // Create ride FIRST, then show payment - this ensures PaymentForm has rideId immediately
-      const { data, error } = await supabase.functions.invoke('create-ride-and-notify-drivers', {
-        body: {
-          pickup,
-          dropoff,
-          distanceKm,
-          durationMinutes,
-          estimatedFare: fareEstimate.total,
-        },
-      });
-
-      if (error) {
-        console.error('Ride insert error:', error);
-        throw error;
-      }
-
-      const ride = data?.ride;
-      if (!ride?.id) {
-        throw new Error('Ride creation failed');
-      }
-
-      // Set ride data BEFORE switching to payment step
-      setCurrentRide(ride);
-      updateRide(ride);
-      setShowStatusBanner(true);
-      
-      // Now show payment step - PaymentForm will have rideId immediately
-      setStep('payment');
-    } catch (err: any) {
-      console.error('Error creating ride:', err);
-      toast({
-        title: 'Error booking ride',
-        description: err.message,
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+    })();
   };
 
   const handlePaymentSuccess = async () => {
