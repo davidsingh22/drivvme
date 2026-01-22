@@ -60,6 +60,7 @@ const RideBooking = () => {
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showStatusBanner, setShowStatusBanner] = useState(false);
+  const paymentGateCheckedRef = useRef<string | null>(null);
 
   const { token: mapboxToken } = useMapboxToken();
 
@@ -259,6 +260,54 @@ const RideBooking = () => {
       supabase.removeChannel(channel);
     };
   }, [currentRide?.id, t, toast]);
+
+  // Hard payment gate: never allow the UI to show "searching" (or beyond) if payment isn't succeeded.
+  useEffect(() => {
+    if (!currentRide?.id) return;
+    if (!fareEstimate) return;
+
+    const shouldGate =
+      step === 'searching' ||
+      step === 'matched' ||
+      step === 'arriving' ||
+      step === 'arrived' ||
+      step === 'inProgress';
+
+    if (!shouldGate) return;
+
+    // Avoid spamming the backend/toasts on repeated renders.
+    const gateKey = `${currentRide.id}:${step}`;
+    if (paymentGateCheckedRef.current === gateKey) return;
+    paymentGateCheckedRef.current = gateKey;
+
+    let cancelled = false;
+    (async () => {
+      const { data: payment, error } = await supabase
+        .from('payments')
+        .select('status')
+        .eq('ride_id', currentRide.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+
+      // If we can't read the payment row yet, treat it as not paid and force payment UI.
+      const status = payment?.status;
+      const isPaid = status === 'succeeded';
+
+      if (!isPaid) {
+        console.log('[RideBooking] Payment gate triggered', { rideId: currentRide.id, status, error });
+        setStep('payment');
+        toast({
+          title: 'Payment required',
+          description: 'Please complete payment to find a driver.',
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRide?.id, step, fareEstimate, toast]);
 
   // Fallback polling: if realtime misses updates, poll every 5 seconds
   useEffect(() => {
