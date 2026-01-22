@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { loadStripe, PaymentRequest, Stripe } from '@stripe/stripe-js';
 import {
   Elements,
@@ -9,9 +9,42 @@ import {
 } from '@stripe/react-stripe-js';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Loader2, CreditCard, Shield, Smartphone } from 'lucide-react';
+
+// Global cache for Stripe instance to avoid re-fetching
+let cachedStripePromise: Promise<Stripe | null> | null = null;
+
+// Get or create Stripe promise (cached)
+const getStripePromise = (): Promise<Stripe | null> => {
+  if (cachedStripePromise) return cachedStripePromise;
+  
+  // Check sessionStorage first
+  const cached = sessionStorage.getItem('stripe_pk');
+  if (cached) {
+    cachedStripePromise = loadStripe(cached);
+    return cachedStripePromise;
+  }
+  
+  // Fetch from edge function and cache the promise
+  cachedStripePromise = (async () => {
+    const { data, error } = await supabase.functions.invoke('get-stripe-config');
+    if (error || !data?.publishableKey) {
+      cachedStripePromise = null; // Reset on error so we can retry
+      throw new Error('Failed to get Stripe config');
+    }
+    
+    sessionStorage.setItem('stripe_pk', data.publishableKey);
+    return loadStripe(data.publishableKey);
+  })().then(stripe => stripe);
+  
+  return cachedStripePromise;
+};
+
+// Start prefetching immediately when this module loads
+getStripePromise().catch(console.error);
 
 interface PaymentFormInnerProps {
   onSuccess: () => void;
@@ -266,71 +299,32 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
-  // Fetch Stripe config and create payment intent on mount with retry logic
+  // Fetch Stripe config and create payment intent in PARALLEL
   useEffect(() => {
     let isMounted = true;
-    let retryCount = 0;
-    const maxRetries = 3;
 
     const initialize = async () => {
       try {
-        // Fetch the Stripe publishable key from edge function with retry
-        let configResponse;
-        while (retryCount < maxRetries) {
-          configResponse = await supabase.functions.invoke('get-stripe-config');
-          
-          if (!configResponse.error) break;
-          
-          retryCount++;
-          if (retryCount < maxRetries) {
-            await new Promise(r => setTimeout(r, 500 * retryCount));
-          }
-        }
+        // Get cached stripe promise (doesn't await - just gets the promise)
+        const stripePromiseToUse = getStripePromise();
+        setStripePromise(stripePromiseToUse);
         
-        if (!isMounted) return;
-        
-        if (configResponse?.error) {
-          throw new Error(configResponse.error.message || 'Failed to get Stripe config');
-        }
-        
-        const publishableKey = configResponse?.data?.publishableKey;
-        if (!publishableKey) {
-          throw new Error('Stripe publishable key not configured');
-        }
-        
-        // Initialize Stripe with the fetched key
-        setStripePromise(loadStripe(publishableKey));
-        
-        // Now create the payment intent
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!session) {
-          throw new Error('Not authenticated');
-        }
-
-        // Retry payment intent creation as well
-        let paymentResponse;
-        retryCount = 0;
-        while (retryCount < maxRetries) {
-          paymentResponse = await supabase.functions.invoke('create-payment-intent', {
-            body: { rideId, amount },
-          });
-
-          if (!paymentResponse.error) break;
-          
-          retryCount++;
-          if (retryCount < maxRetries) {
-            await new Promise(r => setTimeout(r, 500 * retryCount));
-          }
-        }
+        // Create payment intent (this is the actual async operation)
+        const paymentResult = await supabase.functions.invoke('create-payment-intent', {
+          body: { rideId, amount },
+        });
 
         if (!isMounted) return;
 
-        if (paymentResponse?.error) {
-          throw new Error(paymentResponse.error.message);
+        if (paymentResult.error) {
+          throw new Error(paymentResult.error.message || 'Failed to create payment');
         }
 
-        setClientSecret(paymentResponse.data.clientSecret);
+        if (!paymentResult.data?.clientSecret) {
+          throw new Error('No client secret returned');
+        }
+
+        setClientSecret(paymentResult.data.clientSecret);
       } catch (err: any) {
         if (!isMounted) return;
         console.error('Error initializing payment:', err);
@@ -348,7 +342,7 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     };
 
     initialize();
-    
+
     return () => {
       isMounted = false;
     };
@@ -367,8 +361,24 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
 
   if (isLoading || !clientSecret || !stripePromise) {
     return (
-      <Card className="p-6 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Shield className="h-4 w-4" />
+          <span>Secure payment powered by Stripe</span>
+        </div>
+        {/* Skeleton loader that matches the payment form layout */}
+        <div className="space-y-4">
+          <Skeleton className="h-12 w-full rounded-lg" />
+          <Skeleton className="h-12 w-full rounded-lg" />
+          <div className="flex gap-3 pt-4">
+            <Skeleton className="h-12 flex-1 rounded-lg" />
+            <Skeleton className="h-12 flex-1 rounded-lg" />
+          </div>
+        </div>
+        <p className="text-center text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin inline mr-2" />
+          Loading payment form...
+        </p>
       </Card>
     );
   }
