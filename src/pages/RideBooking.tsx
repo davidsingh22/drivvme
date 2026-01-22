@@ -844,7 +844,7 @@ const RideBooking = () => {
               )}
 
               {/* Payment Step */}
-              {step === 'payment' && currentRide && fareEstimate && (
+              {step === 'payment' && fareEstimate && (
                 <motion.div
                   key="payment"
                   initial={{ opacity: 0, y: 20 }}
@@ -867,12 +867,25 @@ const RideBooking = () => {
                     </div>
                   </Card>
 
-                  <PaymentForm
-                    rideId={currentRide.id}
-                    amount={fareEstimate.total}
-                    onSuccess={handlePaymentSuccess}
-                    onCancel={handlePaymentCancel}
-                  />
+                  {currentRide?.id ? (
+                    <PaymentForm
+                      rideId={currentRide.id}
+                      amount={fareEstimate.total}
+                      onSuccess={handlePaymentSuccess}
+                      onCancel={handlePaymentCancel}
+                    />
+                  ) : (
+                    <Card className="p-6 flex flex-col items-center justify-center space-y-4">
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent"
+                      />
+                      <p className="text-muted-foreground text-center">
+                        Preparing your payment...
+                      </p>
+                    </Card>
+                  )}
                 </motion.div>
               )}
 
