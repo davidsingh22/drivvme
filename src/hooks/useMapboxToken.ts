@@ -21,7 +21,8 @@ const getSessionCache = (): string | null => {
     const cached = sessionStorage.getItem(CACHE_KEY);
     if (cached) {
       const { token, timestamp } = JSON.parse(cached);
-      if (Date.now() - timestamp < CACHE_DURATION) {
+      // Only use valid tokens (not error states) and within cache duration
+      if (token && typeof token === 'string' && token.startsWith('pk.') && Date.now() - timestamp < CACHE_DURATION) {
         return token;
       }
       sessionStorage.removeItem(CACHE_KEY);
@@ -30,6 +31,17 @@ const getSessionCache = (): string | null => {
     // Ignore storage errors
   }
   return null;
+};
+
+export const clearMapboxTokenCache = () => {
+  cachedToken = null;
+  tokenFetchPromise = null;
+  prefetchStarted = false;
+  try {
+    sessionStorage.removeItem(CACHE_KEY);
+  } catch {
+    // Ignore storage errors
+  }
 };
 
 const setSessionCache = (token: string) => {
@@ -54,36 +66,51 @@ const fetchTokenInternal = async (): Promise<string | null> => {
     return tokenFetchPromise;
   }
 
-  // Start new fetch
+  // Start new fetch with retry logic
   tokenFetchPromise = (async () => {
-    try {
-      const { data, error } = await supabase.functions.invoke('get-mapbox-token');
+    const maxRetries = 2;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const { data, error } = await supabase.functions.invoke('get-mapbox-token');
 
-      if (error) {
-        console.error('Mapbox token fetch error:', error.message);
+        if (error) {
+          console.error(`Mapbox token fetch error (attempt ${attempt + 1}):`, error.message);
+          if (attempt < maxRetries) {
+            await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+            continue;
+          }
+          return null;
+        }
+
+        if (data?.error) {
+          console.error('Mapbox token error:', data.error);
+          return null;
+        }
+
+        if (data?.token && typeof data.token === 'string' && data.token.startsWith('pk.')) {
+          cachedToken = data.token;
+          setSessionCache(data.token);
+          return data.token;
+        } else {
+          console.error('Invalid mapbox token returned:', data);
+          return null;
+        }
+      } catch (err: any) {
+        console.error(`Mapbox token fetch failed (attempt ${attempt + 1}):`, err.message);
+        if (attempt < maxRetries) {
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+          continue;
+        }
         return null;
       }
-
-      if (data?.error) {
-        console.error('Mapbox token error:', data.error);
-        return null;
-      }
-
-      if (data?.token) {
-        cachedToken = data.token;
-        setSessionCache(data.token);
-        return data.token;
-      } else {
-        console.error('No mapbox token returned');
-        return null;
-      }
-    } catch (err: any) {
-      console.error('Mapbox token fetch failed:', err.message);
-      return null;
-    } finally {
-      tokenFetchPromise = null;
     }
+    return null;
   })();
+
+  tokenFetchPromise.finally(() => {
+    tokenFetchPromise = null;
+  });
 
   return tokenFetchPromise;
 };
