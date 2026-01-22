@@ -42,15 +42,29 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   );
 
   const searchPlaces = useCallback(async (query: string) => {
-    if (!token || query.length < 3) {
+    if (!token || query.length < 2) {
       setSuggestions([]);
       return;
     }
 
     setIsSearching(true);
     try {
+      // Enhanced geocoding with broader search types and Montreal proximity
+      // types: address, poi, place, locality, neighborhood for better landmark support
+      // proximity: Montreal coordinates for better local results
+      // fuzzyMatch: true for partial/alternate name matching
+      const params = new URLSearchParams({
+        access_token: token,
+        country: 'ca',
+        types: 'address,poi,place,locality,neighborhood',
+        limit: '8',
+        fuzzyMatch: 'true',
+        proximity: '-73.5673,45.5017', // Montreal center for better local results
+        language: 'en,fr', // Support both languages
+      });
+      
       const response = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&country=ca&types=address,poi&limit=5`
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`
       );
       const data = await response.json();
 
