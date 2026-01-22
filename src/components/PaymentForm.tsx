@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { loadStripe, PaymentRequest, Stripe } from '@stripe/stripe-js';
 import {
   Elements,
@@ -61,14 +61,38 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
   const [paymentRequest, setPaymentRequest] = useState<PaymentRequest | null>(null);
   const [canMakePayment, setCanMakePayment] = useState(false);
   const [isElementReady, setIsElementReady] = useState(false);
+  const paymentRequestRef = useRef<PaymentRequest | null>(null);
 
   // Set up Apple Pay / Google Pay
   useEffect(() => {
     if (!stripe) return;
 
+    // Stripe warns if paymentRequest is swapped after mount; keep it stable.
+    // Recreate only if amount meaningfully changes.
+    if (paymentRequestRef.current) {
+      try {
+        // Update total on existing instance when possible.
+        paymentRequestRef.current.update({
+          total: {
+            label: 'Ride Payment',
+            amount: Math.round(amount * 100),
+          },
+        });
+      } catch {
+        // If update fails for any reason, fall back to re-creating.
+        paymentRequestRef.current = null;
+      }
+    }
+
+    if (paymentRequestRef.current) {
+      setPaymentRequest(paymentRequestRef.current);
+      return;
+    }
+
     const pr = stripe.paymentRequest({
-      country: 'US',
-      currency: 'usd',
+      // App charges in CAD; using CA/cad also improves Apple/Google Pay availability.
+      country: 'CA',
+      currency: 'cad',
       total: {
         label: 'Ride Payment',
         amount: Math.round(amount * 100), // Convert to cents
@@ -80,6 +104,7 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
     // Check if the Payment Request is available
     pr.canMakePayment().then((result) => {
       if (result) {
+        paymentRequestRef.current = pr;
         setPaymentRequest(pr);
         setCanMakePayment(true);
       }
@@ -141,6 +166,20 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
     });
   }, [stripe, amount, clientSecret, onSuccess, toast]);
 
+  const paymentRequestButtonOptions = useMemo(() => {
+    if (!paymentRequest) return undefined;
+    return {
+      paymentRequest,
+      style: {
+        paymentRequestButton: {
+          type: 'default' as const,
+          theme: 'dark' as const,
+          height: '48px',
+        },
+      },
+    };
+  }, [paymentRequest]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -195,23 +234,14 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
       </div>
 
       {/* Apple Pay / Google Pay Button */}
-      {canMakePayment && paymentRequest && isElementReady && (
+      {canMakePayment && paymentRequest && isElementReady && paymentRequestButtonOptions && (
         <div className="space-y-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Smartphone className="h-4 w-4" />
             <span>Express checkout</span>
           </div>
           <PaymentRequestButtonElement
-            options={{
-              paymentRequest,
-              style: {
-                paymentRequestButton: {
-                  type: 'default',
-                  theme: 'dark',
-                  height: '48px',
-                },
-              },
-            }}
+            options={paymentRequestButtonOptions}
           />
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
@@ -292,16 +322,24 @@ interface PaymentFormProps {
   onCancel: () => void;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) => {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+  const initKeyRef = useRef<string | null>(null);
 
   // Fetch Stripe config and create payment intent in PARALLEL
   useEffect(() => {
     let isMounted = true;
+
+    // Prevent duplicate initialization loops for the same ride+amount
+    const initKey = `${rideId}:${amount}`;
+    if (initKeyRef.current === initKey) return;
+    initKeyRef.current = initKey;
 
     const initialize = async () => {
       try {
@@ -309,19 +347,29 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
         const stripePromiseToUse = getStripePromise();
         setStripePromise(stripePromiseToUse);
         
-        // Create payment intent (this is the actual async operation)
-        const paymentResult = await supabase.functions.invoke('create-payment-intent', {
-          body: { rideId, amount },
-        });
+        // Create payment intent (retry a few times to handle transient backend latency)
+        let lastErr: unknown = null;
+        let paymentResult:
+          | { data: any; error: any }
+          | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          paymentResult = await supabase.functions.invoke('create-payment-intent', {
+            body: { rideId, amount },
+          });
+
+          if (!paymentResult?.error && paymentResult?.data?.clientSecret) break;
+          lastErr = paymentResult?.error ?? new Error('No client secret returned');
+          await sleep(300 * Math.pow(2, attempt));
+        }
 
         if (!isMounted) return;
 
-        if (paymentResult.error) {
+        if (paymentResult?.error) {
           throw new Error(paymentResult.error.message || 'Failed to create payment');
         }
 
-        if (!paymentResult.data?.clientSecret) {
-          throw new Error('No client secret returned');
+        if (!paymentResult?.data?.clientSecret) {
+          throw (lastErr instanceof Error ? lastErr : new Error('Failed to create payment'));
         }
 
         setClientSecret(paymentResult.data.clientSecret);
@@ -352,9 +400,23 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     return (
       <Card className="p-6">
         <p className="text-destructive text-center">{error}</p>
-        <Button onClick={onCancel} variant="outline" className="w-full mt-4">
-          Go Back
-        </Button>
+        <div className="mt-4 flex gap-3">
+          <Button
+            onClick={() => {
+              initKeyRef.current = null;
+              setError(null);
+              setIsLoading(true);
+              setClientSecret(null);
+              setStripePromise(null);
+            }}
+            className="flex-1"
+          >
+            Retry
+          </Button>
+          <Button onClick={onCancel} variant="outline" className="flex-1">
+            Go Back
+          </Button>
+        </div>
       </Card>
     );
   }
