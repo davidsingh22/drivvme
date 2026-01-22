@@ -134,17 +134,17 @@ const RideBooking = () => {
         });
       }
       
-      // If status is "searching", check if payment was completed
-      if (activeRide.status === 'searching') {
+      // If ride is pending_payment or searching without a succeeded payment, show payment
+      if (activeRide.status === 'pending_payment' || activeRide.status === 'searching') {
         const { data: payment } = await supabase
           .from('payments')
           .select('status')
           .eq('ride_id', activeRide.id)
-          .single();
-        
-        // If payment is still pending, show payment step instead of searching
-        if (!payment || payment.status === 'pending') {
-          console.log('Payment pending, showing payment step');
+          .maybeSingle();
+
+        // If payment isn't succeeded yet, stay on payment step
+        if (!payment || payment.status !== 'succeeded') {
+          console.log('Payment not succeeded, showing payment step');
           setStep('payment');
           toast({
             title: 'Complete your payment',
@@ -153,9 +153,10 @@ const RideBooking = () => {
           return;
         }
       }
-      
+
       // Restore step based on status (payment was completed)
       const statusToStep: Record<string, RideStep> = {
+        pending_payment: 'payment',
         searching: 'searching',
         driver_assigned: 'matched',
         driver_en_route: 'arriving',
@@ -163,7 +164,7 @@ const RideBooking = () => {
         in_progress: 'inProgress',
         completed: 'completed',
       };
-      const newStep = statusToStep[activeRide.status] || 'searching';
+      const newStep = statusToStep[activeRide.status] || 'payment';
       setStep(newStep);
       
       // Fetch driver info if assigned
@@ -576,7 +577,20 @@ const RideBooking = () => {
     })();
   };
 
-  const handlePaymentSuccess = () => {
+  const handlePaymentSuccess = async () => {
+    // Payment succeeded – transition ride status to searching so drivers can see it
+    if (currentRide?.id) {
+      try {
+        await supabase
+          .from('rides')
+          .update({ status: 'searching' })
+          .eq('id', currentRide.id)
+          .eq('status', 'pending_payment');
+      } catch (e) {
+        console.error('Failed to update ride status to searching', e);
+        // Webhook will handle this as fallback
+      }
+    }
     setStep('searching');
     toast({
       title: t('booking.searching'),

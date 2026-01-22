@@ -60,7 +60,7 @@ serve(async (req) => {
       });
     }
 
-    // Create ride using RLS (user client) so we don't bypass policies
+    // Create ride in "pending_payment" status — drivers can't see it yet
     const { data: ride, error: rideErr } = await userClient
       .from("rides")
       .insert({
@@ -74,7 +74,7 @@ serve(async (req) => {
         distance_km: payload.distanceKm,
         estimated_duration_minutes: Math.round(payload.durationMinutes),
         estimated_fare: payload.estimatedFare,
-        status: "searching",
+        status: "pending_payment", // <-- new pre-payment status
       })
       .select()
       .single();
@@ -91,8 +91,8 @@ serve(async (req) => {
       user_id: userId,
       ride_id: ride.id,
       type: "ride_booked",
-      title: "Ride requested ✅",
-      message: "We're looking for a driver now. You'll be notified when a driver accepts.",
+      title: "Payment required 💳",
+      message: "Complete payment to find a driver.",
     });
 
     // Notify drivers (service role)

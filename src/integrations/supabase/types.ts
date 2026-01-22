@@ -453,6 +453,7 @@ export type Database = {
       language_preference: "en" | "fr"
       payment_status: "pending" | "succeeded" | "failed" | "refunded"
       ride_status:
+        | "pending_payment"
         | "searching"
         | "driver_assigned"
         | "driver_en_route"
@@ -592,6 +593,7 @@ export const Constants = {
       language_preference: ["en", "fr"],
       payment_status: ["pending", "succeeded", "failed", "refunded"],
       ride_status: [
+        "pending_payment",
         "searching",
         "driver_assigned",
         "driver_en_route",

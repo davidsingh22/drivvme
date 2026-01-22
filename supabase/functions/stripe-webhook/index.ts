@@ -39,12 +39,33 @@ serve(async (req) => {
     switch (event.type) {
       case "payment_intent.succeeded": {
         const paymentIntent = event.data.object as Stripe.PaymentIntent;
-        
-        // Update payment status
-        await supabase
+
+        // 1. Mark payment as succeeded
+        const { data: updatedPayments, error: paymentErr } = await supabase
           .from("payments")
           .update({ status: "succeeded" })
-          .eq("stripe_payment_intent_id", paymentIntent.id);
+          .eq("stripe_payment_intent_id", paymentIntent.id)
+          .select("ride_id");
+
+        if (paymentErr) {
+          console.error("Failed to update payment status:", paymentErr);
+        }
+
+        // 2. Transition ride from pending_payment → searching so drivers can see it
+        const rideId = updatedPayments?.[0]?.ride_id;
+        if (rideId) {
+          const { error: rideErr } = await supabase
+            .from("rides")
+            .update({ status: "searching" })
+            .eq("id", rideId)
+            .eq("status", "pending_payment");
+
+          if (rideErr) {
+            console.error("Failed to update ride status to searching:", rideErr);
+          } else {
+            console.log(`Ride ${rideId} is now visible to drivers`);
+          }
+        }
 
         console.log(`Payment succeeded for intent: ${paymentIntent.id}`);
         break;
