@@ -75,7 +75,7 @@ interface Ride {
   pickup_lng: number;
   dropoff_lat: number;
   dropoff_lng: number;
-  status: 'searching' | 'driver_assigned' | 'driver_en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'pending_payment' | 'searching' | 'driver_assigned' | 'driver_en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
   estimated_fare: number;
   actual_fare: number | null;
   distance_km: number | null;
