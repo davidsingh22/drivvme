@@ -95,68 +95,9 @@ serve(async (req) => {
       message: "Complete payment to find a driver.",
     });
 
-    // Notify drivers (service role)
-    const service = createClient(supabaseUrl, supabaseServiceKey);
-    const { data: onlineDrivers } = await service
-      .from("driver_profiles")
-      .select("user_id")
-      .eq("is_online", true);
-
-    const driverUserIds = (onlineDrivers || []).map((d) => d.user_id);
-
-    if (driverUserIds.length > 0) {
-      const { data: subscriptions } = await service
-        .from("push_subscriptions")
-        .select("id, user_id, endpoint, p256dh, auth")
-        .in("user_id", driverUserIds);
-
-      if (subscriptions && subscriptions.length > 0) {
-        const vapid: VapidKeys = {
-          subject: "mailto:support@drivvme.app",
-          publicKey: vapidPublicKey,
-          privateKey: vapidPrivateKey,
-        };
-
-        const fareDisplay = payload.estimatedFare ? `$${Number(payload.estimatedFare).toFixed(2)}` : "";
-        const pushBody = JSON.stringify({
-          title: "🚗 New Ride Request!",
-          body: `${payload.pickup.address} → ${payload.dropoff.address}${fareDisplay ? ` • ${fareDisplay}` : ""}`,
-          icon: "/favicon.ico",
-          badge: "/favicon.ico",
-          data: { url: "/driver", rideId: ride.id },
-        });
-
-        for (const sub of subscriptions) {
-          try {
-            const subscription: PushSubscription = {
-              endpoint: sub.endpoint,
-              expirationTime: null,
-              keys: { p256dh: sub.p256dh, auth: sub.auth },
-            };
-
-            const message: PushMessage = {
-              data: pushBody,
-              options: { ttl: 300, urgency: "high" },
-            };
-
-            const pushPayload = await buildPushPayload(message, subscription, vapid);
-            const resp = await fetch(subscription.endpoint, {
-              ...pushPayload,
-              body: pushPayload.body as BodyInit,
-            });
-
-            // Consume body to avoid leaks
-            await resp.text();
-
-            if (!resp.ok && (resp.status === 404 || resp.status === 410)) {
-              await service.from("push_subscriptions").delete().eq("id", sub.id);
-            }
-          } catch (e) {
-            console.error("Driver push failed:", e);
-          }
-        }
-      }
-    }
+    // DO NOT notify drivers here - they should only be notified after payment succeeds
+    // The stripe-webhook will update the ride to "searching" status after payment
+    // Drivers will see the ride in their dashboard when it becomes "searching"
 
     return new Response(JSON.stringify({ ride }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
