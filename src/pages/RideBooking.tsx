@@ -91,45 +91,93 @@ const RideBooking = () => {
     hasRestoredRide.current = true;
     console.log('Restoring active ride:', activeRide.id, activeRide.status);
     
-    setCurrentRide(activeRide);
-    setShowStatusBanner(true);
-    
-    // Restore locations
-    setPickup({
-      address: activeRide.pickup_address,
-      lat: activeRide.pickup_lat,
-      lng: activeRide.pickup_lng,
-    });
-    setDropoff({
-      address: activeRide.dropoff_address,
-      lat: activeRide.dropoff_lat,
-      lng: activeRide.dropoff_lng,
-    });
-    setPickupAddress(activeRide.pickup_address);
-    setDropoffAddress(activeRide.dropoff_address);
-    
-    // Restore step based on status
-    const statusToStep: Record<string, RideStep> = {
-      searching: 'searching',
-      driver_assigned: 'matched',
-      driver_en_route: 'arriving',
-      arrived: 'arrived',
-      in_progress: 'inProgress',
-      completed: 'completed',
+    // Check if payment was completed for this ride before restoring to searching step
+    const checkPaymentAndRestore = async () => {
+      setCurrentRide(activeRide);
+      setShowStatusBanner(true);
+      
+      // Restore locations
+      setPickup({
+        address: activeRide.pickup_address,
+        lat: activeRide.pickup_lat,
+        lng: activeRide.pickup_lng,
+      });
+      setDropoff({
+        address: activeRide.dropoff_address,
+        lat: activeRide.dropoff_lat,
+        lng: activeRide.dropoff_lng,
+      });
+      setPickupAddress(activeRide.pickup_address);
+      setDropoffAddress(activeRide.dropoff_address);
+      
+      // Set fare estimate from the ride data (approximate breakdown for display)
+      if (activeRide.estimated_fare) {
+        const total = activeRide.estimated_fare;
+        setFareEstimate({
+          baseFare: total * 0.2,
+          distanceFare: total * 0.4,
+          timeFare: total * 0.15,
+          bookingFee: total * 0.1,
+          surgeMultiplier: 1.0,
+          subtotal: total,
+          total: total,
+          platformFee: 5.0,
+          driverEarnings: Math.max(0, total - 5),
+          uberEquivalent: total / 0.85,
+          uberBaseFare: total * 0.2 / 0.85,
+          uberBookingFee: total * 0.1 / 0.85,
+          uberDistanceFare: total * 0.4 / 0.85,
+          uberTimeFare: total * 0.15 / 0.85,
+          savings: (total / 0.85) - total,
+          savingsPercent: 15,
+        });
+      }
+      
+      // If status is "searching", check if payment was completed
+      if (activeRide.status === 'searching') {
+        const { data: payment } = await supabase
+          .from('payments')
+          .select('status')
+          .eq('ride_id', activeRide.id)
+          .single();
+        
+        // If payment is still pending, show payment step instead of searching
+        if (!payment || payment.status === 'pending') {
+          console.log('Payment pending, showing payment step');
+          setStep('payment');
+          toast({
+            title: 'Complete your payment',
+            description: 'Please complete payment to find a driver.',
+          });
+          return;
+        }
+      }
+      
+      // Restore step based on status (payment was completed)
+      const statusToStep: Record<string, RideStep> = {
+        searching: 'searching',
+        driver_assigned: 'matched',
+        driver_en_route: 'arriving',
+        arrived: 'arrived',
+        in_progress: 'inProgress',
+        completed: 'completed',
+      };
+      const newStep = statusToStep[activeRide.status] || 'searching';
+      setStep(newStep);
+      
+      // Fetch driver info if assigned
+      if (activeRide.driver_id) {
+        fetchDriverInfo(activeRide.driver_id);
+      }
+      
+      // Show a prominent alert about the current ride
+      toast({
+        title: 'Active ride restored',
+        description: `Status: ${activeRide.status.replace('_', ' ')}`,
+      });
     };
-    const newStep = statusToStep[activeRide.status] || 'searching';
-    setStep(newStep);
     
-    // Fetch driver info if assigned
-    if (activeRide.driver_id) {
-      fetchDriverInfo(activeRide.driver_id);
-    }
-    
-    // Show a prominent alert about the current ride
-    toast({
-      title: 'Active ride restored',
-      description: `Status: ${activeRide.status.replace('_', ' ')}`,
-    });
+    checkPaymentAndRestore();
   }, [activeRide, activeRideLoading, toast]);
 
   // Subscribe to ride updates via realtime
