@@ -1,8 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { useMapboxToken } from '@/hooks/useMapboxToken';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { useMapboxToken, clearMapboxTokenCache } from '@/hooks/useMapboxToken';
+import { AlertCircle, Loader2, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 type GeoJSONSourceLike = mapboxgl.GeoJSONSource;
 
@@ -440,15 +441,26 @@ const MapComponent = ({
   }
 
   if (error) {
+    const handleRetry = () => {
+      clearMapboxTokenCache();
+      window.location.reload();
+    };
+
     return (
       <div className="w-full h-full flex items-center justify-center bg-card p-4">
         <div className="max-w-md text-center space-y-3">
           <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
           <p className="text-foreground font-medium">Map configuration error</p>
           <p className="text-sm text-muted-foreground">{error}</p>
-          <p className="text-xs text-muted-foreground">
-            Please ensure MAPBOX_ACCESS_TOKEN is configured in Cloud → Secrets
-          </p>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={handleRetry}
+            className="mt-2"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Retry
+          </Button>
         </div>
       </div>
     );
