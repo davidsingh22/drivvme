@@ -24,11 +24,21 @@ serve(async (req) => {
       });
     }
 
+    // Build authDomain - don't double append if projectId already contains domain
+    const authDomain = projectId.includes('.firebaseapp.com') 
+      ? projectId 
+      : `${projectId}.firebaseapp.com`;
+    
+    // Build storageBucket - don't double append if projectId already contains domain
+    const storageBucket = projectId.includes('.appspot.com') || projectId.includes('.firebasestorage.app')
+      ? projectId
+      : `${projectId}.appspot.com`;
+
     const config = {
       apiKey,
-      authDomain: `${projectId}.firebaseapp.com`,
-      projectId,
-      storageBucket: `${projectId}.appspot.com`,
+      authDomain,
+      projectId: projectId.replace('.firebaseapp.com', '').replace('.appspot.com', ''),
+      storageBucket,
       messagingSenderId,
       appId,
     };
