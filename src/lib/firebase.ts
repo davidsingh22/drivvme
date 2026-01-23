@@ -6,6 +6,18 @@ let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
 let cachedConfig: { config: Record<string, string>; vapidKey: string } | null = null;
 
+function normalizeBase64Url(input: string): string {
+  // Firebase expects the Web Push (VAPID) public key in URL-safe base64.
+  // We defensively normalize the string to avoid atob() failures caused by
+  // whitespace/padding issues.
+  const trimmed = (input || '').trim();
+  const withoutWhitespace = trimmed.replace(/\s+/g, '');
+  // Convert base64url -> base64 for validation/compat (some browsers/SDK internals call atob)
+  const base64 = withoutWhitespace.replace(/-/g, '+').replace(/_/g, '/');
+  const padLen = (4 - (base64.length % 4)) % 4;
+  return base64 + '='.repeat(padLen);
+}
+
 export async function getFirebaseConfig() {
   if (cachedConfig) return cachedConfig;
   
@@ -61,10 +73,29 @@ export async function getFCMToken(registration: ServiceWorkerRegistration): Prom
     throw new Error('VAPID key not configured');
   }
   
-  const token = await getToken(messaging, {
-    vapidKey,
-    serviceWorkerRegistration: registration,
-  });
+  // 1) Try with provided VAPID key (normalized)
+  // 2) If the SDK throws (notably atob/base64 errors), retry without vapidKey.
+  //    Some setups have a default key configured and don't require passing it.
+  let token: string | null = null;
+  try {
+    const normalizedForAtob = normalizeBase64Url(vapidKey);
+    // getToken expects base64url, but normalizing for atob() can help on some platforms.
+    // Convert back to base64url (no padding) for the SDK call.
+    const normalizedForSdk = normalizedForAtob
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/g, '');
+
+    token = await getToken(messaging, {
+      vapidKey: normalizedForSdk,
+      serviceWorkerRegistration: registration,
+    });
+  } catch (err) {
+    console.warn('[Firebase] getToken failed with vapidKey; retrying without vapidKey', err);
+    token = await getToken(messaging, {
+      serviceWorkerRegistration: registration,
+    } as any);
+  }
   
   if (!token) {
     throw new Error('Failed to get FCM token');
