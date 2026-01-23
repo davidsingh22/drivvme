@@ -78,10 +78,13 @@ const DriverDashboard = () => {
     // Wait until roles are loaded before deciding access
     if (roles.length === 0) return;
 
-    if (!isDriver) {
+    // iOS Safari can temporarily provide stale/partial role state on resume.
+    // If we already have a driverProfile in memory/cache, do NOT bounce the driver
+    // back to landing — keep them on /driver and allow the auth layer to recover.
+    if (!isDriver && !driverProfile) {
       navigate('/', { replace: true });
     }
-  }, [user, isDriver, roles.length, authLoading, navigate]);
+  }, [user, isDriver, roles.length, authLoading, navigate, driverProfile]);
 
   // Initialize driver status
   useEffect(() => {
