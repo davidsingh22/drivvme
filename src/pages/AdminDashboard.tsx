@@ -947,10 +947,17 @@ const AdminDashboard = () => {
                           .filter(u => u.roles.includes('driver'))
                           .map(driver => {
                             const subCount = driverSubscriptions.find(s => s.user_id === driver.user_id)?.count || 0;
+                             const displayName = `${driver.first_name ?? ''} ${driver.last_name ?? ''}`.trim();
+                             const label = displayName || driver.email || driver.user_id;
                             return (
                               <SelectItem key={driver.user_id} value={driver.user_id}>
                                 <div className="flex items-center gap-2">
-                                  <span>{driver.first_name} {driver.last_name}</span>
+                                   <span className="truncate max-w-[220px]">{label}</span>
+                                   {driver.email && displayName && driver.email !== label && (
+                                     <span className="text-xs text-muted-foreground truncate max-w-[220px]">
+                                       ({driver.email})
+                                     </span>
+                                   )}
                                   <Badge variant={subCount > 0 ? "default" : "secondary"} className="ml-2">
                                     {subCount} sub{subCount !== 1 ? 's' : ''}
                                   </Badge>
