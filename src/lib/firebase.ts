@@ -1,10 +1,11 @@
-import { initializeApp, FirebaseApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, deleteApp, FirebaseApp } from 'firebase/app';
 import { getMessaging, getToken, onMessage, Messaging } from 'firebase/messaging';
 import { supabase } from '@/integrations/supabase/client';
 
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
 let cachedConfig: { config: Record<string, string>; vapidKey: string } | null = null;
+let lastConfigHash: string | null = null;
 
 function normalizeBase64Url(input: string): string {
   // Firebase expects the Web Push (VAPID) public key in URL-safe base64.
@@ -16,6 +17,10 @@ function normalizeBase64Url(input: string): string {
   const base64 = withoutWhitespace.replace(/-/g, '+').replace(/_/g, '/');
   const padLen = (4 - (base64.length % 4)) % 4;
   return base64 + '='.repeat(padLen);
+}
+
+function hashConfig(config: Record<string, string>): string {
+  return JSON.stringify(config);
 }
 
 export async function getFirebaseConfig() {
@@ -36,14 +41,48 @@ export async function getFirebaseConfig() {
 }
 
 export async function initializeFirebase(): Promise<{ app: FirebaseApp; messaging: Messaging }> {
+  const { config } = await getFirebaseConfig();
+  const configHash = hashConfig(config);
+  
+  // If config changed, we need to reinitialize
+  if (app && lastConfigHash && lastConfigHash !== configHash) {
+    console.log('[Firebase] Config changed, reinitializing...');
+    try {
+      await deleteApp(app);
+    } catch (e) {
+      console.warn('[Firebase] Failed to delete old app:', e);
+    }
+    app = null;
+    messaging = null;
+  }
+  
   if (app && messaging) {
     return { app, messaging };
   }
   
-  const { config } = await getFirebaseConfig();
+  // Check if a default app already exists (e.g., from HMR or previous init)
+  const existingApps = getApps();
+  if (existingApps.length > 0) {
+    // Use existing app if config matches, otherwise delete and recreate
+    const existingApp = getApp();
+    try {
+      app = existingApp;
+      messaging = getMessaging(app);
+      lastConfigHash = configHash;
+      return { app, messaging };
+    } catch (e) {
+      console.warn('[Firebase] Existing app incompatible, recreating...', e);
+      try {
+        await deleteApp(existingApp);
+      } catch (delErr) {
+        console.warn('[Firebase] Could not delete existing app:', delErr);
+      }
+    }
+  }
   
   app = initializeApp(config);
   messaging = getMessaging(app);
+  lastConfigHash = configHash;
   
   return { app, messaging };
 }
