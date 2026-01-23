@@ -5,3 +5,12 @@ verify_jwt = false
 
 [functions.create-ride-and-notify-drivers]
 verify_jwt = false
+
+[functions.get-firebase-config]
+verify_jwt = false
+
+[functions.send-fcm-notification]
+verify_jwt = false
+
+[functions.send-push-notification]
+verify_jwt = false
