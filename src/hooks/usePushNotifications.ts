@@ -26,6 +26,26 @@ export function usePushNotifications() {
     }
   }, []);
 
+  const checkExistingSubscription = useCallback(async () => {
+    if (!user) return;
+    try {
+      // Check if user has any FCM subscriptions in database
+      const { data, error } = await supabase
+        .from('push_subscriptions')
+        .select('id')
+        .eq('user_id', user.id)
+        .limit(1);
+
+      if (error) {
+        console.error('Error checking subscription in database:', error);
+      }
+
+      setIsSubscribed(!!data && data.length > 0);
+    } catch (error) {
+      console.error('Error checking subscription:', error);
+    }
+  }, [user]);
+
   // Auto-register for push on first load (driver role)
   const autoRegisterForPush = useCallback(async () => {
     if (!user || !isSupported) return;
@@ -81,26 +101,7 @@ export function usePushNotifications() {
         });
       });
     }).catch(console.error);
-  }, [isSupported, user, autoRegisterForPush]);
-
-  const checkExistingSubscription = async () => {
-    try {
-      // Check if user has any FCM subscriptions in database
-      const { data, error } = await supabase
-        .from('push_subscriptions')
-        .select('id')
-        .eq('user_id', user?.id)
-        .limit(1);
-
-      if (error) {
-        console.error('Error checking subscription in database:', error);
-      }
-
-      setIsSubscribed(!!data && data.length > 0);
-    } catch (error) {
-      console.error('Error checking subscription:', error);
-    }
-  };
+  }, [isSupported, user, checkExistingSubscription, autoRegisterForPush]);
 
   const refreshPermission = useCallback(() => {
     if (!isSupported) return;
