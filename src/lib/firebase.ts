@@ -151,6 +151,14 @@ export function setupForegroundMessageHandler(callback: (payload: any) => void) 
   
   return onMessage(messaging, (payload) => {
     console.log('[Firebase] Foreground message received:', payload);
+    
+    // Show a system notification while the app is open
+    if (Notification.permission === 'granted') {
+      const title = payload?.notification?.title || 'DrivvMe';
+      const body = payload?.notification?.body || 'New notification';
+      new Notification(title, { body });
+    }
+    
     callback(payload);
   });
 }
