@@ -27,8 +27,11 @@ import {
   User,
   MapPin,
   Navigation,
-  Eye
+  Eye,
+  Bell,
+  Send
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
 
 interface Payment {
@@ -144,6 +147,13 @@ const AdminDashboard = () => {
   const [refundDialog, setRefundDialog] = useState<{ open: boolean; payment: Payment | null }>({ open: false, payment: null });
   const [refundReason, setRefundReason] = useState('');
   const [isProcessingRefund, setIsProcessingRefund] = useState(false);
+  
+  // Notification testing state
+  const [selectedDriverId, setSelectedDriverId] = useState<string>('');
+  const [notificationTitle, setNotificationTitle] = useState('🧪 Test Notification');
+  const [notificationBody, setNotificationBody] = useState('This is a test push notification from the admin dashboard.');
+  const [isSendingNotification, setIsSendingNotification] = useState(false);
+  const [driverSubscriptions, setDriverSubscriptions] = useState<Array<{ user_id: string; count: number }>>([]);
 
   const isAdmin = roles.includes('admin' as any);
 
@@ -163,8 +173,86 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (user && isAdmin) {
       fetchData();
+      fetchDriverSubscriptions();
     }
   }, [user, isAdmin]);
+
+  const fetchDriverSubscriptions = async () => {
+    try {
+      // Get all push subscriptions grouped by user
+      const { data, error } = await supabase
+        .from('push_subscriptions')
+        .select('user_id');
+
+      if (error) throw error;
+
+      // Count subscriptions per user
+      const counts: Record<string, number> = {};
+      data?.forEach(sub => {
+        counts[sub.user_id] = (counts[sub.user_id] || 0) + 1;
+      });
+
+      const subscriptionCounts = Object.entries(counts).map(([user_id, count]) => ({
+        user_id,
+        count
+      }));
+
+      setDriverSubscriptions(subscriptionCounts);
+    } catch (error) {
+      console.error('Error fetching driver subscriptions:', error);
+    }
+  };
+
+  const sendTestNotification = async () => {
+    if (!selectedDriverId) {
+      toast({
+        title: 'Select a Driver',
+        description: 'Please select a driver to send the test notification to.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsSendingNotification(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('send-push-notification', {
+        body: {
+          userId: selectedDriverId,
+          title: notificationTitle,
+          body: notificationBody,
+          url: '/driver',
+          data: { type: 'test', timestamp: new Date().toISOString() }
+        }
+      });
+
+      if (error) throw error;
+
+      if (data.sent > 0) {
+        toast({
+          title: 'Notification Sent!',
+          description: `Successfully sent to ${data.sent} of ${data.total} subscription(s).`,
+        });
+      } else {
+        toast({
+          title: 'No Notifications Sent',
+          description: data.message || 'The driver may not have push notifications enabled.',
+          variant: 'destructive',
+        });
+      }
+
+      // Refresh subscription counts
+      fetchDriverSubscriptions();
+    } catch (error: any) {
+      console.error('Error sending notification:', error);
+      toast({
+        title: 'Failed to Send',
+        description: error.message || 'Failed to send test notification.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSendingNotification(false);
+    }
+  };
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -571,6 +659,10 @@ const AdminDashboard = () => {
                 <DollarSign className="w-4 h-4" />
                 Payments
               </TabsTrigger>
+              <TabsTrigger value="notifications" className="gap-2">
+                <Bell className="w-4 h-4" />
+                Notifications
+              </TabsTrigger>
             </TabsList>
             
             <div className="flex gap-2">
@@ -827,6 +919,169 @@ const AdminDashboard = () => {
                 </Table>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Notifications Tab */}
+          <TabsContent value="notifications">
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Send Test Notification Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Send className="w-5 h-5" />
+                    Send Test Notification
+                  </CardTitle>
+                  <CardDescription>
+                    Send a test FCM push notification to a driver to verify the system is working.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Select Driver</label>
+                    <Select value={selectedDriverId} onValueChange={setSelectedDriverId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select a driver..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {users
+                          .filter(u => u.roles.includes('driver'))
+                          .map(driver => {
+                            const subCount = driverSubscriptions.find(s => s.user_id === driver.user_id)?.count || 0;
+                            return (
+                              <SelectItem key={driver.user_id} value={driver.user_id}>
+                                <div className="flex items-center gap-2">
+                                  <span>{driver.first_name} {driver.last_name}</span>
+                                  <Badge variant={subCount > 0 ? "default" : "secondary"} className="ml-2">
+                                    {subCount} sub{subCount !== 1 ? 's' : ''}
+                                  </Badge>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Only drivers with active subscriptions will receive notifications.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Notification Title</label>
+                    <Input
+                      value={notificationTitle}
+                      onChange={(e) => setNotificationTitle(e.target.value)}
+                      placeholder="Notification title..."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Notification Body</label>
+                    <Textarea
+                      value={notificationBody}
+                      onChange={(e) => setNotificationBody(e.target.value)}
+                      placeholder="Notification message..."
+                      rows={3}
+                    />
+                  </div>
+
+                  <Button 
+                    onClick={sendTestNotification} 
+                    disabled={isSendingNotification || !selectedDriverId}
+                    className="w-full"
+                  >
+                    {isSendingNotification ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4 mr-2" />
+                    )}
+                    Send Test Notification
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Subscription Status Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Bell className="w-5 h-5" />
+                    Push Subscription Status
+                  </CardTitle>
+                  <CardDescription>
+                    Overview of drivers with active FCM push subscriptions.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 bg-muted rounded-lg text-center">
+                        <p className="text-2xl font-bold text-primary">
+                          {driverSubscriptions.length}
+                        </p>
+                        <p className="text-sm text-muted-foreground">Users with Subscriptions</p>
+                      </div>
+                      <div className="p-4 bg-muted rounded-lg text-center">
+                        <p className="text-2xl font-bold text-primary">
+                          {driverSubscriptions.reduce((acc, s) => acc + s.count, 0)}
+                        </p>
+                        <p className="text-sm text-muted-foreground">Total Subscriptions</p>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-lg">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Driver</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead className="text-right">Subscriptions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {users
+                            .filter(u => u.roles.includes('driver'))
+                            .slice(0, 10)
+                            .map(driver => {
+                              const subCount = driverSubscriptions.find(s => s.user_id === driver.user_id)?.count || 0;
+                              return (
+                                <TableRow key={driver.user_id}>
+                                  <TableCell className="font-medium">
+                                    {driver.first_name} {driver.last_name}
+                                  </TableCell>
+                                  <TableCell className="text-muted-foreground">
+                                    {driver.email}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    <Badge variant={subCount > 0 ? "default" : "outline"}>
+                                      {subCount}
+                                    </Badge>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          {users.filter(u => u.roles.includes('driver')).length === 0 && (
+                            <TableRow>
+                              <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
+                                <Car className="w-8 h-8 mx-auto mb-2" />
+                                No drivers found
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    <Button 
+                      variant="outline" 
+                      onClick={fetchDriverSubscriptions}
+                      className="w-full"
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Refresh Subscriptions
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </main>
