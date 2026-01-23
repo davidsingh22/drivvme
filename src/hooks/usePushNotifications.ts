@@ -26,11 +26,51 @@ export function usePushNotifications() {
     }
   }, []);
 
+  // Auto-register for push on first load (driver role)
+  const autoRegisterForPush = useCallback(async () => {
+    if (!user || !isSupported) return;
+    
+    const key = `push_registered_${user.id}`;
+    
+    // Skip if already registered in this browser
+    if (localStorage.getItem(key)) return;
+    
+    // If permission already granted, register silently
+    if (Notification.permission === 'granted') {
+      try {
+        const registration = await registerServiceWorkerWithConfig();
+        const fcmToken = await getFCMToken(registration);
+        const endpoint = `https://fcm.googleapis.com/fcm/send/${fcmToken}`;
+        
+        await supabase
+          .from('push_subscriptions')
+          .upsert(
+            {
+              user_id: user.id,
+              endpoint: endpoint,
+              p256dh: fcmToken,
+              auth: 'fcm',
+            },
+            { onConflict: 'user_id,endpoint' }
+          );
+        
+        localStorage.setItem(key, '1');
+        setIsSubscribed(true);
+        console.log('[Push] Auto-registered for notifications');
+      } catch (err) {
+        console.warn('[Push] Auto-registration failed:', err);
+      }
+    }
+  }, [user, isSupported]);
+
   useEffect(() => {
     if (!isSupported || !user) return;
 
     // Check if already subscribed
     checkExistingSubscription();
+    
+    // Auto-register if permission is already granted
+    autoRegisterForPush();
     
     // Setup foreground message handler
     initializeFirebase().then(() => {
@@ -41,7 +81,7 @@ export function usePushNotifications() {
         });
       });
     }).catch(console.error);
-  }, [isSupported, user]);
+  }, [isSupported, user, autoRegisterForPush]);
 
   const checkExistingSubscription = async () => {
     try {
