@@ -14,6 +14,7 @@ const translations: Translations = {
   'nav.home': { en: 'Home', fr: 'Accueil' },
   'nav.ride': { en: 'Book a Ride', fr: 'Réserver' },
   'nav.drive': { en: 'Drive with Us', fr: 'Conduire' },
+  'nav.availableRides': { en: 'Available Rides', fr: 'Trajets disponibles' },
   'nav.history': { en: 'My Rides', fr: 'Mes trajets' },
   'nav.earnings': { en: 'Earnings', fr: 'Revenus' },
   'nav.profile': { en: 'Profile', fr: 'Profil' },

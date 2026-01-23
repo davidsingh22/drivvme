@@ -205,7 +205,7 @@ const Navbar = () => {
                         className="px-4 py-2 text-muted-foreground hover:text-foreground"
                         onClick={() => setIsOpen(false)}
                       >
-                        {t('nav.drive')}
+                        {t('nav.availableRides')}
                       </Link>
                       <Link
                         to="/earnings"
