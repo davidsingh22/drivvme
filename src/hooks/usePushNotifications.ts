@@ -2,24 +2,12 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
-
-// VAPID public key is fetched from backend (safe to expose, avoids mismatches)
-let cachedVapidPublicKey: string | null = null;
-
-function urlBase64ToUint8Array(base64String: string): ArrayBuffer {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray.buffer as ArrayBuffer;
-}
+import { 
+  registerServiceWorkerWithConfig, 
+  getFCMToken, 
+  initializeFirebase, 
+  setupForegroundMessageHandler 
+} from '@/lib/firebase';
 
 export function usePushNotifications() {
   const { user } = useAuth();
@@ -43,39 +31,35 @@ export function usePushNotifications() {
 
     // Check if already subscribed
     checkExistingSubscription();
+    
+    // Setup foreground message handler
+    initializeFirebase().then(() => {
+      setupForegroundMessageHandler((payload) => {
+        // Show toast for foreground messages
+        toast(payload.notification?.title || 'New notification', {
+          description: payload.notification?.body,
+        });
+      });
+    }).catch(console.error);
   }, [isSupported, user]);
 
   const checkExistingSubscription = async () => {
     try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
+      // Check if user has any FCM subscriptions in database
+      const { data, error } = await supabase
+        .from('push_subscriptions')
+        .select('id')
+        .eq('user_id', user?.id)
+        .limit(1);
 
-      if (subscription) {
-        // Verify it exists in our database
-        const { data, error } = await supabase
-          .from('push_subscriptions')
-          .select('id')
-          .eq('user_id', user?.id)
-          .eq('endpoint', subscription.endpoint)
-          .maybeSingle();
-
-        if (error) {
-          console.error('Error checking subscription in database:', error);
-        }
-
-        setIsSubscribed(!!data);
-      } else {
-        setIsSubscribed(false);
+      if (error) {
+        console.error('Error checking subscription in database:', error);
       }
+
+      setIsSubscribed(!!data && data.length > 0);
     } catch (error) {
       console.error('Error checking subscription:', error);
     }
-  };
-
-  const registerServiceWorker = async (): Promise<ServiceWorkerRegistration> => {
-    const registration = await navigator.serviceWorker.register('/sw.js');
-    await navigator.serviceWorker.ready;
-    return registration;
   };
 
   const refreshPermission = useCallback(() => {
@@ -109,41 +93,26 @@ export function usePushNotifications() {
         return false;
       }
 
-      // Register service worker
-      const registration = await registerServiceWorker();
+      // Register Firebase service worker
+      const registration = await registerServiceWorkerWithConfig();
 
-      // Fetch VAPID public key (avoid hardcoded mismatch)
-      if (!cachedVapidPublicKey) {
-        const { data, error } = await supabase.functions.invoke('get-vapid-public-key');
-        if (error) throw new Error(`Failed to fetch VAPID key: ${error.message}`);
-        cachedVapidPublicKey = data?.publicKey;
-      }
+      // Get FCM token
+      const fcmToken = await getFCMToken(registration);
 
-      if (!cachedVapidPublicKey) {
-        throw new Error('Missing VAPID public key');
-      }
+      console.log('FCM Token obtained:', fcmToken.substring(0, 20) + '...');
 
-      // Subscribe to push notifications
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(cachedVapidPublicKey),
-      });
-
-      const subscriptionJson = subscription.toJSON();
-
-      if (!subscriptionJson.endpoint || !subscriptionJson.keys?.p256dh || !subscriptionJson.keys?.auth) {
-        throw new Error('Invalid push subscription payload');
-      }
-
-      // Save subscription to database
+      // Save FCM token to database
+      // We store the token in p256dh field and use a unique endpoint
+      const endpoint = `https://fcm.googleapis.com/fcm/send/${fcmToken}`;
+      
       const { error: saveError } = await supabase
         .from('push_subscriptions')
         .upsert(
           {
             user_id: user.id,
-            endpoint: subscriptionJson.endpoint,
-            p256dh: subscriptionJson.keys.p256dh,
-            auth: subscriptionJson.keys.auth,
+            endpoint: endpoint,
+            p256dh: fcmToken,
+            auth: 'fcm', // Marker to identify FCM subscriptions
           },
           {
             onConflict: 'user_id,endpoint',
@@ -173,18 +142,18 @@ export function usePushNotifications() {
     setIsLoading(true);
 
     try {
-      const registration = await navigator.serviceWorker.ready;
-      const subscription = await registration.pushManager.getSubscription();
+      // Remove all subscriptions for this user from database
+      await supabase
+        .from('push_subscriptions')
+        .delete()
+        .eq('user_id', user.id);
 
-      if (subscription) {
-        await subscription.unsubscribe();
-
-        // Remove from database
-        await supabase
-          .from('push_subscriptions')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('endpoint', subscription.endpoint);
+      // Unregister the service worker
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const registration of registrations) {
+        if (registration.active?.scriptURL.includes('firebase-messaging-sw.js')) {
+          await registration.unregister();
+        }
       }
 
       setIsSubscribed(false);
