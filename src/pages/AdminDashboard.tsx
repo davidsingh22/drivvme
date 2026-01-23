@@ -203,6 +203,12 @@ const AdminDashboard = () => {
     }
   };
 
+  const [lastNotificationResult, setLastNotificationResult] = useState<{
+    success: boolean;
+    message: string;
+    timestamp: Date;
+  } | null>(null);
+
   const sendTestNotification = async () => {
     if (!selectedDriverId) {
       toast({
@@ -214,6 +220,9 @@ const AdminDashboard = () => {
     }
 
     setIsSendingNotification(true);
+    setLastNotificationResult(null);
+    const startTime = Date.now();
+
     try {
       const { data, error } = await supabase.functions.invoke('send-push-notification', {
         body: {
@@ -227,12 +236,28 @@ const AdminDashboard = () => {
 
       if (error) throw error;
 
+      const duration = Date.now() - startTime;
+      const selectedDriver = users.find(u => u.user_id === selectedDriverId);
+      const driverName = selectedDriver?.first_name || selectedDriver?.email || 'driver';
+
       if (data.sent > 0) {
+        const successMessage = `✅ Notification delivered to ${driverName} (${data.sent}/${data.total} subscriptions) in ${duration}ms`;
+        setLastNotificationResult({
+          success: true,
+          message: successMessage,
+          timestamp: new Date()
+        });
         toast({
-          title: 'Notification Sent!',
-          description: `Successfully sent to ${data.sent} of ${data.total} subscription(s).`,
+          title: '✅ Notification Sent!',
+          description: `Delivered to ${driverName} in ${duration}ms`,
         });
       } else {
+        const failMessage = `❌ No active subscriptions for ${driverName}. They may need to enable push notifications.`;
+        setLastNotificationResult({
+          success: false,
+          message: failMessage,
+          timestamp: new Date()
+        });
         toast({
           title: 'No Notifications Sent',
           description: data.message || 'The driver may not have push notifications enabled.',
@@ -244,6 +269,11 @@ const AdminDashboard = () => {
       fetchDriverSubscriptions();
     } catch (error: any) {
       console.error('Error sending notification:', error);
+      setLastNotificationResult({
+        success: false,
+        message: `❌ Failed: ${error.message || 'Unknown error'}`,
+        timestamp: new Date()
+      });
       toast({
         title: 'Failed to Send',
         description: error.message || 'Failed to send test notification.',
@@ -1003,6 +1033,22 @@ const AdminDashboard = () => {
                     )}
                     Send Test Notification
                   </Button>
+
+                  {/* Notification Result Confirmation */}
+                  {lastNotificationResult && (
+                    <div 
+                      className={`mt-4 p-4 rounded-lg border ${
+                        lastNotificationResult.success 
+                          ? 'bg-primary/10 border-primary/30 text-primary' 
+                          : 'bg-destructive/10 border-destructive/30 text-destructive'
+                      }`}
+                    >
+                      <p className="font-medium text-sm">{lastNotificationResult.message}</p>
+                      <p className="text-xs opacity-70 mt-1">
+                        {lastNotificationResult.timestamp.toLocaleTimeString()}
+                      </p>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

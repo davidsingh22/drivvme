@@ -315,18 +315,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     })();
 
     // When the app returns from background (lock screen, app switcher),
-    // mobile browsers can briefly report a null session while storage/network wakes up.
-    // This avoids forcing a re-login by re-checking and refreshing in the background.
+    // mobile browsers (especially iOS Safari) can briefly report a null session 
+    // while storage/network wakes up. This avoids forcing a re-login.
     const resumeCheck = () => {
       if (resumeCheckInFlight.current) return;
 
       resumeCheckInFlight.current = (async () => {
         try {
+          // iOS Safari aggressively clears IndexedDB/localStorage on background.
+          // Give storage a moment to wake up before checking session.
+          await new Promise((r) => setTimeout(r, 150));
+
           const { data } = await supabase.auth.getSession();
 
           // On mobile lock/unlock, browsers can briefly fail to read storage/network.
           // Do NOT force a sign-out here; only the auth system should emit SIGNED_OUT.
-          if (!data.session) return;
+          // If we already have a user in state, trust it and just try to refresh.
+          if (!data.session) {
+            // If we have a cached user, try to refresh session instead of giving up
+            if (userRef.current) {
+              console.log('[Auth] No session found on resume, but user exists in state. Attempting refresh...');
+              try {
+                const refreshResult = await withTimeout(supabase.auth.refreshSession(), 10000);
+                if (refreshResult.data.session) {
+                  setSession(refreshResult.data.session);
+                  setUser(refreshResult.data.session.user);
+                  console.log('[Auth] Session refreshed successfully on resume');
+                }
+              } catch (refreshError) {
+                console.warn('[Auth] Session refresh failed on resume, keeping existing state:', refreshError);
+                // Don't sign out - keep existing state, it might recover
+              }
+            }
+            return;
+          }
 
           // Session exists: ensure state is hydrated and refresh tokens silently.
           if (!userRef.current || userRef.current.id !== data.session.user.id) {
@@ -335,8 +357,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             hydrateFromCache(data.session.user.id);
           }
 
-          // Refresh tokens in the background (best-effort)
-          await withTimeout(supabase.auth.refreshSession(), 8000).catch(() => undefined);
+          // Refresh tokens in the background (best-effort) with longer timeout for iOS
+          await withTimeout(supabase.auth.refreshSession(), 12000).catch(() => undefined);
 
           // If we were missing roles/profile (e.g., first wake), reload without blocking UI
           if (data.session?.user && rolesRef.current.length === 0) {
