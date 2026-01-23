@@ -117,6 +117,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [hasInitialized, setHasInitialized] = useState(false);
   const { toast } = useToast();
   const resumeCheckInFlight = useRef<Promise<void> | null>(null);
+  const lastResumeAttemptAtRef = useRef<number>(0);
   const userRef = useRef<User | null>(null);
   const rolesRef = useRef<UserRole[]>([]);
   const hasInitializedRef = useRef(false);
@@ -255,6 +256,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      // iOS Safari can transiently drop session storage on lock/unlock and emit SIGNED_OUT
+      // even though a refresh can still recover. Add a short grace window on resume.
+      const recentlyResumed = Date.now() - lastResumeAttemptAtRef.current < 7000;
+
+      if (event === 'SIGNED_OUT' && userRef.current && (recentlyResumed || document.visibilityState === 'hidden')) {
+        // Keep current in-memory state to avoid redirect-to-login flicker.
+        setIsLoading(true);
+        try {
+          // Best-effort: attempt token refresh, then re-check session.
+          await withTimeout(supabase.auth.refreshSession(), 12000).catch(() => undefined);
+          const {
+            data: { session: recovered },
+          } = await withTimeout(supabase.auth.getSession(), 12000);
+
+          if (recovered?.user) {
+            setSession(recovered);
+            setUser(recovered.user);
+            hydrateFromCache(recovered.user.id);
+            await loadUserData(recovered.user.id);
+            return;
+          }
+
+          // If we truly can't recover a session, fall through to normal SIGNED_OUT handling.
+        } finally {
+          setIsLoading(false);
+          setHasInitialized(true);
+        }
+      }
+
       // Only show loading on initial load or actual sign-in/sign-out
       // Skip loading for background token refreshes when we already have user data
       // IMPORTANT: this effect has an empty dep array, so we must use refs here.
@@ -319,6 +349,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // while storage/network wakes up. This avoids forcing a re-login.
     const resumeCheck = () => {
       if (resumeCheckInFlight.current) return;
+
+      lastResumeAttemptAtRef.current = Date.now();
 
       resumeCheckInFlight.current = (async () => {
         try {
