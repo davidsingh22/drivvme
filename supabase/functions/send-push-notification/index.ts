@@ -29,8 +29,19 @@ interface FCMMessageV1 {
   };
 }
 
-// Get OAuth2 access token for FCM v1 API using service account
+// Cache for access token to avoid repeated OAuth exchanges
+let cachedAccessToken: string | null = null;
+let tokenExpiresAt = 0;
+
+// Get OAuth2 access token for FCM v1 API using service account (with caching)
 async function getAccessToken(): Promise<string> {
+  const now = Date.now();
+  
+  // Return cached token if still valid (with 5 min buffer)
+  if (cachedAccessToken && tokenExpiresAt > now + 300000) {
+    return cachedAccessToken;
+  }
+
   const serviceAccountJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
   
   if (!serviceAccountJson) {
@@ -40,14 +51,14 @@ async function getAccessToken(): Promise<string> {
   const serviceAccount = JSON.parse(serviceAccountJson);
 
   // Create JWT for OAuth2
-  const now = Math.floor(Date.now() / 1000);
+  const nowSec = Math.floor(now / 1000);
   const header = { alg: "RS256", typ: "JWT" };
   const payload = {
     iss: serviceAccount.client_email,
     scope: "https://www.googleapis.com/auth/firebase.messaging",
     aud: "https://oauth2.googleapis.com/token",
-    iat: now,
-    exp: now + 3600,
+    iat: nowSec,
+    exp: nowSec + 3600,
   };
 
   // Encode header and payload
@@ -98,7 +109,12 @@ async function getAccessToken(): Promise<string> {
   }
 
   const tokenData = await tokenResponse.json();
-  return tokenData.access_token;
+  
+  // Cache the token (expires in ~1 hour, we got it fresh)
+  cachedAccessToken = tokenData.access_token;
+  tokenExpiresAt = now + (tokenData.expires_in || 3600) * 1000;
+  
+  return cachedAccessToken!;
 }
 
 serve(async (req) => {
@@ -123,12 +139,18 @@ serve(async (req) => {
       });
     }
 
+    // Start fetching subscriptions and access token in parallel
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    
+    const [subscriptionsResult, accessToken] = await Promise.all([
+      supabase
+        .from("push_subscriptions")
+        .select("id, endpoint, p256dh, auth")
+        .eq("user_id", userId),
+      getAccessToken()
+    ]);
 
-    const { data: subscriptions, error: subError } = await supabase
-      .from("push_subscriptions")
-      .select("id, endpoint, p256dh, auth")
-      .eq("user_id", userId);
+    const { data: subscriptions, error: subError } = subscriptionsResult;
 
     if (subError) {
       console.error("Error fetching subscriptions:", subError);
@@ -146,29 +168,17 @@ serve(async (req) => {
       });
     }
 
-    // Get FCM access token
-    let accessToken: string;
-    try {
-      accessToken = await getAccessToken();
-    } catch (error) {
-      console.error("Failed to get FCM access token:", error);
-      return new Response(JSON.stringify({ error: "FCM authentication failed" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
     const results: Array<{ id: string; success: boolean; reason?: string; status?: number }> = [];
 
-    for (const sub of subscriptions) {
+    // Send to all subscriptions in parallel
+    const sendPromises = subscriptions.map(async (sub) => {
       try {
         // FCM token is stored in p256dh field
         const fcmToken = sub.p256dh;
 
         if (!fcmToken || sub.auth !== 'fcm') {
           console.log("Skipping non-FCM subscription:", sub.id);
-          results.push({ id: sub.id, success: false, reason: "Not an FCM subscription" });
-          continue;
+          return { id: sub.id, success: false, reason: "Not an FCM subscription" };
         }
 
         const message: FCMMessageV1 = {
@@ -212,7 +222,7 @@ serve(async (req) => {
         console.log("FCM sent, status:", response.status);
 
         if (response.ok) {
-          results.push({ id: sub.id, success: true, status: response.status });
+          return { id: sub.id, success: true, status: response.status };
         } else {
           const errorText = await response.text();
           console.error("FCM failed:", response.status, errorText);
@@ -220,17 +230,20 @@ serve(async (req) => {
           // Token expired/invalid: clean it up
           if (response.status === 404 || response.status === 410 || errorText.includes("UNREGISTERED")) {
             await supabase.from("push_subscriptions").delete().eq("id", sub.id);
-            results.push({ id: sub.id, success: false, reason: "expired", status: response.status });
+            return { id: sub.id, success: false, reason: "expired", status: response.status };
           } else {
-            results.push({ id: sub.id, success: false, reason: errorText, status: response.status });
+            return { id: sub.id, success: false, reason: errorText, status: response.status };
           }
         }
       } catch (e: unknown) {
         const errorMessage = e instanceof Error ? e.message : String(e);
         console.error("FCM send failed:", errorMessage);
-        results.push({ id: sub.id, success: false, reason: errorMessage });
+        return { id: sub.id, success: false, reason: errorMessage };
       }
-    }
+    });
+
+    const allResults = await Promise.all(sendPromises);
+    results.push(...allResults);
 
     const sent = results.filter((r) => r.success).length;
 
