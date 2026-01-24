@@ -169,12 +169,12 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Tier configuration
+    // Tier configuration - TEST MODE: all tiers set to 100km for testing
     const tierConfig = {
-      1: { maxDistanceKm: 2, maxEta: 5, description: "2km radius, ≤5min ETA" },
-      2: { maxDistanceKm: 5, maxEta: 5, description: "5km radius, ≤5min ETA" },
-      3: { maxDistanceKm: 8, maxEta: 7, description: "8km radius, ≤7min ETA" },
-      4: { maxDistanceKm: 15, maxEta: 15, description: "Top 3 fastest drivers" },
+      1: { maxDistanceKm: 100, maxEta: 60, description: "TEST MODE - 100km radius" },
+      2: { maxDistanceKm: 100, maxEta: 60, description: "TEST MODE - 100km radius" },
+      3: { maxDistanceKm: 100, maxEta: 60, description: "TEST MODE - 100km radius" },
+      4: { maxDistanceKm: 100, maxEta: 60, description: "TEST MODE - Top 3 drivers" },
     };
 
     const config = tierConfig[tier as keyof typeof tierConfig] || tierConfig[1];
@@ -231,11 +231,11 @@ serve(async (req) => {
         
         let distance = Infinity;
         if (dropoffLocation) {
-          // Only notify busy drivers if their dropoff is within 2km of pickup
+          // TEST MODE: Notify all busy drivers regardless of dropoff distance
           distance = calculateDistanceKm(pickupLat, pickupLng, dropoffLocation.lat, dropoffLocation.lng);
-          if (distance > 2) {
-            return null; // Skip this busy driver - dropoff too far
-          }
+          // if (distance > 2) {
+          //   return null; // Skip this busy driver - dropoff too far
+          // }
         } else if (driver.current_lat && driver.current_lng) {
           distance = calculateDistanceKm(pickupLat, pickupLng, driver.current_lat, driver.current_lng);
         } else {
