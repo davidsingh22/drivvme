@@ -27,6 +27,8 @@ interface Location {
   lng: number;
 }
 
+// Test accounts that bypass payment
+const TEST_ACCOUNTS = ['alsensa@hotmail.com'];
 
 const RideBooking = () => {
   const { t, language } = useLanguage();
@@ -263,9 +265,14 @@ const RideBooking = () => {
   }, [currentRide?.id, t, toast]);
 
   // Hard payment gate: never allow the UI to show "searching" (or beyond) if payment isn't succeeded.
+  // Test accounts bypass this gate entirely.
+  const isTestAccount = user?.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
+
   useEffect(() => {
     if (!currentRide?.id) return;
     if (!fareEstimate) return;
+    // Test accounts skip payment gate
+    if (isTestAccount) return;
 
     const shouldGate =
       step === 'searching' ||
@@ -308,7 +315,7 @@ const RideBooking = () => {
     return () => {
       cancelled = true;
     };
-  }, [currentRide?.id, step, fareEstimate, toast]);
+  }, [currentRide?.id, step, fareEstimate, toast, isTestAccount]);
 
   // Fallback polling: if realtime misses updates, poll every 5 seconds
   useEffect(() => {
@@ -520,8 +527,13 @@ const RideBooking = () => {
   const handleProceedToPayment = async () => {
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
-    // Show payment UI immediately (no perceived delay)
-    setStep('payment');
+    // Test accounts skip payment entirely
+    const skipPayment = user.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
+
+    // Show payment UI immediately (no perceived delay) — unless test account
+    if (!skipPayment) {
+      setStep('payment');
+    }
     setIsSubmitting(true);
 
     // Create the ride in the background as fast as possible.
@@ -540,6 +552,9 @@ const RideBooking = () => {
           return;
         }
 
+        // Test accounts create ride directly with 'searching' status
+        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
+
         const { data: ride, error: rideErr } = await supabase
           .from('rides')
           .insert({
@@ -553,7 +568,7 @@ const RideBooking = () => {
             distance_km: distanceKm,
             estimated_duration_minutes: Math.round(durationMinutes),
             estimated_fare: fareEstimate.total,
-            status: 'pending_payment',
+            status: rideStatus,
           })
           .select('*')
           .single();
@@ -568,13 +583,22 @@ const RideBooking = () => {
           user_id: user.id,
           ride_id: ride.id,
           type: 'ride_booked',
-          title: 'Payment required',
-          message: 'Complete payment to find a driver.',
+          title: skipPayment ? 'Test ride created' : 'Payment required',
+          message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.',
         });
 
         setCurrentRide(ride);
         updateRide(ride);
         setShowStatusBanner(true);
+
+        // Test accounts go directly to searching
+        if (skipPayment) {
+          setStep('searching');
+          toast({
+            title: 'Test mode',
+            description: 'Payment bypassed. Looking for nearby drivers...',
+          });
+        }
       } catch (err: any) {
         console.error('Error creating ride:', err);
         toast({
