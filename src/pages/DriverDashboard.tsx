@@ -111,9 +111,10 @@ const DriverDashboard = () => {
   // instead of an infinite loading screen.
   useEffect(() => {
     // Reset when things are healthy.
-    const waitingForIdentity =
-      !!session &&
-      (profileLoading || roles.length === 0 || (roles.includes('driver') && !driverProfile));
+    // IMPORTANT: don't hard-block the entire dashboard on roles/driverProfile.
+    // Those can be delayed by mobile networks / transient RLS hiccups and would otherwise
+    // create an infinite loading screen. Only block while we are actively fetching.
+    const waitingForIdentity = !!session && profileLoading;
 
     if (!waitingForIdentity) {
       setShowReconnect(false);
@@ -532,8 +533,7 @@ const DriverDashboard = () => {
   }
 
   const waitingForIdentity =
-    !!session &&
-    (profileLoading || roles.length === 0 || (roles.includes('driver') && !driverProfile));
+    !!session && profileLoading;
 
   if (waitingForIdentity) {
     if (!showReconnect) {
