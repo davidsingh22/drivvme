@@ -18,6 +18,7 @@ import { NotificationPermissionHelpDialog } from '@/components/NotificationPermi
 import { useActiveRide } from '@/hooks/useActiveRide';
 import { RideStatusBanner } from '@/components/RideStatusBanner';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
+import { useDriverNotificationEscalation } from '@/hooks/useDriverNotificationEscalation';
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -62,9 +63,34 @@ const RideBooking = () => {
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showStatusBanner, setShowStatusBanner] = useState(false);
+  const [notificationTier, setNotificationTier] = useState(1);
   const paymentGateCheckedRef = useRef<string | null>(null);
 
   const { token: mapboxToken } = useMapboxToken();
+
+  // Tiered driver notification escalation
+  const escalationOptions = currentRide && step === 'searching' && pickup && dropoff && fareEstimate ? {
+    rideId: currentRide.id,
+    pickupLat: pickup.lat,
+    pickupLng: pickup.lng,
+    pickupAddress: pickup.address,
+    dropoffAddress: dropoff.address,
+    estimatedFare: fareEstimate.total,
+    onTierChange: (tier: number) => {
+      setNotificationTier(tier);
+      if (tier > 1) {
+        toast({
+          title: `Expanding search (Tier ${tier})`,
+          description: tier === 4 ? 'Contacting fastest available drivers...' : 'Looking for more drivers nearby...',
+        });
+      }
+    },
+    onDriverFound: () => {
+      setNotificationTier(1); // Reset
+    },
+  } : null;
+
+  const { start: startEscalation, stop: stopEscalation } = useDriverNotificationEscalation(escalationOptions);
 
 
   // Route guard - drivers go to /driver, only pure riders stay here
@@ -421,42 +447,14 @@ const RideBooking = () => {
     }
   };
 
-  // Notify nearby drivers when a ride is created
-  const notifyNearbyDrivers = async (
-    rideId: string, 
-    pickupLocation: Location, 
-    dropoffLocation: Location, 
-    estimatedFare: number
-  ) => {
-    try {
-      const response = await supabase.functions.invoke('notify-drivers-new-ride', {
-        body: {
-          rideId,
-          pickupAddress: pickupLocation.address,
-          dropoffAddress: dropoffLocation.address,
-          estimatedFare,
-          pickupLat: pickupLocation.lat,
-          pickupLng: pickupLocation.lng,
-          maxDistanceKm: 15, // Notify drivers within 15km
-        },
-      });
-
-      if (response.error) {
-        console.error('Failed to notify drivers:', response.error);
-      } else {
-        console.log('Driver notification result:', response.data);
-        const { nearbyDrivers, sent, inAppNotifications } = response.data || {};
-        if (nearbyDrivers > 0) {
-          toast({
-            title: `${nearbyDrivers} driver${nearbyDrivers > 1 ? 's' : ''} notified`,
-            description: `Your ride request is visible to nearby drivers.`,
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error notifying drivers:', error);
+  // Start tiered notification escalation when entering searching state
+  useEffect(() => {
+    if (step === 'searching' && currentRide && pickup && dropoff && fareEstimate) {
+      startEscalation();
+    } else {
+      stopEscalation();
     }
-  };
+  }, [step, currentRide?.id]);
 
   const handlePickupChange = (address: string, location?: { lat: number; lng: number }) => {
     setPickupAddress(address);
@@ -628,16 +626,13 @@ const RideBooking = () => {
         updateRide(ride);
         setShowStatusBanner(true);
 
-        // Test accounts go directly to searching and notify drivers
+        // Test accounts go directly to searching (escalation hook will handle notifications)
         if (skipPayment) {
           setStep('searching');
           toast({
             title: 'Test mode',
-            description: 'Payment bypassed. Notifying nearby drivers...',
+            description: 'Payment bypassed. Starting driver search...',
           });
-          
-          // Notify nearby drivers of the new ride request
-          notifyNearbyDrivers(ride.id, pickup, dropoff, fareEstimate.total);
         }
       } catch (err: any) {
         console.error('Error creating ride:', err);
@@ -662,20 +657,16 @@ const RideBooking = () => {
           .update({ status: 'searching' })
           .eq('id', currentRide.id)
           .eq('status', 'pending_payment');
-          
-        // Notify nearby drivers of the new ride request
-        if (pickup && dropoff && fareEstimate) {
-          notifyNearbyDrivers(currentRide.id, pickup, dropoff, fareEstimate.total);
-        }
+        
+        // Escalation hook will automatically start notifying drivers when step changes to 'searching'
       } catch (e) {
         console.error('Failed to update ride status to searching', e);
-        // Webhook will handle this as fallback
       }
     }
     setStep('searching');
     toast({
       title: t('booking.searching'),
-      description: 'Payment confirmed! Notifying nearby drivers...',
+      description: 'Payment confirmed! Finding nearby drivers...',
     });
   };
 
