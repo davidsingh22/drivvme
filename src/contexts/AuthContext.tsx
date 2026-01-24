@@ -3,6 +3,18 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
+const isLikelyStandaloneIOS = () => {
+  try {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua);
+    const standaloneFlag = (navigator as any).standalone === true;
+    const standaloneMedia = window.matchMedia?.('(display-mode: standalone)')?.matches;
+    return isIOS && (standaloneFlag || standaloneMedia);
+  } catch {
+    return false;
+  }
+};
+
 const withTimeout = async <T,>(promise: Promise<T>, ms = 12000): Promise<T> => {
   let timeoutId: number | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -260,28 +272,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // even though a refresh can still recover. Add a short grace window on resume.
       const recentlyResumed = Date.now() - lastResumeAttemptAtRef.current < 7000;
 
-      if (event === 'SIGNED_OUT' && userRef.current && (recentlyResumed || document.visibilityState === 'hidden')) {
-        // Keep current in-memory state to avoid redirect-to-login flicker.
-        setIsLoading(true);
-        try {
-          // Best-effort: attempt token refresh, then re-check session.
-          await withTimeout(supabase.auth.refreshSession(), 12000).catch(() => undefined);
-          const {
-            data: { session: recovered },
-          } = await withTimeout(supabase.auth.getSession(), 12000);
+      if (event === 'SIGNED_OUT' && userRef.current) {
+        // iOS “Add to Home Screen” (standalone mode) can intermittently lose auth storage
+        // and emit SIGNED_OUT even though a refresh can still recover.
+        const shouldAttemptRecovery =
+          recentlyResumed || document.visibilityState === 'hidden' || isLikelyStandaloneIOS();
 
-          if (recovered?.user) {
-            setSession(recovered);
-            setUser(recovered.user);
-            hydrateFromCache(recovered.user.id);
-            await loadUserData(recovered.user.id);
-            return;
+        if (shouldAttemptRecovery) {
+          // Keep current in-memory state to avoid redirect-to-login flicker.
+          setIsLoading(true);
+          try {
+            // Best-effort: attempt token refresh, then re-check session.
+            await withTimeout(supabase.auth.refreshSession(), 12000).catch(() => undefined);
+            const {
+              data: { session: recovered },
+            } = await withTimeout(supabase.auth.getSession(), 12000);
+
+            if (recovered?.user) {
+              setSession(recovered);
+              setUser(recovered.user);
+              hydrateFromCache(recovered.user.id);
+              await loadUserData(recovered.user.id);
+              return;
+            }
+            // If we truly can't recover a session, fall through to normal SIGNED_OUT handling.
+          } finally {
+            setIsLoading(false);
+            setHasInitialized(true);
           }
-
-          // If we truly can't recover a session, fall through to normal SIGNED_OUT handling.
-        } finally {
-          setIsLoading(false);
-          setHasInitialized(true);
         }
       }
 
