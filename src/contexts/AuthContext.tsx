@@ -222,68 +222,73 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfileLoading(true);
     let lastError: any = null;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        // Mobile networks + iOS resume often need more time.
-        const baseTimeout = isLikelyStandaloneIOS() ? 30000 : 25000;
+    try {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          // Mobile networks + iOS resume often need more time.
+          const baseTimeout = isLikelyStandaloneIOS() ? 30000 : 25000;
 
-        const [profileData, rolesData] = await Promise.all([
-          withTimeout(fetchProfile(userId), baseTimeout),
-          withTimeout(fetchRoles(userId), baseTimeout),
-        ]);
+          const [profileData, rolesData] = await Promise.all([
+            withTimeout(fetchProfile(userId), baseTimeout),
+            withTimeout(fetchRoles(userId), baseTimeout),
+          ]);
 
-        let driverData: DriverProfile | null = null;
-        if (rolesData.includes('driver')) {
-          // Driver profile can be the slowest fetch; retry it with backoff but keep session.
-          for (let dpAttempt = 1; dpAttempt <= 4; dpAttempt++) {
-            try {
-              driverData = (await withTimeout(fetchDriverProfile(userId), baseTimeout)) ?? null;
-              break;
-            } catch (dpErr) {
-              driverData = null;
-              lastError = dpErr;
-              await new Promise((r) => setTimeout(r, 400 * dpAttempt));
+          let driverData: DriverProfile | null = null;
+          if (rolesData.includes('driver')) {
+            // Driver profile can be the slowest fetch; retry it with backoff but keep session.
+            for (let dpAttempt = 1; dpAttempt <= 4; dpAttempt++) {
+              try {
+                driverData = (await withTimeout(fetchDriverProfile(userId), baseTimeout)) ?? null;
+                break;
+              } catch (dpErr) {
+                driverData = null;
+                lastError = dpErr;
+                await new Promise((r) => setTimeout(r, 400 * dpAttempt));
+              }
             }
           }
+
+          setProfile(profileData ?? null);
+          setRoles(rolesData);
+          setDriverProfile(driverData);
+
+          writeAuthCache(userId, {
+            profile: (profileData ?? null) as any,
+            roles: rolesData,
+            driverProfile: driverData,
+            cachedAt: Date.now(),
+          });
+
+          return; // success – exit the retry loop
+        } catch (e) {
+          lastError = e;
+          // brief backoff, helps with transient network errors
+          await new Promise((r) => setTimeout(r, 250 * attempt));
         }
-
-        setProfile(profileData ?? null);
-        setRoles(rolesData);
-        setDriverProfile(driverData);
-
-        writeAuthCache(userId, {
-          profile: (profileData ?? null) as any,
-          roles: rolesData,
-          driverProfile: driverData,
-          cachedAt: Date.now(),
-        });
-
-        return;
-      } catch (e) {
-        lastError = e;
-        // brief backoff, helps with transient network errors
-        await new Promise((r) => setTimeout(r, 250 * attempt));
       }
-    }
 
-    console.error('Failed to load user data after retries:', lastError);
+      console.error('Failed to load user data after retries:', lastError);
 
-    // IMPORTANT: don't "wipe" auth/session on transient mobile/Safari network issues.
-    // If we already had roles/profile, keep them and just warn.
-    if (hasInitializedRef.current && userRef.current?.id === userId && rolesRef.current.length > 0) {
-      toast({
-        title: 'Connection issue',
-        description: 'We had trouble refreshing your account data. Retrying in the background…',
-      });
-      return;
-    }
-    // Keep whatever we may have in cache/in-memory; the driver dashboard will show a loading
-    // state instead of redirecting while we recover.
-    if (!profile && !driverProfile && roles.length === 0) {
-      toast({
-        title: 'Loading is taking longer than usual',
-        description: 'Keeping you signed in while we reconnect…',
-      });
+      // IMPORTANT: don't "wipe" auth/session on transient mobile/Safari network issues.
+      // If we already had roles/profile, keep them and just warn.
+      if (hasInitializedRef.current && userRef.current?.id === userId && rolesRef.current.length > 0) {
+        toast({
+          title: 'Connection issue',
+          description: 'We had trouble refreshing your account data. Retrying in the background…',
+        });
+        return;
+      }
+      // Keep whatever we may have in cache/in-memory; the driver dashboard will show a loading
+      // state instead of redirecting while we recover.
+      if (!profile && !driverProfile && roles.length === 0) {
+        toast({
+          title: 'Loading is taking longer than usual',
+          description: 'Keeping you signed in while we reconnect…',
+        });
+      }
+    } finally {
+      // CRITICAL: always clear profileLoading so DriverDashboard doesn't stay on loading screen
+      setProfileLoading(false);
     }
   };
 
