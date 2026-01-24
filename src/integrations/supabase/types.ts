@@ -423,6 +423,48 @@ export type Database = {
         }
         Relationships: []
       }
+      saved_cards: {
+        Row: {
+          card_brand: string
+          card_exp_month: number
+          card_exp_year: number
+          card_last_four: string
+          created_at: string
+          id: string
+          is_default: boolean
+          nickname: string
+          stripe_payment_method_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          card_brand: string
+          card_exp_month: number
+          card_exp_year: number
+          card_last_four: string
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          nickname: string
+          stripe_payment_method_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          card_brand?: string
+          card_exp_month?: number
+          card_exp_year?: number
+          card_last_four?: string
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          nickname?: string
+          stripe_payment_method_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       translations: {
         Row: {
           created_at: string
