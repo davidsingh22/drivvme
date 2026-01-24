@@ -80,12 +80,47 @@ const DriverDashboard = () => {
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
   const prevRideIdsRef = useRef<Set<string>>(new Set());
-  const { play: playAlertSound, unlock: unlockAlertSound } = useAlertSound({ volume: 0.2 });
+  const { play: playAlertSound, stop: stopAlertSound, unlock: unlockAlertSound } = useAlertSound({ 
+    volume: 0.25, 
+    loop: true, 
+    loopInterval: 2500 
+  });
+  const alertStartTimeRef = useRef<number | null>(null);
 
   const alertRide = useMemo(() => {
     if (!newRideAlertRideId) return null;
-    return availableRides.find((r) => r.id === newRideAlertRideId) ?? null;
-  }, [availableRides, newRideAlertRideId]);
+    const ride = availableRides.find((r) => r.id === newRideAlertRideId);
+    if (!ride) return null;
+    
+    // Calculate pickup ETA based on driver location
+    let pickupEtaMinutes: number | undefined;
+    if (driverLocation && ride.pickup_lat && ride.pickup_lng) {
+      const distanceKm = calculateDistanceKm(
+        driverLocation.lat, driverLocation.lng,
+        ride.pickup_lat, ride.pickup_lng
+      );
+      pickupEtaMinutes = Math.ceil((distanceKm / 30) * 60); // 30km/h average
+    }
+    
+    return {
+      id: ride.id,
+      pickup_address: ride.pickup_address,
+      dropoff_address: ride.dropoff_address,
+      estimated_fare: ride.estimated_fare,
+      pickup_eta_minutes: pickupEtaMinutes,
+      minimum_earnings: ride.estimated_fare ? ride.estimated_fare - PLATFORM_FEE : undefined,
+      is_priority: false, // Can be set based on surge or rider preference
+    };
+  }, [availableRides, newRideAlertRideId, driverLocation]);
+
+  // Helper function for distance calculation
+  const calculateDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
 
   const [redirectGraceOver, setRedirectGraceOver] = useState(false);
 
@@ -230,6 +265,7 @@ const DriverDashboard = () => {
         if (newlyAdded && !currentRide) {
           setNewRideAlertRideId(newlyAdded.id);
           setNewRideAlertOpen(true);
+          alertStartTimeRef.current = Date.now();
           void playAlertSound();
         }
       }
@@ -385,15 +421,25 @@ const DriverDashboard = () => {
   const acceptRide = async (ride: RideRequest) => {
     if (!user) return;
 
+    // Stop the alert sound immediately
+    stopAlertSound();
+    setNewRideAlertOpen(false);
+
+    // Calculate acceptance time for priority driver reward
+    const acceptanceTimeSeconds = alertStartTimeRef.current 
+      ? Math.floor((Date.now() - alertStartTimeRef.current) / 1000)
+      : null;
+
     const { error } = await supabase
       .from('rides')
       .update({
         driver_id: user.id,
         status: 'driver_assigned',
         accepted_at: new Date().toISOString(),
+        acceptance_time_seconds: acceptanceTimeSeconds,
       })
       .eq('id', ride.id)
-      .eq('status', 'searching'); // Ensure ride is still available
+      .eq('status', 'searching');
 
     if (error) {
       toast({
@@ -404,18 +450,37 @@ const DriverDashboard = () => {
       return;
     }
 
-    // Update UI immediately — don't wait for notifications
+    // Grant Priority Driver status if accepted within 5 seconds
+    if (acceptanceTimeSeconds !== null && acceptanceTimeSeconds <= 5) {
+      const priorityUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes
+      await supabase
+        .from('driver_profiles')
+        .update({ priority_driver_until: priorityUntil })
+        .eq('user_id', user.id);
+
+      toast({
+        title: '⚡ Priority Driver Activated!',
+        description: 'You get priority for the next 30 minutes for accepting fast!',
+      });
+    }
+
+    // Update UI immediately
     setCurrentRide({ ...ride, status: 'driver_assigned' });
     setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id));
-    toast({
-      title: 'Ride accepted!',
-      description: 'Navigate to pickup location',
-    });
+    
+    if (!acceptanceTimeSeconds || acceptanceTimeSeconds > 5) {
+      toast({
+        title: 'Ride accepted!',
+        description: 'Navigate to pickup location',
+      });
+    }
 
-    // Background: fetch rider info + send notifications (non-blocking)
+    // Reset alert tracking
+    alertStartTimeRef.current = null;
+
+    // Background: fetch rider info + send notifications
     fetchRiderInfo(ride.rider_id);
 
-    // Fire-and-forget notification tasks (don't await)
     supabase.from('notifications').insert({
       user_id: ride.rider_id,
       ride_id: ride.id,
@@ -573,21 +638,19 @@ const DriverDashboard = () => {
     <div className="min-h-screen bg-background">
       <DriverNewRideAlert
         open={newRideAlertOpen}
-        ride={
-          alertRide
-            ? {
-                id: alertRide.id,
-                pickup_address: alertRide.pickup_address,
-                dropoff_address: alertRide.dropoff_address,
-              }
-            : null
-        }
-        onDismiss={() => setNewRideAlertOpen(false)}
+        ride={alertRide}
+        onDismiss={() => {
+          setNewRideAlertOpen(false);
+          stopAlertSound();
+          alertStartTimeRef.current = null;
+        }}
         onView={() => {
           setNewRideAlertOpen(false);
-          // best-effort: bring attention back to available rides list
+          stopAlertSound();
+          // Don't reset alertStartTimeRef - keep timing for fast acceptance reward
           if (!isOnline) void toggleOnlineStatus();
         }}
+        showPriorityReward={true}
       />
       <Navbar />
       

@@ -97,6 +97,7 @@ export type Database = {
           is_verified: boolean
           license_number: string | null
           license_plate: string | null
+          priority_driver_until: string | null
           stripe_account_id: string | null
           total_earnings: number | null
           total_rides: number | null
@@ -117,6 +118,7 @@ export type Database = {
           is_verified?: boolean
           license_number?: string | null
           license_plate?: string | null
+          priority_driver_until?: string | null
           stripe_account_id?: string | null
           total_earnings?: number | null
           total_rides?: number | null
@@ -137,6 +139,7 @@ export type Database = {
           is_verified?: boolean
           license_number?: string | null
           license_plate?: string | null
+          priority_driver_until?: string | null
           stripe_account_id?: string | null
           total_earnings?: number | null
           total_rides?: number | null
@@ -341,6 +344,7 @@ export type Database = {
       }
       rides: {
         Row: {
+          acceptance_time_seconds: number | null
           accepted_at: string | null
           actual_fare: number | null
           cancellation_reason: string | null
@@ -357,6 +361,9 @@ export type Database = {
           estimated_duration_minutes: number | null
           estimated_fare: number
           id: string
+          last_notification_at: string | null
+          notification_tier: number | null
+          notified_driver_ids: string[] | null
           pickup_address: string
           pickup_at: string | null
           pickup_lat: number
@@ -368,6 +375,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          acceptance_time_seconds?: number | null
           accepted_at?: string | null
           actual_fare?: number | null
           cancellation_reason?: string | null
@@ -384,6 +392,9 @@ export type Database = {
           estimated_duration_minutes?: number | null
           estimated_fare: number
           id?: string
+          last_notification_at?: string | null
+          notification_tier?: number | null
+          notified_driver_ids?: string[] | null
           pickup_address: string
           pickup_at?: string | null
           pickup_lat: number
@@ -395,6 +406,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          acceptance_time_seconds?: number | null
           accepted_at?: string | null
           actual_fare?: number | null
           cancellation_reason?: string | null
@@ -411,6 +423,9 @@ export type Database = {
           estimated_duration_minutes?: number | null
           estimated_fare?: number
           id?: string
+          last_notification_at?: string | null
+          notification_tier?: number | null
+          notified_driver_ids?: string[] | null
           pickup_address?: string
           pickup_at?: string | null
           pickup_lat?: number
