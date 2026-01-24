@@ -94,21 +94,32 @@ const RideBooking = () => {
 
 
   // Route guard - drivers go to /driver, only pure riders stay here
+  // Track if we've started a redirect to prevent flash
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  
   useEffect(() => {
     // Don't redirect during initial auth load unless we have cached roles
     if (authLoading && roles.length === 0) return;
 
     if (!user) {
+      setIsRedirecting(true);
       navigate('/login', { replace: true });
       return;
     }
 
-    // Wait for roles to be loaded before deciding
-    if (roles.length === 0) return;
+    // Wait for roles to be loaded before deciding (max 3 seconds then assume rider)
+    if (roles.length === 0) {
+      const timeout = setTimeout(() => {
+        // If roles still empty after 3s, assume user is a rider and let them proceed
+        console.log('[RideBooking] Roles timeout, assuming rider');
+      }, 3000);
+      return () => clearTimeout(timeout);
+    }
 
     // Drivers (even those also registered as riders) should use the driver dashboard
     // This prevents drivers from accidentally seeing the rider "Finding your driver" UI
     if (isDriver) {
+      setIsRedirecting(true);
       navigate('/driver', { replace: true });
     }
   }, [user, authLoading, roles.length, isDriver, navigate]);
@@ -742,7 +753,8 @@ const RideBooking = () => {
 
   // Avoid blocking the whole page during background token refreshes.
   // If roles are already loaded, keep the UI responsive.
-  if (authLoading && roles.length === 0) {
+  // Show loading while redirecting to prevent black screen flash
+  if (isRedirecting || (authLoading && roles.length === 0)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
