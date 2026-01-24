@@ -71,8 +71,15 @@ const DriverDashboard = () => {
 
     // Not authenticated
     if (!user) {
-      navigate('/login', { replace: true });
-      return;
+      // On iOS Home Screen, auth storage can briefly disappear then recover.
+      // Delay the redirect slightly to avoid bouncing drivers to login.
+      const t = window.setTimeout(() => {
+        void (async () => {
+          const { data } = await supabase.auth.getSession();
+          if (!data.session) navigate('/login', { replace: true });
+        })();
+      }, 3000);
+      return () => window.clearTimeout(t);
     }
 
     // Wait until roles are loaded before deciding access
