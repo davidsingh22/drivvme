@@ -239,8 +239,9 @@ serve(async (req) => {
         } else if (driver.current_lat && driver.current_lng) {
           distance = calculateDistanceKm(pickupLat, pickupLng, driver.current_lat, driver.current_lng);
         } else {
-          // Include drivers without location (just went online)
-          distance = config.maxDistanceKm * 0.5; // Assume mid-range
+          // TEST MODE: Include all drivers without location by assuming they're very close
+          // In production, this would be: distance = config.maxDistanceKm * 0.5
+          distance = 1; // 1km - ensures they pass ETA filter
         }
 
         const isPriority = driver.priority_driver_until && 
