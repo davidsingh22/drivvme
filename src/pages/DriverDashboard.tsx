@@ -43,7 +43,16 @@ interface RiderInfo {
 
 const DriverDashboard = () => {
   const { t, language } = useLanguage();
-  const { user, session, roles, isDriver, driverProfile, refreshDriverProfile, isLoading: authLoading } = useAuth();
+  const {
+    user,
+    session,
+    roles,
+    isDriver,
+    driverProfile,
+    refreshDriverProfile,
+    authLoading,
+    profileLoading,
+  } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const {
@@ -65,33 +74,52 @@ const DriverDashboard = () => {
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
-  // Redirect if not logged in as driver
+  const [redirectGraceOver, setRedirectGraceOver] = useState(false);
+
+  // Persist last known route so iOS Home Screen reloads can restore driver dashboard.
+  useEffect(() => {
+    try {
+      localStorage.setItem('last_route', '/driver');
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Grace window on initial load/resume (iOS can briefly report null session)
+  useEffect(() => {
+    setRedirectGraceOver(false);
+    const t = window.setTimeout(() => setRedirectGraceOver(true), 5000);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  // Redirect if not logged in as driver (gated behind authLoading + grace window)
   useEffect(() => {
     if (authLoading) return;
+    if (!redirectGraceOver) return;
 
-    // Not authenticated
-    if (!user) {
-      // On iOS Home Screen, auth storage can briefly disappear then recover.
-      // Delay the redirect slightly to avoid bouncing drivers to login.
-      const t = window.setTimeout(() => {
-        void (async () => {
-          const { data } = await supabase.auth.getSession();
-          if (!data.session) navigate('/login', { replace: true });
-        })();
-      }, 3000);
-      return () => window.clearTimeout(t);
+    // If we truly have no session after load+grace, send to login.
+    if (!session) {
+      navigate('/login', { replace: true });
+      return;
     }
 
-    // Wait until roles are loaded before deciding access
-    if (roles.length === 0) return;
+    // If roles are still loading / profile fetch is retrying, never redirect.
+    if (profileLoading || roles.length === 0) return;
 
-    // iOS Safari can temporarily provide stale/partial role state on resume.
-    // If we already have a driverProfile in memory/cache, do NOT bounce the driver
-    // back to landing — keep them on /driver and allow the auth layer to recover.
-    if (!isDriver && !driverProfile) {
+    // Not a driver -> send to landing.
+    if (!isDriver) {
       navigate('/', { replace: true });
     }
-  }, [user, isDriver, roles.length, authLoading, navigate, driverProfile]);
+  }, [authLoading, redirectGraceOver, session, profileLoading, roles.length, isDriver, navigate]);
+
+  // If we have a valid session and driver role but the driver profile hasn't loaded yet,
+  // fetch it in the background (don't redirect).
+  useEffect(() => {
+    if (!session?.user) return;
+    if (!isDriver) return;
+    if (driverProfile) return;
+    void refreshDriverProfile();
+  }, [session?.user?.id, isDriver, driverProfile, refreshDriverProfile]);
 
   // Initialize driver status
   useEffect(() => {
@@ -438,9 +466,8 @@ const DriverDashboard = () => {
 
   const driverEarnings = currentRide ? currentRide.estimated_fare - PLATFORM_FEE : 0;
 
-  // Only block on truly initial load - never block if we already have driver profile from cache
-  // This prevents the loading screen from showing when drivers reopen the app
-  if (!user && authLoading) {
+  // Loading states: never redirect while we are still restoring session/profile on iOS.
+  if (authLoading || (session && (profileLoading || roles.length === 0 || (isDriver && !driverProfile)))) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
