@@ -181,7 +181,7 @@ const DriverDashboard = () => {
   }, [authLoading, redirectGraceOver, session, profileLoading, roles.length, isDriver, navigate]);
 
   // If we have a valid session and driver role but the driver profile hasn't loaded yet,
-  // fetch it in the background (don't redirect).
+  // fetch it in the background (don't redirect). Auto-create if it doesn't exist.
   useEffect(() => {
     if (!session?.user) return;
     if (driverProfile) return;
@@ -195,8 +195,42 @@ const DriverDashboard = () => {
       }
     })();
 
+    const ensureDriverProfile = async () => {
+      // First try to fetch existing profile
+      const { data: existingProfile, error: fetchError } = await supabase
+        .from('driver_profiles')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+
+      if (existingProfile) {
+        // Profile exists, refresh it in context
+        void refreshDriverProfile();
+        return;
+      }
+
+      // Profile doesn't exist - create one for drivers
+      if (isDriver || last === '/driver') {
+        console.log('[DriverDashboard] Creating missing driver_profile for user:', session.user.id);
+        const { error: insertError } = await supabase
+          .from('driver_profiles')
+          .insert({
+            user_id: session.user.id,
+            is_online: false,
+            is_verified: false,
+          });
+
+        if (insertError) {
+          console.error('[DriverDashboard] Failed to create driver_profile:', insertError);
+        } else {
+          // Refresh to load the newly created profile
+          void refreshDriverProfile();
+        }
+      }
+    };
+
     if (isDriver || last === '/driver') {
-      void refreshDriverProfile();
+      ensureDriverProfile();
     }
   }, [session?.user?.id, isDriver, driverProfile, refreshDriverProfile]);
 
