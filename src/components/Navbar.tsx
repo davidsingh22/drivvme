@@ -26,9 +26,10 @@ const Navbar = () => {
   const { user, profile, isRider, isDriver, isAdmin, signOut } = useAuth();
   const navigate = useNavigate();
 
-  const handleSignOut = async () => {
-    await signOut();
+  const handleSignOut = () => {
+    // Navigate immediately for instant feedback, signOut runs in background
     navigate('/');
+    signOut();
   };
 
   const getInitials = () => {
