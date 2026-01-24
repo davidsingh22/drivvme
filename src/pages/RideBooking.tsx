@@ -28,7 +28,7 @@ interface Location {
 }
 
 // Test accounts that bypass payment
-const TEST_ACCOUNTS = ['alsensa@hotmail.com'];
+const TEST_ACCOUNTS = ['alsenesa@hotmail.com'];
 
 const RideBooking = () => {
   const { t, language } = useLanguage();
