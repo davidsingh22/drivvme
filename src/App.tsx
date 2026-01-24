@@ -20,8 +20,30 @@ import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
+// Wrapped inside BrowserRouter AND AuthProvider to ensure context is available.
+const AppRoutes = () => {
+  return (
+    <>
+      <RouteRestorer />
+      <Routes>
+        <Route path="/" element={<Landing />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<Signup />} />
+        <Route path="/ride" element={<RideBooking />} />
+        <Route path="/driver" element={<DriverDashboard />} />
+        <Route path="/history" element={<RideHistory />} />
+        <Route path="/earnings" element={<Earnings />} />
+        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/refunds" element={<AdminRefunds />} />
+        {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </>
+  );
+};
+
 const RouteRestorer = () => {
-  const { session, roles, authLoading, profileLoading } = useAuth();
+  const { session, roles, authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -41,8 +63,6 @@ const RouteRestorer = () => {
 
     if (last === '/driver') {
       // If the driver last used /driver, restore them there immediately on iOS reload.
-      // Even if roles/profile are still loading (or retrying), keep the user on /driver
-      // and let the dashboard recover in the background.
       if (roles.length === 0 || roles.includes('driver')) {
         navigate('/driver', { replace: true });
       }
@@ -60,20 +80,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <RouteRestorer />
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route path="/login" element={<Login />} />
-              <Route path="/signup" element={<Signup />} />
-              <Route path="/ride" element={<RideBooking />} />
-              <Route path="/driver" element={<DriverDashboard />} />
-              <Route path="/history" element={<RideHistory />} />
-              <Route path="/earnings" element={<Earnings />} />
-              <Route path="/admin" element={<AdminDashboard />} />
-              <Route path="/admin/refunds" element={<AdminRefunds />} />
-              {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
+            <AppRoutes />
           </BrowserRouter>
         </TooltipProvider>
       </AuthProvider>
