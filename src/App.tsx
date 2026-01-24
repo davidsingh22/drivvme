@@ -29,9 +29,6 @@ const RouteRestorer = () => {
   useEffect(() => {
     if (authLoading) return;
     if (!session) return;
-    if (profileLoading) return;
-    if (roles.length === 0) return;
-    if (!roles.includes('driver')) return;
     if (location.pathname !== '/') return;
 
     const last = (() => {
@@ -43,9 +40,14 @@ const RouteRestorer = () => {
     })();
 
     if (last === '/driver') {
-      navigate('/driver', { replace: true });
+      // If the driver last used /driver, restore them there immediately on iOS reload.
+      // Even if roles/profile are still loading (or retrying), keep the user on /driver
+      // and let the dashboard recover in the background.
+      if (roles.length === 0 || roles.includes('driver')) {
+        navigate('/driver', { replace: true });
+      }
     }
-  }, [authLoading, profileLoading, session, roles, location.pathname, navigate]);
+  }, [authLoading, session, roles, location.pathname, navigate]);
 
   return null;
 };
