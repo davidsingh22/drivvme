@@ -184,7 +184,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data, error } = await supabase.from('user_roles').select('role').eq('user_id', userId);
 
     if (!error) {
-      return data?.map((r) => r.role as UserRole) || [];
+      const roles = data?.map((r) => r.role as UserRole) || [];
+
+      // Resilience: if roles table is empty/missing for a driver account, infer from driver profile.
+      // This prevents drivers from being stuck on the dashboard loading screen.
+      if (roles.length === 0) {
+        const { data: dp } = await supabase
+          .from('driver_profiles')
+          .select('id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (dp?.id) return ['driver'];
+      }
+
+      return roles;
     }
 
     // Fallback path: use SECURITY DEFINER functions (avoids RLS recursion / missing policies)
