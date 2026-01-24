@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle, Bell } from 'lucide-react';
@@ -15,6 +15,8 @@ import DriverProfileModal from '@/components/DriverProfileModal';
 import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
+import { useAlertSound } from '@/hooks/useAlertSound';
+import { DriverNewRideAlert } from '@/components/DriverNewRideAlert';
 
 const PLATFORM_FEE = 5.00;
 
@@ -74,6 +76,16 @@ const DriverDashboard = () => {
   const [todayRides, setTodayRides] = useState(0);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+
+  const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
+  const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
+  const prevRideIdsRef = useRef<Set<string>>(new Set());
+  const { play: playAlertSound, unlock: unlockAlertSound } = useAlertSound({ volume: 0.2 });
+
+  const alertRide = useMemo(() => {
+    if (!newRideAlertRideId) return null;
+    return availableRides.find((r) => r.id === newRideAlertRideId) ?? null;
+  }, [availableRides, newRideAlertRideId]);
 
   const [redirectGraceOver, setRedirectGraceOver] = useState(false);
 
@@ -205,7 +217,20 @@ const DriverDashboard = () => {
         .order('requested_at', { ascending: true });
 
       if (!error && data) {
+        // Detect newly-added rides (to trigger big in-app alert + sound).
+        const nextIds = new Set(data.map((r) => r.id));
+        const prevIds = prevRideIdsRef.current;
+
+        const newlyAdded = data.find((r) => !prevIds.has(r.id));
+        prevRideIdsRef.current = nextIds;
+
         setAvailableRides(data);
+
+        if (newlyAdded && !currentRide) {
+          setNewRideAlertRideId(newlyAdded.id);
+          setNewRideAlertOpen(true);
+          void playAlertSound();
+        }
       }
     };
 
@@ -222,9 +247,9 @@ const DriverDashboard = () => {
           table: 'rides',
           filter: 'status=eq.searching',
         },
-        () => {
+        (payload) => {
           // Reliable in-app fallback alert (works even when system push is flaky on mobile browsers)
-          if (!currentRide) {
+          if (!currentRide && payload.eventType === 'INSERT') {
             toast({
               title: 'New ride request',
               description: 'A rider is looking for a driver now.',
@@ -546,6 +571,24 @@ const DriverDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      <DriverNewRideAlert
+        open={newRideAlertOpen}
+        ride={
+          alertRide
+            ? {
+                id: alertRide.id,
+                pickup_address: alertRide.pickup_address,
+                dropoff_address: alertRide.dropoff_address,
+              }
+            : null
+        }
+        onDismiss={() => setNewRideAlertOpen(false)}
+        onView={() => {
+          setNewRideAlertOpen(false);
+          // best-effort: bring attention back to available rides list
+          if (!isOnline) void toggleOnlineStatus();
+        }}
+      />
       <Navbar />
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
@@ -568,7 +611,11 @@ const DriverDashboard = () => {
               </div>
               <Switch
                 checked={isOnline}
-                onCheckedChange={toggleOnlineStatus}
+                onCheckedChange={async () => {
+                  // Unlock audio (browser gesture) so subsequent alerts can play sound.
+                  await unlockAlertSound();
+                  await toggleOnlineStatus();
+                }}
                 className="data-[state=checked]:bg-success"
               />
             </Card>
@@ -671,7 +718,10 @@ const DriverDashboard = () => {
 
             {/* Go Online/Offline Button */}
             <Button
-              onClick={toggleOnlineStatus}
+                onClick={async () => {
+                  await unlockAlertSound();
+                  await toggleOnlineStatus();
+                }}
               className={`w-full h-16 text-lg font-bold mb-6 transition-all ${
                 isOnline 
                   ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' 
