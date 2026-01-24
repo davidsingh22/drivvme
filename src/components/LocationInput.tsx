@@ -49,42 +49,91 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
     setIsSearching(true);
     try {
-      // Maximum POI discovery: include ALL categories for restaurants, airports, hospitals, casinos, etc.
-      // Mapbox POI categories covered: food, restaurant, hotel, lodging, airport, bus_station, train_station,
-      // hospital, pharmacy, bank, atm, casino, nightclub, bar, cafe, shopping_mall, supermarket, 
-      // gas_station, parking, park, museum, theater, cinema, gym, spa, school, university, library,
-      // police, fire_station, post_office, place_of_worship, stadium, zoo, aquarium, amusement_park, etc.
+      // Use Mapbox Search Box API for superior POI discovery
+      // This API has much better coverage for airports, restaurants, hospitals, casinos, etc.
+      const sessionToken = crypto.randomUUID();
+      
       const params = new URLSearchParams({
         access_token: token,
-        country: 'ca',
-        // 'poi' covers ALL points of interest categories in Mapbox
-        // Combined with address/place for complete coverage of any searchable location
-        types: 'poi,address,place,locality,neighborhood',
+        session_token: sessionToken,
+        q: query,
+        country: 'CA',
+        language: 'en',
         limit: '10',
-        fuzzyMatch: 'true',
-        autocomplete: 'true',
-        // Central Canada proximity (between Montreal/Toronto) for balanced national results
-        proximity: '-79.3832,43.6532',
-        language: 'en,fr',
+        // Include all POI types - this covers airports, restaurants, hospitals, casinos, etc.
+        types: 'poi,address,place,street,postcode,locality,neighborhood,district,region',
+        // Proximity to Montreal for better local results, but search is Canada-wide
+        proximity: '-73.5673,45.5017',
       });
       
       const response = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params}`
+        `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`
       );
       const data = await response.json();
 
-      if (data.features) {
-        setSuggestions(
-          data.features.map((f: any) => ({
-            id: f.id,
-            place_name: f.place_name,
-            center: f.center,
-          }))
+      if (data.suggestions && data.suggestions.length > 0) {
+        // For each suggestion, we need to retrieve the full details to get coordinates
+        const detailedSuggestions = await Promise.all(
+          data.suggestions.slice(0, 8).map(async (s: any) => {
+            try {
+              const retrieveParams = new URLSearchParams({
+                access_token: token,
+                session_token: sessionToken,
+              });
+              const retrieveResponse = await fetch(
+                `https://api.mapbox.com/search/searchbox/v1/retrieve/${s.mapbox_id}?${retrieveParams}`
+              );
+              const retrieveData = await retrieveResponse.json();
+              
+              if (retrieveData.features && retrieveData.features.length > 0) {
+                const feature = retrieveData.features[0];
+                return {
+                  id: s.mapbox_id,
+                  place_name: s.full_address || s.name + (s.place_formatted ? ', ' + s.place_formatted : ''),
+                  center: feature.geometry.coordinates as [number, number],
+                };
+              }
+              return null;
+            } catch {
+              return null;
+            }
+          })
         );
-        setShowSuggestions(true);
+
+        const validSuggestions = detailedSuggestions.filter((s): s is Suggestion => s !== null);
+        setSuggestions(validSuggestions);
+        setShowSuggestions(validSuggestions.length > 0);
+      } else {
+        // Fallback to geocoding API if Search Box returns no results
+        const geocodeParams = new URLSearchParams({
+          access_token: token,
+          country: 'ca',
+          types: 'poi,address,place,locality,neighborhood',
+          limit: '10',
+          fuzzyMatch: 'true',
+          autocomplete: 'true',
+          proximity: '-73.5673,45.5017',
+          language: 'en,fr',
+        });
+        
+        const geocodeResponse = await fetch(
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${geocodeParams}`
+        );
+        const geocodeData = await geocodeResponse.json();
+
+        if (geocodeData.features) {
+          setSuggestions(
+            geocodeData.features.map((f: any) => ({
+              id: f.id,
+              place_name: f.place_name,
+              center: f.center,
+            }))
+          );
+          setShowSuggestions(true);
+        }
       }
     } catch (err) {
-      console.error('Geocoding error:', err);
+      console.error('Search error:', err);
     } finally {
       setIsSearching(false);
     }
