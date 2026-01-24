@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
+import { supabase } from '@/integrations/supabase/client';
 
 interface LocationInputProps {
   type: 'pickup' | 'dropoff';
@@ -18,6 +19,7 @@ interface Suggestion {
   name: string;
   address: string;
   center: [number, number];
+  isCustom?: boolean;
 }
 
 const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
@@ -42,6 +44,33 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     <Navigation className="h-5 w-5 text-accent" />
   );
 
+  // Search custom locations from database
+  const searchCustomLocations = async (query: string): Promise<Suggestion[]> => {
+    if (query.length < 2) return [];
+    
+    try {
+      const { data, error } = await supabase
+        .from('custom_locations')
+        .select('id, name, address, lat, lng')
+        .or(`name.ilike.%${query}%,address.ilike.%${query}%`)
+        .eq('is_active', true)
+        .limit(5);
+
+      if (error) throw error;
+
+      return (data || []).map(loc => ({
+        id: `custom-${loc.id}`,
+        name: loc.name,
+        address: loc.address,
+        center: [loc.lng, loc.lat] as [number, number],
+        isCustom: true,
+      }));
+    } catch (err) {
+      console.error('Error searching custom locations:', err);
+      return [];
+    }
+  };
+
   const searchPlaces = useCallback(async (query: string) => {
     if (!token || query.length < 2) {
       setSuggestions([]);
@@ -50,20 +79,36 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
     setIsSearching(true);
     try {
+      // Search custom locations and Mapbox in parallel
+      const [customResults, mapboxResults] = await Promise.all([
+        searchCustomLocations(query),
+        searchMapbox(query, token),
+      ]);
+
+      // Combine results: custom locations first, then Mapbox
+      const combined = [...customResults, ...mapboxResults];
+      setSuggestions(combined);
+      setShowSuggestions(combined.length > 0);
+    } catch (err) {
+      console.error('Search error:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  }, [token]);
+
+  const searchMapbox = async (query: string, accessToken: string): Promise<Suggestion[]> => {
+    try {
       // Use Mapbox Search Box API for superior POI discovery
-      // This API has much better coverage for airports, restaurants, hospitals, casinos, etc.
       const sessionToken = crypto.randomUUID();
       
       const params = new URLSearchParams({
-        access_token: token,
+        access_token: accessToken,
         session_token: sessionToken,
         q: query,
         country: 'CA',
         language: 'en',
         limit: '10',
-        // Include all POI types - this covers airports, restaurants, hospitals, casinos, etc.
         types: 'poi,address,place,street,postcode,locality,neighborhood,district,region',
-        // Proximity to Montreal for better local results, but search is Canada-wide
         proximity: '-73.5673,45.5017',
       });
       
@@ -73,12 +118,11 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       const data = await response.json();
 
       if (data.suggestions && data.suggestions.length > 0) {
-        // For each suggestion, we need to retrieve the full details to get coordinates
         const detailedSuggestions = await Promise.all(
           data.suggestions.slice(0, 8).map(async (s: any) => {
             try {
               const retrieveParams = new URLSearchParams({
-                access_token: token,
+                access_token: accessToken,
                 session_token: sessionToken,
               });
               const retrieveResponse = await fetch(
@@ -90,21 +134,17 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                 const feature = retrieveData.features[0];
                 const props = feature.properties || {};
                 
-                // Build full street address from feature properties
-                // Properties contain: address, street, place, region, postcode, country
                 const streetParts: string[] = [];
-                if (props.address) streetParts.push(props.address); // Street number
-                if (props.street) streetParts.push(props.street); // Street name
+                if (props.address) streetParts.push(props.address);
+                if (props.street) streetParts.push(props.street);
                 const streetAddress = streetParts.join(' ');
                 
-                // Build the rest of the address (city, province, postal code)
                 const locationParts: string[] = [];
-                if (props.place) locationParts.push(props.place); // City
-                if (props.region) locationParts.push(props.region); // Province
-                if (props.postcode) locationParts.push(props.postcode); // Postal code
-                if (props.country) locationParts.push(props.country); // Country
+                if (props.place) locationParts.push(props.place);
+                if (props.region) locationParts.push(props.region);
+                if (props.postcode) locationParts.push(props.postcode);
+                if (props.country) locationParts.push(props.country);
                 
-                // Combine street address with location
                 const fullAddress = streetAddress 
                   ? `${streetAddress}, ${locationParts.join(', ')}`
                   : locationParts.join(', ');
@@ -123,13 +163,11 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           })
         );
 
-        const validSuggestions = detailedSuggestions.filter((s): s is Suggestion => s !== null);
-        setSuggestions(validSuggestions);
-        setShowSuggestions(validSuggestions.length > 0);
+        return detailedSuggestions.filter((s): s is Suggestion => s !== null);
       } else {
-        // Fallback to geocoding API if Search Box returns no results
+        // Fallback to geocoding API
         const geocodeParams = new URLSearchParams({
-          access_token: token,
+          access_token: accessToken,
           country: 'ca',
           types: 'poi,address,place,locality,neighborhood',
           limit: '10',
@@ -145,29 +183,25 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         const geocodeData = await geocodeResponse.json();
 
         if (geocodeData.features) {
-          setSuggestions(
-            geocodeData.features.map((f: any) => {
-              // Split place_name into name and address parts
-              const parts = f.place_name.split(', ');
-              const name = parts[0] || f.place_name;
-              const address = parts.slice(1).join(', ') || '';
-              return {
-                id: f.id,
-                name,
-                address,
-                center: f.center,
-              };
-            })
-          );
-          setShowSuggestions(true);
+          return geocodeData.features.map((f: any) => {
+            const parts = f.place_name.split(', ');
+            const name = parts[0] || f.place_name;
+            const address = parts.slice(1).join(', ') || '';
+            return {
+              id: f.id,
+              name,
+              address,
+              center: f.center,
+            };
+          });
         }
       }
+      return [];
     } catch (err) {
-      console.error('Search error:', err);
-    } finally {
-      setIsSearching(false);
+      console.error('Mapbox search error:', err);
+      return [];
     }
-  }, [token]);
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;

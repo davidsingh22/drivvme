@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      custom_locations: {
+        Row: {
+          address: string
+          category: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          lat: number
+          lng: number
+          name: string
+        }
+        Insert: {
+          address: string
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          lat: number
+          lng: number
+          name: string
+        }
+        Update: {
+          address?: string
+          category?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          lat?: number
+          lng?: number
+          name?: string
+        }
+        Relationships: []
+      }
       driver_documents: {
         Row: {
           created_at: string

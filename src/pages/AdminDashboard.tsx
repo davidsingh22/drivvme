@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
+import AddCustomLocationForm from '@/components/AddCustomLocationForm';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,7 +30,8 @@ import {
   Navigation,
   Eye,
   Bell,
-  Send
+  Send,
+  Trash2
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
@@ -154,6 +156,19 @@ const AdminDashboard = () => {
   const [notificationBody, setNotificationBody] = useState('This is a test push notification from the admin dashboard.');
   const [isSendingNotification, setIsSendingNotification] = useState(false);
   const [driverSubscriptions, setDriverSubscriptions] = useState<Array<{ user_id: string; count: number }>>([]);
+  
+  // Custom locations state
+  const [customLocations, setCustomLocations] = useState<Array<{
+    id: string;
+    name: string;
+    address: string;
+    lat: number;
+    lng: number;
+    category: string | null;
+    created_at: string;
+    is_active: boolean;
+  }>>([]);
+  const [isDeletingLocation, setIsDeletingLocation] = useState<string | null>(null);
 
   const isAdmin = roles.includes('admin' as any);
 
@@ -174,8 +189,47 @@ const AdminDashboard = () => {
     if (user && isAdmin) {
       fetchData();
       fetchDriverSubscriptions();
+      fetchCustomLocations();
     }
   }, [user, isAdmin]);
+
+  const fetchCustomLocations = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('custom_locations')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setCustomLocations(data || []);
+    } catch (error) {
+      console.error('Error fetching custom locations:', error);
+    }
+  };
+
+  const deleteCustomLocation = async (id: string) => {
+    setIsDeletingLocation(id);
+    try {
+      const { error } = await supabase
+        .from('custom_locations')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      
+      toast({ title: 'Location deleted' });
+      fetchCustomLocations();
+    } catch (error: any) {
+      console.error('Error deleting location:', error);
+      toast({ 
+        title: 'Failed to delete', 
+        description: error.message,
+        variant: 'destructive' 
+      });
+    } finally {
+      setIsDeletingLocation(null);
+    }
+  };
 
   const fetchDriverSubscriptions = async () => {
     try {
@@ -693,6 +747,10 @@ const AdminDashboard = () => {
                 <Bell className="w-4 h-4" />
                 Notifications
               </TabsTrigger>
+              <TabsTrigger value="locations" className="gap-2">
+                <MapPin className="w-4 h-4" />
+                Locations
+              </TabsTrigger>
             </TabsList>
             
             <div className="flex gap-2">
@@ -1135,6 +1193,77 @@ const AdminDashboard = () => {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* Locations Tab */}
+          <TabsContent value="locations">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>Custom Locations</CardTitle>
+                  <CardDescription>
+                    Add locations that riders can search for (restaurants, clubs, etc.)
+                  </CardDescription>
+                </div>
+                <AddCustomLocationForm onLocationAdded={fetchCustomLocations} />
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Address</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Added</TableHead>
+                      <TableHead className="w-[80px]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {customLocations.map((loc) => (
+                      <TableRow key={loc.id}>
+                        <TableCell className="font-medium">{loc.name}</TableCell>
+                        <TableCell className="text-muted-foreground max-w-xs truncate">
+                          {loc.address}
+                        </TableCell>
+                        <TableCell>
+                          {loc.category ? (
+                            <Badge variant="secondary">{loc.category}</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {format(new Date(loc.created_at), 'MMM d, yyyy')}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => deleteCustomLocation(loc.id)}
+                            disabled={isDeletingLocation === loc.id}
+                          >
+                            {isDeletingLocation === loc.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {customLocations.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                          <MapPin className="w-8 h-8 mx-auto mb-2" />
+                          No custom locations added yet
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
       </main>
