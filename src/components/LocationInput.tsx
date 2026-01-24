@@ -88,10 +88,31 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
               
               if (retrieveData.features && retrieveData.features.length > 0) {
                 const feature = retrieveData.features[0];
+                const props = feature.properties || {};
+                
+                // Build full street address from feature properties
+                // Properties contain: address, street, place, region, postcode, country
+                const streetParts: string[] = [];
+                if (props.address) streetParts.push(props.address); // Street number
+                if (props.street) streetParts.push(props.street); // Street name
+                const streetAddress = streetParts.join(' ');
+                
+                // Build the rest of the address (city, province, postal code)
+                const locationParts: string[] = [];
+                if (props.place) locationParts.push(props.place); // City
+                if (props.region) locationParts.push(props.region); // Province
+                if (props.postcode) locationParts.push(props.postcode); // Postal code
+                if (props.country) locationParts.push(props.country); // Country
+                
+                // Combine street address with location
+                const fullAddress = streetAddress 
+                  ? `${streetAddress}, ${locationParts.join(', ')}`
+                  : locationParts.join(', ');
+                
                 return {
                   id: s.mapbox_id,
-                  name: s.name || s.full_address || 'Unknown',
-                  address: s.place_formatted || s.full_address || '',
+                  name: s.name || props.name || 'Unknown',
+                  address: fullAddress || s.full_address || '',
                   center: feature.geometry.coordinates as [number, number],
                 };
               }
