@@ -580,19 +580,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    // Clear local state IMMEDIATELY for instant UI feedback
+    setUser(null);
+    setSession(null);
+    setProfile(null);
+    setDriverProfile(null);
+    setRoles([]);
+    
+    // Clear cached auth data
     try {
-      await supabase.auth.signOut();
-      toast({
-        title: 'Signed out',
-        description: 'See you next time!',
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Error signing out',
-        description: error.message,
-        variant: 'destructive',
-      });
-    }
+      const keys = Object.keys(localStorage).filter(k => k.startsWith('auth-cache:'));
+      keys.forEach(k => localStorage.removeItem(k));
+      localStorage.removeItem('last_route');
+    } catch {}
+
+    // Fire-and-forget the actual signOut call to Supabase
+    supabase.auth.signOut().catch((error: any) => {
+      console.error('Error signing out:', error);
+    });
+
+    toast({
+      title: 'Signed out',
+      description: 'See you next time!',
+    });
   };
 
   const refreshProfile = async () => {
