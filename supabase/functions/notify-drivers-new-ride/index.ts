@@ -38,6 +38,21 @@ interface FCMMessageV1 {
   };
 }
 
+// Calculate distance between two coordinates using Haversine formula (returns km)
+function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371; // Earth's radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 // Get OAuth2 access token for FCM v1 API using service account
 async function getAccessToken(): Promise<string> {
   const serviceAccountJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
@@ -120,9 +135,17 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
 
-    const { rideId, pickupAddress, dropoffAddress, estimatedFare } = await req.json();
+    const { 
+      rideId, 
+      pickupAddress, 
+      dropoffAddress, 
+      estimatedFare,
+      pickupLat,
+      pickupLng,
+      maxDistanceKm = 15 // Default: notify drivers within 15km of pickup
+    } = await req.json();
 
-    console.log("Notifying drivers of new ride:", rideId);
+    console.log("Notifying nearby drivers of new ride:", rideId);
 
     if (!rideId) {
       return new Response(JSON.stringify({ error: "rideId is required" }), {
@@ -133,10 +156,10 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Get all online drivers
+    // Get all online drivers with their current location
     const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
-      .select("user_id")
+      .select("user_id, current_lat, current_lng")
       .eq("is_online", true);
 
     if (driverError) {
@@ -150,14 +173,54 @@ serve(async (req) => {
     console.log("Found online drivers:", onlineDrivers?.length || 0);
 
     if (!onlineDrivers || onlineDrivers.length === 0) {
-      return new Response(JSON.stringify({ message: "No online drivers found", sent: 0 }), {
+      return new Response(JSON.stringify({ 
+        message: "No online drivers found", 
+        sent: 0,
+        nearbyDrivers: 0,
+        totalOnline: 0 
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const driverUserIds = onlineDrivers.map(d => d.user_id);
+    // Filter drivers by proximity to pickup location
+    let nearbyDrivers = onlineDrivers;
+    
+    if (pickupLat && pickupLng) {
+      nearbyDrivers = onlineDrivers.filter(driver => {
+        // Include drivers without location data (they might have just gone online)
+        if (!driver.current_lat || !driver.current_lng) {
+          return true;
+        }
+        
+        const distance = calculateDistanceKm(
+          pickupLat, 
+          pickupLng, 
+          driver.current_lat, 
+          driver.current_lng
+        );
+        
+        console.log(`Driver ${driver.user_id} is ${distance.toFixed(2)}km from pickup`);
+        return distance <= maxDistanceKm;
+      });
+      
+      console.log(`Filtered to ${nearbyDrivers.length} nearby drivers within ${maxDistanceKm}km`);
+    }
 
-    // Get push subscriptions for all online drivers
+    if (nearbyDrivers.length === 0) {
+      return new Response(JSON.stringify({ 
+        message: "No nearby drivers found", 
+        sent: 0,
+        nearbyDrivers: 0,
+        totalOnline: onlineDrivers.length 
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const driverUserIds = nearbyDrivers.map(d => d.user_id);
+
+    // Get push subscriptions for nearby online drivers
     const { data: subscriptions, error: subError } = await supabase
       .from("push_subscriptions")
       .select("id, user_id, endpoint, p256dh, auth")
@@ -173,8 +236,33 @@ serve(async (req) => {
 
     console.log("Found driver subscriptions:", subscriptions?.length || 0);
 
+    // Create in-app notifications for all nearby drivers (even without push subscriptions)
+    const inAppNotifications = nearbyDrivers.map(driver => ({
+      user_id: driver.user_id,
+      ride_id: rideId,
+      type: "new_ride",
+      title: "🚗 New Ride Request",
+      message: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${estimatedFare ? ` • $${Number(estimatedFare).toFixed(2)}` : ""}`,
+    }));
+
+    const { error: notifError } = await supabase
+      .from("notifications")
+      .insert(inAppNotifications);
+
+    if (notifError) {
+      console.error("Failed to create in-app notifications:", notifError);
+    } else {
+      console.log(`Created ${inAppNotifications.length} in-app notifications`);
+    }
+
     if (!subscriptions || subscriptions.length === 0) {
-      return new Response(JSON.stringify({ message: "No driver subscriptions found", sent: 0 }), {
+      return new Response(JSON.stringify({ 
+        message: "No driver push subscriptions found, in-app notifications sent", 
+        sent: 0,
+        inAppNotifications: inAppNotifications.length,
+        nearbyDrivers: nearbyDrivers.length,
+        totalOnline: onlineDrivers.length 
+      }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -185,27 +273,31 @@ serve(async (req) => {
       accessToken = await getAccessToken();
     } catch (error) {
       console.error("Failed to get FCM access token:", error);
-      return new Response(JSON.stringify({ error: "FCM authentication failed" }), {
+      return new Response(JSON.stringify({ 
+        error: "FCM authentication failed",
+        inAppNotifications: inAppNotifications.length 
+      }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    // Professional notification content
     const fareDisplay = estimatedFare ? `$${Number(estimatedFare).toFixed(2)}` : "";
-    const title = "🚗 New Ride Request!";
-    const body = `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${fareDisplay ? ` • ${fareDisplay}` : ""}`;
+    const title = "🚗 New Ride Request Nearby";
+    const body = `📍 ${pickupAddress || "Pickup location"}\n➡️ ${dropoffAddress || "Destination"}${fareDisplay ? `\n💰 Earn ${fareDisplay}` : ""}`;
 
     const results: Array<{ id: string; success: boolean; reason?: string; status?: number }> = [];
 
-    for (const sub of subscriptions) {
+    // Send push notifications in parallel for faster delivery
+    const pushPromises = subscriptions.map(async (sub) => {
       try {
         // FCM token is stored in p256dh field
         const fcmToken = sub.p256dh;
 
         if (!fcmToken || sub.auth !== 'fcm') {
           console.log("Skipping non-FCM subscription:", sub.id);
-          results.push({ id: sub.id, success: false, reason: "Not an FCM subscription" });
-          continue;
+          return { id: sub.id, success: false, reason: "Not an FCM subscription" };
         }
 
         const message: FCMMessageV1 = {
@@ -219,6 +311,9 @@ serve(async (req) => {
               url: "/driver",
               rideId,
               type: "new_ride",
+              pickupAddress: pickupAddress || "",
+              dropoffAddress: dropoffAddress || "",
+              estimatedFare: String(estimatedFare || ""),
             },
             webpush: {
               notification: {
@@ -226,7 +321,7 @@ serve(async (req) => {
                 badge: "/favicon.ico",
                 vibrate: [300, 100, 300, 100, 300],
                 requireInteraction: true,
-                tag: "ride-request",
+                tag: `ride-request-${rideId}`,
               },
               fcm_options: {
                 link: "/driver",
@@ -236,7 +331,7 @@ serve(async (req) => {
               priority: "high",
               notification: {
                 icon: "ic_notification",
-                color: "#4F46E5",
+                color: "#10B981", // Green color for ride requests
                 sound: "default",
                 channelId: "ride_requests",
               },
@@ -259,7 +354,7 @@ serve(async (req) => {
         console.log("FCM sent to driver, status:", response.status);
 
         if (response.ok) {
-          results.push({ id: sub.id, success: true, status: response.status });
+          return { id: sub.id, success: true, status: response.status };
         } else {
           const errorText = await response.text();
           console.error("FCM failed:", response.status, errorText);
@@ -267,21 +362,31 @@ serve(async (req) => {
           // Token expired/invalid: clean it up
           if (response.status === 404 || response.status === 410 || errorText.includes("UNREGISTERED")) {
             await supabase.from("push_subscriptions").delete().eq("id", sub.id);
-            results.push({ id: sub.id, success: false, reason: "expired", status: response.status });
+            return { id: sub.id, success: false, reason: "expired", status: response.status };
           } else {
-            results.push({ id: sub.id, success: false, reason: errorText, status: response.status });
+            return { id: sub.id, success: false, reason: errorText, status: response.status };
           }
         }
       } catch (e: unknown) {
         const errorMessage = e instanceof Error ? e.message : String(e);
         console.error("FCM send failed:", errorMessage);
-        results.push({ id: sub.id, success: false, reason: errorMessage });
+        return { id: sub.id, success: false, reason: errorMessage };
       }
-    }
+    });
+
+    const pushResults = await Promise.all(pushPromises);
+    results.push(...pushResults);
 
     const sent = results.filter((r) => r.success).length;
 
-    return new Response(JSON.stringify({ sent, total: results.length, driversNotified: driverUserIds.length, results }), {
+    return new Response(JSON.stringify({ 
+      sent, 
+      total: results.length, 
+      nearbyDrivers: nearbyDrivers.length,
+      totalOnline: onlineDrivers.length,
+      inAppNotifications: inAppNotifications.length,
+      results 
+    }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
