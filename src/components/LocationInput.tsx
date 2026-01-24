@@ -15,7 +15,8 @@ interface LocationInputProps {
 
 interface Suggestion {
   id: string;
-  place_name: string;
+  name: string;
+  address: string;
   center: [number, number];
 }
 
@@ -89,7 +90,8 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                 const feature = retrieveData.features[0];
                 return {
                   id: s.mapbox_id,
-                  place_name: s.full_address || s.name + (s.place_formatted ? ', ' + s.place_formatted : ''),
+                  name: s.name || s.full_address || 'Unknown',
+                  address: s.place_formatted || s.full_address || '',
                   center: feature.geometry.coordinates as [number, number],
                 };
               }
@@ -123,11 +125,18 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
         if (geocodeData.features) {
           setSuggestions(
-            geocodeData.features.map((f: any) => ({
-              id: f.id,
-              place_name: f.place_name,
-              center: f.center,
-            }))
+            geocodeData.features.map((f: any) => {
+              // Split place_name into name and address parts
+              const parts = f.place_name.split(', ');
+              const name = parts[0] || f.place_name;
+              const address = parts.slice(1).join(', ') || '';
+              return {
+                id: f.id,
+                name,
+                address,
+                center: f.center,
+              };
+            })
           );
           setShowSuggestions(true);
         }
@@ -153,7 +162,8 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   };
 
   const handleSelectSuggestion = (suggestion: Suggestion) => {
-    onChange(suggestion.place_name, {
+    const fullAddress = suggestion.address ? `${suggestion.name}, ${suggestion.address}` : suggestion.name;
+    onChange(fullAddress, {
       lat: suggestion.center[1],
       lng: suggestion.center[0],
     });
@@ -204,10 +214,16 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
               <button
                 key={suggestion.id}
                 type="button"
-                className="w-full px-4 py-3 text-left text-sm hover:bg-muted transition-colors border-b border-border last:border-b-0"
+                className="w-full px-4 py-3 text-left hover:bg-muted transition-colors border-b border-border last:border-b-0 flex items-start gap-3"
                 onClick={() => handleSelectSuggestion(suggestion)}
               >
-                <span className="line-clamp-2">{suggestion.place_name}</span>
+                <MapPin className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="font-medium text-foreground truncate">{suggestion.name}</span>
+                  {suggestion.address && (
+                    <span className="text-sm text-muted-foreground truncate">{suggestion.address}</span>
+                  )}
+                </div>
               </button>
             ))}
           </div>
