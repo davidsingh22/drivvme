@@ -13,6 +13,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Loader2, CreditCard, Shield, Smartphone } from 'lucide-react';
+import { SavedCardsSelector, SaveCardPrompt } from '@/components/SavedCardsSelector';
+import { Checkbox as CheckboxUI } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 
 // Global cache for Stripe instance to avoid re-fetching
 let cachedStripePromise: Promise<Stripe | null> | null = null;
@@ -47,7 +50,7 @@ const getStripePromise = (): Promise<Stripe | null> => {
 getStripePromise().catch(console.error);
 
 interface PaymentFormInnerProps {
-  onSuccess: () => void;
+  onSuccess: (paymentMethodId?: string) => void;
   onCancel: () => void;
   amount: number;
   clientSecret: string;
@@ -61,6 +64,7 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
   const [paymentRequest, setPaymentRequest] = useState<PaymentRequest | null>(null);
   const [canMakePayment, setCanMakePayment] = useState(false);
   const [isElementReady, setIsElementReady] = useState(false);
+  const [saveCard, setSaveCard] = useState(false);
   const paymentRequestRef = useRef<PaymentRequest | null>(null);
 
   // Set up Apple Pay / Google Pay
@@ -198,6 +202,7 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
         elements,
         confirmParams: {
           return_url: `${window.location.origin}/ride`,
+          save_payment_method: saveCard,
         },
         redirect: 'if_required',
       });
@@ -213,7 +218,9 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
           title: 'Payment successful!',
           description: 'Your ride has been confirmed.',
         });
-        onSuccess();
+        // Pass the payment method ID if user wants to save the card
+        const pmId = saveCard ? paymentIntent.payment_method as string : undefined;
+        onSuccess(pmId);
       }
     } catch (error: any) {
       toast({
@@ -277,6 +284,21 @@ const PaymentFormInner = ({ onSuccess, onCancel, amount, clientSecret }: Payment
           }}
         />
       </div>
+
+      {/* Save card option */}
+      <div className="flex items-center space-x-2 pt-2">
+        <CheckboxUI
+          id="save-card"
+          checked={saveCard}
+          onCheckedChange={(checked) => setSaveCard(checked === true)}
+        />
+        <Label 
+          htmlFor="save-card" 
+          className="text-sm text-muted-foreground cursor-pointer"
+        >
+          Save this card for future payments
+        </Label>
+      </div>
       
       <div className="flex gap-3 pt-4">
         <Button
@@ -324,11 +346,17 @@ interface PaymentFormProps {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+type PaymentMode = 'select' | 'new' | 'save_prompt';
+
 const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) => {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [mode, setMode] = useState<PaymentMode>('select');
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
+  const [paymentMethodToSave, setPaymentMethodToSave] = useState<string | null>(null);
+  const [isPayingWithSaved, setIsPayingWithSaved] = useState(false);
   const { toast } = useToast();
   const initKeyRef = useRef<string | null>(null);
 
@@ -396,6 +424,108 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     };
   }, [rideId, amount, toast]);
 
+  const handlePayWithSavedCard = async () => {
+    if (!selectedCardId) return;
+    
+    setIsPayingWithSaved(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('manage-saved-cards', {
+        body: { 
+          action: 'pay_with_saved',
+          cardId: selectedCardId,
+          rideId,
+          amount,
+        },
+      });
+
+      if (error) throw error;
+      
+      if (data.success) {
+        toast({
+          title: 'Payment successful!',
+          description: 'Your ride has been confirmed.',
+        });
+        onSuccess();
+      } else {
+        throw new Error('Payment was not successful');
+      }
+    } catch (err: any) {
+      toast({
+        title: 'Payment failed',
+        description: err.message || 'Failed to process payment with saved card',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsPayingWithSaved(false);
+    }
+  };
+
+  const handleNewCardSuccess = (paymentMethodId?: string) => {
+    if (paymentMethodId) {
+      setPaymentMethodToSave(paymentMethodId);
+      setMode('save_prompt');
+    } else {
+      onSuccess();
+    }
+  };
+
+  // Show save card prompt after payment
+  if (mode === 'save_prompt' && paymentMethodToSave) {
+    return (
+      <SaveCardPrompt
+        paymentMethodId={paymentMethodToSave}
+        onSaved={onSuccess}
+        onSkip={onSuccess}
+      />
+    );
+  }
+
+  // Card selection mode
+  if (mode === 'select') {
+    return (
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Shield className="h-4 w-4" />
+          <span>Secure payment powered by Stripe</span>
+        </div>
+
+        <SavedCardsSelector
+          onSelectCard={setSelectedCardId}
+          onPayWithNew={() => setMode('new')}
+          selectedCardId={selectedCardId}
+        />
+
+        {selectedCardId && (
+          <Button
+            className="w-full gradient-primary"
+            onClick={handlePayWithSavedCard}
+            disabled={isPayingWithSaved}
+          >
+            {isPayingWithSaved ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Processing...
+              </>
+            ) : (
+              <>
+                <CreditCard className="h-4 w-4 mr-2" />
+                Pay ${amount.toFixed(2)} CAD
+              </>
+            )}
+          </Button>
+        )}
+
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+      </Card>
+    );
+  }
+
   if (error) {
     return (
       <Card className="p-6">
@@ -408,6 +538,7 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
               setIsLoading(true);
               setClientSecret(null);
               setStripePromise(null);
+              setMode('select');
             }}
             className="flex-1"
           >
@@ -516,7 +647,12 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
         },
       }}
     >
-      <PaymentFormInner onSuccess={onSuccess} onCancel={onCancel} amount={amount} clientSecret={clientSecret} />
+      <PaymentFormInner 
+        onSuccess={handleNewCardSuccess} 
+        onCancel={() => setMode('select')} 
+        amount={amount} 
+        clientSecret={clientSecret} 
+      />
     </Elements>
   );
 };
