@@ -65,6 +65,11 @@ interface AuthContextType {
   profile: Profile | null;
   driverProfile: DriverProfile | null;
   roles: UserRole[];
+  /** True while we are determining whether a session exists (auth state). */
+  authLoading: boolean;
+  /** True while we are fetching profiles/roles (can be slow on mobile). */
+  profileLoading: boolean;
+  /** Back-compat aggregate loading flag. */
   isLoading: boolean;
   isRider: boolean;
   isDriver: boolean;
@@ -124,7 +129,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null);
   const [driverProfile, setDriverProfile] = useState<DriverProfile | null>(null);
   const [roles, setRoles] = useState<UserRole[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
   // Track if we've done the initial load to avoid resetting during background refreshes
   const [hasInitialized, setHasInitialized] = useState(false);
   const { toast } = useToast();
@@ -213,18 +219,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const loadUserData = async (userId: string) => {
+    setProfileLoading(true);
     let lastError: any = null;
 
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
+        // Mobile networks + iOS resume often need more time.
+        const baseTimeout = isLikelyStandaloneIOS() ? 30000 : 25000;
+
         const [profileData, rolesData] = await Promise.all([
-          withTimeout(fetchProfile(userId), 12000),
-          withTimeout(fetchRoles(userId), 12000),
+          withTimeout(fetchProfile(userId), baseTimeout),
+          withTimeout(fetchRoles(userId), baseTimeout),
         ]);
 
         let driverData: DriverProfile | null = null;
         if (rolesData.includes('driver')) {
-          driverData = (await withTimeout(fetchDriverProfile(userId), 12000)) ?? null;
+          // Driver profile can be the slowest fetch; retry it with backoff but keep session.
+          for (let dpAttempt = 1; dpAttempt <= 4; dpAttempt++) {
+            try {
+              driverData = (await withTimeout(fetchDriverProfile(userId), baseTimeout)) ?? null;
+              break;
+            } catch (dpErr) {
+              driverData = null;
+              lastError = dpErr;
+              await new Promise((r) => setTimeout(r, 400 * dpAttempt));
+            }
+          }
         }
 
         setProfile(profileData ?? null);
@@ -248,7 +268,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     console.error('Failed to load user data after retries:', lastError);
 
-    // IMPORTANT: don't "wipe" the app state on transient mobile/Safari network issues.
+    // IMPORTANT: don't "wipe" auth/session on transient mobile/Safari network issues.
     // If we already had roles/profile, keep them and just warn.
     if (hasInitializedRef.current && userRef.current?.id === userId && rolesRef.current.length > 0) {
       toast({
@@ -257,10 +277,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       return;
     }
-
-    setProfile(null);
-    setDriverProfile(null);
-    setRoles([]);
+    // Keep whatever we may have in cache/in-memory; the driver dashboard will show a loading
+    // state instead of redirecting while we recover.
+    if (!profile && !driverProfile && roles.length === 0) {
+      toast({
+        title: 'Loading is taking longer than usual',
+        description: 'Keeping you signed in while we reconnect…',
+      });
+    }
   };
 
   useEffect(() => {
@@ -280,7 +304,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (shouldAttemptRecovery) {
           // Keep current in-memory state to avoid redirect-to-login flicker.
-          setIsLoading(true);
+          setAuthLoading(true);
           try {
             // Best-effort: attempt token refresh, then re-check session.
             await withTimeout(supabase.auth.refreshSession(), 12000).catch(() => undefined);
@@ -297,7 +321,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
             // If we truly can't recover a session, fall through to normal SIGNED_OUT handling.
           } finally {
-            setIsLoading(false);
+            setAuthLoading(false);
             setHasInitialized(true);
           }
         }
@@ -311,9 +335,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const isBackgroundRefresh = event === 'TOKEN_REFRESHED' && hasInitializedRef.current;
 
       if (!isBackgroundRefresh) {
-        setIsLoading(true);
+        setAuthLoading(true);
       }
 
+      // Always set session/user immediately (even if profile fetch is slow/timeouts).
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
 
@@ -330,17 +355,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setRoles([]);
         }
       } finally {
-        setIsLoading(false);
+        setAuthLoading(false);
         setHasInitialized(true);
       }
     });
 
     // THEN check for existing session
     (async () => {
-      setIsLoading(true);
+      setAuthLoading(true);
       const {
         data: { session: existingSession },
       } = await supabase.auth.getSession();
+      // Set session/user immediately so routes don't redirect while profile is still loading.
       setSession(existingSession);
       setUser(existingSession?.user ?? null);
 
@@ -349,7 +375,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Hydrate from cache immediately so Safari doesn't look like it "reset".
           const hydrated = hydrateFromCache(existingSession.user.id);
           // If we hydrated, don't block the UI while we refresh.
-          if (hydrated) setIsLoading(false);
+          if (hydrated) setAuthLoading(false);
           await loadUserData(existingSession.user.id);
         } else {
           setProfile(null);
@@ -357,7 +383,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setRoles([]);
         }
       } finally {
-        setIsLoading(false);
+        setAuthLoading(false);
         setHasInitialized(true);
       }
     })();
@@ -443,7 +469,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     phone?: string,
     vehicleInfo?: { vehicleMake: string; vehicleModel: string; vehicleColor: string; licensePlate: string }
   ) => {
-    setIsLoading(true);
+    setAuthLoading(true);
     try {
       const { data, error } = await supabase.auth.signUp({
         email,
@@ -499,7 +525,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       throw error;
     } finally {
-      setIsLoading(false);
+      setAuthLoading(false);
     }
   };
 
@@ -559,6 +585,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isDriver = roles.includes('driver');
   const isAdmin = roles.includes('admin');
 
+  const isLoading = authLoading || profileLoading;
+
   return (
     <AuthContext.Provider
       value={{
@@ -567,6 +595,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         profile,
         driverProfile,
         roles,
+        authLoading,
+        profileLoading,
         isLoading,
         isRider,
         isDriver,
