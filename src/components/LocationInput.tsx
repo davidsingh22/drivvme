@@ -49,20 +49,23 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
     setIsSearching(true);
     try {
-      // Enhanced geocoding with broader search types and Montreal proximity
-      // types: address, poi, place, locality, neighborhood for better landmark support
-      // proximity: Montreal coordinates for better local results
-      // fuzzyMatch: true for partial/alternate name matching
+      // Maximum POI discovery: include ALL categories for restaurants, airports, hospitals, casinos, etc.
+      // Mapbox POI categories covered: food, restaurant, hotel, lodging, airport, bus_station, train_station,
+      // hospital, pharmacy, bank, atm, casino, nightclub, bar, cafe, shopping_mall, supermarket, 
+      // gas_station, parking, park, museum, theater, cinema, gym, spa, school, university, library,
+      // police, fire_station, post_office, place_of_worship, stadium, zoo, aquarium, amusement_park, etc.
       const params = new URLSearchParams({
         access_token: token,
         country: 'ca',
-        // Include all POI types for landmarks, airports, train stations, malls, etc.
-        types: 'address,poi,poi.landmark,place,locality,neighborhood,region',
+        // 'poi' covers ALL points of interest categories in Mapbox
+        // Combined with address/place for complete coverage of any searchable location
+        types: 'poi,address,place,locality,neighborhood',
         limit: '10',
         fuzzyMatch: 'true',
         autocomplete: 'true',
-        proximity: '-73.5673,45.5017', // Montreal center for better local results
-        language: 'en,fr', // Support both languages
+        // Central Canada proximity (between Montreal/Toronto) for balanced national results
+        proximity: '-79.3832,43.6532',
+        language: 'en,fr',
       });
       
       const response = await fetch(
