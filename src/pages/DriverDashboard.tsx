@@ -50,6 +50,7 @@ const DriverDashboard = () => {
     isDriver,
     driverProfile,
     refreshDriverProfile,
+    refreshSession,
     authLoading,
     profileLoading,
   } = useAuth();
@@ -76,6 +77,8 @@ const DriverDashboard = () => {
 
   const [redirectGraceOver, setRedirectGraceOver] = useState(false);
 
+  const [showReconnect, setShowReconnect] = useState(false);
+
   // Persist last known route so iOS Home Screen reloads can restore driver dashboard.
   useEffect(() => {
     try {
@@ -91,6 +94,23 @@ const DriverDashboard = () => {
     const t = window.setTimeout(() => setRedirectGraceOver(true), 5000);
     return () => window.clearTimeout(t);
   }, []);
+
+  // If we have a session but roles/driver profile are taking too long, show a reconnect UI
+  // instead of an infinite loading screen.
+  useEffect(() => {
+    // Reset when things are healthy.
+    const waitingForIdentity =
+      !!session &&
+      (profileLoading || roles.length === 0 || (roles.includes('driver') && !driverProfile));
+
+    if (!waitingForIdentity) {
+      setShowReconnect(false);
+      return;
+    }
+
+    const t = window.setTimeout(() => setShowReconnect(true), 8000);
+    return () => window.clearTimeout(t);
+  }, [session, profileLoading, roles.length, driverProfile]);
 
   // Redirect if not logged in as driver (gated behind authLoading + grace window)
   useEffect(() => {
@@ -116,9 +136,20 @@ const DriverDashboard = () => {
   // fetch it in the background (don't redirect).
   useEffect(() => {
     if (!session?.user) return;
-    if (!isDriver) return;
     if (driverProfile) return;
-    void refreshDriverProfile();
+
+    // If roles are slow to load, use last_route as a hint that this user is a driver.
+    const last = (() => {
+      try {
+        return localStorage.getItem('last_route');
+      } catch {
+        return null;
+      }
+    })();
+
+    if (isDriver || last === '/driver') {
+      void refreshDriverProfile();
+    }
   }, [session?.user?.id, isDriver, driverProfile, refreshDriverProfile]);
 
   // Initialize driver status
@@ -467,10 +498,48 @@ const DriverDashboard = () => {
   const driverEarnings = currentRide ? currentRide.estimated_fare - PLATFORM_FEE : 0;
 
   // Loading states: never redirect while we are still restoring session/profile on iOS.
-  if (authLoading || (session && (profileLoading || roles.length === 0 || (isDriver && !driverProfile)))) {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
+      </div>
+    );
+  }
+
+  const waitingForIdentity =
+    !!session &&
+    (profileLoading || roles.length === 0 || (roles.includes('driver') && !driverProfile));
+
+  if (waitingForIdentity) {
+    if (!showReconnect) {
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <Card className="w-full max-w-sm p-6 text-center">
+          <div className="font-medium">Reconnecting…</div>
+          <div className="mt-2 text-sm text-muted-foreground">
+            We’re keeping you signed in while we reload your driver account.
+          </div>
+          <div className="mt-5 flex flex-col gap-3">
+            <Button
+              onClick={async () => {
+                await refreshSession();
+                await refreshDriverProfile();
+              }}
+            >
+              Retry now
+            </Button>
+            <Button variant="outline" onClick={() => window.location.reload()}>
+              Reload page
+            </Button>
+          </div>
+        </Card>
       </div>
     );
   }

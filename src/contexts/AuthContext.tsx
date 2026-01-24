@@ -74,6 +74,8 @@ interface AuthContextType {
   isRider: boolean;
   isDriver: boolean;
   isAdmin: boolean;
+  /** Best-effort re-check of the current session (used for iOS resume). */
+  refreshSession: (options?: { silent?: boolean }) => Promise<void>;
   signUp: (
     email: string,
     password: string,
@@ -292,6 +294,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshSession = async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) setAuthLoading(true);
+
+    try {
+      const {
+        data: { session: next },
+      } = await withTimeout(supabase.auth.getSession(), 12000);
+
+      // If we have a session, set it immediately (do not wait for profile fetch).
+      if (next?.user) {
+        setSession(next);
+        setUser(next.user);
+        hydrateFromCache(next.user.id);
+
+        // If we don't have roles yet, attempt to (re)load user data in the background.
+        if (rolesRef.current.length === 0) {
+          await loadUserData(next.user.id);
+        }
+        return;
+      }
+
+      // No session: do NOT aggressively clear state during iOS resume.
+      const recentlyResumed = Date.now() - lastResumeAttemptAtRef.current < 7000;
+      if (!recentlyResumed) {
+        setSession(null);
+        setUser(null);
+        setProfile(null);
+        setDriverProfile(null);
+        setRoles([]);
+      }
+    } catch (e) {
+      // Keep existing state on transient errors/timeouts.
+      console.warn('[Auth] refreshSession failed (keeping existing state):', e);
+    } finally {
+      if (!silent) setAuthLoading(false);
+    }
+  };
+
   useEffect(() => {
     // Set up auth state listener FIRST
     const {
@@ -407,44 +448,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Give storage a moment to wake up before checking session.
           await new Promise((r) => setTimeout(r, 150));
 
-          const { data } = await supabase.auth.getSession();
-
-          // On mobile lock/unlock, browsers can briefly fail to read storage/network.
-          // Do NOT force a sign-out here; only the auth system should emit SIGNED_OUT.
-          // If we already have a user in state, trust it and just try to refresh.
-          if (!data.session) {
-            // If we have a cached user, try to refresh session instead of giving up
-            if (userRef.current) {
-              console.log('[Auth] No session found on resume, but user exists in state. Attempting refresh...');
-              try {
-                const refreshResult = await withTimeout(supabase.auth.refreshSession(), 10000);
-                if (refreshResult.data.session) {
-                  setSession(refreshResult.data.session);
-                  setUser(refreshResult.data.session.user);
-                  console.log('[Auth] Session refreshed successfully on resume');
-                }
-              } catch (refreshError) {
-                console.warn('[Auth] Session refresh failed on resume, keeping existing state:', refreshError);
-                // Don't sign out - keep existing state, it might recover
-              }
-            }
-            return;
-          }
-
-          // Session exists: ensure state is hydrated and refresh tokens silently.
-          if (!userRef.current || userRef.current.id !== data.session.user.id) {
-            setSession(data.session);
-            setUser(data.session.user);
-            hydrateFromCache(data.session.user.id);
-          }
-
-          // Refresh tokens in the background (best-effort) with longer timeout for iOS
-          await withTimeout(supabase.auth.refreshSession(), 12000).catch(() => undefined);
-
-          // If we were missing roles/profile (e.g., first wake), reload without blocking UI
-          if (data.session?.user && rolesRef.current.length === 0) {
-            await loadUserData(data.session.user.id);
-          }
+          // Best-effort, silent session re-check.
+          await refreshSession({ silent: true });
         } finally {
           resumeCheckInFlight.current = null;
         }
@@ -455,13 +460,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (document.visibilityState === 'visible') resumeCheck();
     };
 
+    // iOS Safari often restores pages from bfcache; pageshow is a reliable resume signal.
+    const onPageShow = () => resumeCheck();
+
     window.addEventListener('focus', resumeCheck);
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
 
     return () => {
       subscription.unsubscribe();
       window.removeEventListener('focus', resumeCheck);
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, []);
 
@@ -580,9 +590,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const refreshDriverProfile = async () => {
-    if (user && roles.includes('driver')) {
+    if (!user) return;
+    try {
       const data = await fetchDriverProfile(user.id);
       setDriverProfile(data);
+    } catch {
+      // keep existing driverProfile on transient failures
     }
   };
 
@@ -606,6 +619,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isRider,
         isDriver,
         isAdmin,
+        refreshSession,
         signUp,
         signIn,
         signOut,
