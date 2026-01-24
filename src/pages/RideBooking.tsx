@@ -421,6 +421,43 @@ const RideBooking = () => {
     }
   };
 
+  // Notify nearby drivers when a ride is created
+  const notifyNearbyDrivers = async (
+    rideId: string, 
+    pickupLocation: Location, 
+    dropoffLocation: Location, 
+    estimatedFare: number
+  ) => {
+    try {
+      const response = await supabase.functions.invoke('notify-drivers-new-ride', {
+        body: {
+          rideId,
+          pickupAddress: pickupLocation.address,
+          dropoffAddress: dropoffLocation.address,
+          estimatedFare,
+          pickupLat: pickupLocation.lat,
+          pickupLng: pickupLocation.lng,
+          maxDistanceKm: 15, // Notify drivers within 15km
+        },
+      });
+
+      if (response.error) {
+        console.error('Failed to notify drivers:', response.error);
+      } else {
+        console.log('Driver notification result:', response.data);
+        const { nearbyDrivers, sent, inAppNotifications } = response.data || {};
+        if (nearbyDrivers > 0) {
+          toast({
+            title: `${nearbyDrivers} driver${nearbyDrivers > 1 ? 's' : ''} notified`,
+            description: `Your ride request is visible to nearby drivers.`,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error notifying drivers:', error);
+    }
+  };
+
   const handlePickupChange = (address: string, location?: { lat: number; lng: number }) => {
     setPickupAddress(address);
     if (location) {
@@ -591,13 +628,16 @@ const RideBooking = () => {
         updateRide(ride);
         setShowStatusBanner(true);
 
-        // Test accounts go directly to searching
+        // Test accounts go directly to searching and notify drivers
         if (skipPayment) {
           setStep('searching');
           toast({
             title: 'Test mode',
-            description: 'Payment bypassed. Looking for nearby drivers...',
+            description: 'Payment bypassed. Notifying nearby drivers...',
           });
+          
+          // Notify nearby drivers of the new ride request
+          notifyNearbyDrivers(ride.id, pickup, dropoff, fareEstimate.total);
         }
       } catch (err: any) {
         console.error('Error creating ride:', err);
@@ -622,6 +662,11 @@ const RideBooking = () => {
           .update({ status: 'searching' })
           .eq('id', currentRide.id)
           .eq('status', 'pending_payment');
+          
+        // Notify nearby drivers of the new ride request
+        if (pickup && dropoff && fareEstimate) {
+          notifyNearbyDrivers(currentRide.id, pickup, dropoff, fareEstimate.total);
+        }
       } catch (e) {
         console.error('Failed to update ride status to searching', e);
         // Webhook will handle this as fallback
@@ -630,7 +675,7 @@ const RideBooking = () => {
     setStep('searching');
     toast({
       title: t('booking.searching'),
-      description: 'Payment confirmed! Looking for nearby drivers...',
+      description: 'Payment confirmed! Notifying nearby drivers...',
     });
   };
 
