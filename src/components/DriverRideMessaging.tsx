@@ -153,8 +153,10 @@ export default function DriverRideMessaging({
         .insert({
           ride_id: rideId,
           sender_id: user.id,
+          sender_user_id: user.id,
           sender_role: 'driver',
           message: newMessage.trim(),
+          body: newMessage.trim(),
         });
 
       if (error) {

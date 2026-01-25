@@ -458,28 +458,34 @@ export type Database = {
       }
       ride_messages: {
         Row: {
+          body: string | null
           created_at: string
           id: string
           message: string
           ride_id: string
           sender_id: string
           sender_role: string
+          sender_user_id: string | null
         }
         Insert: {
+          body?: string | null
           created_at?: string
           id?: string
           message: string
           ride_id: string
           sender_id: string
           sender_role: string
+          sender_user_id?: string | null
         }
         Update: {
+          body?: string | null
           created_at?: string
           id?: string
           message?: string
           ride_id?: string
           sender_id?: string
           sender_role?: string
+          sender_user_id?: string | null
         }
         Relationships: []
       }
