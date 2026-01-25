@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-ro
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/integrations/supabase/client";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -23,6 +24,54 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 const queryClient = new QueryClient();
 
+// /ride is a rider screen. Drivers should always be redirected to /driver.
+const RideRoute = () => {
+  const { session, authLoading, isDriver } = useAuth();
+  const navigate = useNavigate();
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!session?.user?.id) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        // Fast path: context already knows.
+        if (isDriver) {
+          if (!cancelled) navigate('/driver', { replace: true });
+          return;
+        }
+
+        // Hard guarantee: backend role check (works even if roles table read is blocked).
+        const { data } = await supabase.rpc('is_driver', { _user_id: session.user.id });
+        if (cancelled) return;
+        if (data) {
+          navigate('/driver', { replace: true });
+          return;
+        }
+      } finally {
+        if (!cancelled) setChecked(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoading, session?.user?.id, isDriver, navigate]);
+
+  // While checking, avoid flashing the rider booking UI.
+  if (authLoading || (session?.user?.id && !checked)) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading…</div>
+      </div>
+    );
+  }
+
+  return <RideBooking />;
+};
+
 // Wrapped inside BrowserRouter AND AuthProvider to ensure context is available.
 const AppRoutes = () => {
   return (
@@ -32,7 +81,7 @@ const AppRoutes = () => {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
-        <Route path="/ride" element={<RideBooking />} />
+        <Route path="/ride" element={<RideRoute />} />
         <Route
           path="/driver"
           element={
