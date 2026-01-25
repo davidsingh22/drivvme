@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   MapPin, 
@@ -11,10 +12,10 @@ import {
   PlayCircle, 
   ExternalLink,
   AlertTriangle,
-  Map
+  Map,
+  MessageSquare
 } from 'lucide-react';
 import DriverNavigationMap from '@/components/DriverNavigationMap';
-import DriverRideMessaging from '@/components/DriverRideMessaging';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -60,6 +61,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const { user, session } = useAuth();
   const { language } = useLanguage();
   const { toast } = useToast();
+  const navigate = useNavigate();
   
   const [activeRide, setActiveRide] = useState<ActiveRide | null>(null);
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
@@ -68,6 +70,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const [driverMismatch, setDriverMismatch] = useState<string | null>(null);
   const [showNavigation, setShowNavigation] = useState(false);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [unreadMessages, setUnreadMessages] = useState(0);
 
   const driverId = session?.user?.id ?? user?.id;
 
@@ -128,6 +131,52 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       setIsLoading(false);
     }
   }, [driverId, onRideUpdated]);
+
+  // Subscribe to unread messages count
+  useEffect(() => {
+    if (!activeRide?.id) {
+      setUnreadMessages(0);
+      return;
+    }
+
+    // Fetch initial count
+    const fetchCount = async () => {
+      const { data, error } = await supabase
+        .from('ride_messages')
+        .select('id')
+        .eq('ride_id', activeRide.id)
+        .eq('sender_role', 'rider');
+
+      if (!error && data) {
+        setUnreadMessages(data.length);
+      }
+    };
+
+    fetchCount();
+
+    // Subscribe to new messages
+    const channel = supabase
+      .channel(`driver-messages-badge-${activeRide.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'ride_messages',
+          filter: `ride_id=eq.${activeRide.id}`,
+        },
+        (payload) => {
+          if ((payload.new as any).sender_role === 'rider') {
+            setUnreadMessages(prev => prev + 1);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeRide?.id]);
 
   // Initial fetch
   useEffect(() => {
@@ -376,14 +425,35 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
             >
               <Phone className="h-4 w-4" />
             </Button>
-            <DriverRideMessaging
-              rideId={activeRide.id}
-              rideStatus={activeRide.status}
-              riderId={activeRide.rider_id}
-              riderName={`${riderInfo.first_name || 'Rider'} ${riderInfo.last_name?.[0] || ''}.`.trim()}
-            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1 relative"
+              onClick={() => navigate(`/driver/messages?rideId=${activeRide.id}`)}
+            >
+              <MessageSquare className="h-4 w-4" />
+              {unreadMessages > 0 && (
+                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
+                  {unreadMessages > 9 ? '9+' : unreadMessages}
+                </span>
+              )}
+            </Button>
           </div>
         )}
+
+        {/* ====== PROMINENT MESSAGES BUTTON ====== */}
+        <Button
+          className="w-full mb-4 py-5 text-base font-bold bg-primary/10 border-2 border-primary text-primary hover:bg-primary hover:text-primary-foreground transition-all relative"
+          onClick={() => navigate(`/driver/messages?rideId=${activeRide.id}`)}
+        >
+          <MessageSquare className="h-5 w-5 mr-2" />
+          {language === 'fr' ? 'Ouvrir les Messages' : 'Open Messages'}
+          {unreadMessages > 0 && (
+            <Badge className="ml-2 bg-destructive text-destructive-foreground">
+              {unreadMessages}
+            </Badge>
+          )}
+        </Button>
 
         {/* Route Details */}
         <div className="space-y-2 mb-4">

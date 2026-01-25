@@ -13,6 +13,7 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import RideBooking from "./pages/RideBooking";
 import DriverDashboard from "./pages/DriverDashboard";
+import DriverMessages from "./pages/DriverMessages";
 import RideHistory from "./pages/RideHistory";
 import Earnings from "./pages/Earnings";
 import AdminDashboard from "./pages/AdminDashboard";
@@ -23,7 +24,6 @@ import DriverLive from "./pages/DriverLive";
 import NotFound from "./pages/NotFound";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import DriverFloatingGPSButton from "@/components/DriverFloatingGPSButton";
-import DriverMessagesBadge from "@/components/DriverMessagesBadge";
 
 const queryClient = new QueryClient();
 
@@ -81,7 +81,6 @@ const AppRoutes = () => {
     <>
       <RouteRestorer />
       <DriverFloatingGPSButton />
-      <DriverMessagesBadge />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
@@ -92,6 +91,14 @@ const AppRoutes = () => {
           element={
             <RouteErrorBoundary title="Driver dashboard error">
               <DriverDashboard />
+            </RouteErrorBoundary>
+          }
+        />
+        <Route
+          path="/driver/messages"
+          element={
+            <RouteErrorBoundary title="Driver messages error">
+              <DriverMessages />
             </RouteErrorBoundary>
           }
         />
