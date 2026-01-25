@@ -7,11 +7,14 @@ import { Button } from '@/components/ui/button';
 
 type GeoJSONSourceLike = mapboxgl.GeoJSONSource;
 
+type RouteMode = 'pickup-dropoff' | 'driver-to-pickup' | 'driver-to-dropoff';
+
 interface MapComponentProps {
   pickup?: { lat: number; lng: number } | null;
   dropoff?: { lat: number; lng: number } | null;
   driverLocation?: { lat: number; lng: number } | null;
   riderLocation?: { lat: number; lng: number } | null;
+  routeMode?: RouteMode;
   onMapClick?: (lat: number, lng: number) => void;
   showUserLocation?: boolean;
 }
@@ -51,6 +54,7 @@ const MapComponent = ({
   dropoff,
   driverLocation,
   riderLocation,
+  routeMode = 'pickup-dropoff',
   onMapClick,
   showUserLocation = true,
 }: MapComponentProps) => {
@@ -393,12 +397,32 @@ const MapComponent = ({
     }
   }, [driverLocation, mapLoaded, createDriverMarkerElement]);
 
-  // Draw route line between pickup and dropoff
+  // Draw route line based on routeMode
   useEffect(() => {
     if (!mapRef.current || !mapLoaded || !token) return;
 
-    // If we don't have both points, remove any existing route to avoid extra work.
-    if (!pickup || !dropoff) {
+    // Determine route start and end based on mode
+    let routeStart: { lat: number; lng: number } | null = null;
+    let routeEnd: { lat: number; lng: number } | null = null;
+
+    switch (routeMode) {
+      case 'driver-to-pickup':
+        routeStart = driverLocation || null;
+        routeEnd = pickup || null;
+        break;
+      case 'driver-to-dropoff':
+        routeStart = driverLocation || null;
+        routeEnd = dropoff || null;
+        break;
+      case 'pickup-dropoff':
+      default:
+        routeStart = pickup || null;
+        routeEnd = dropoff || null;
+        break;
+    }
+
+    // If we don't have both points, remove any existing route
+    if (!routeStart || !routeEnd) {
       if (mapRef.current.getLayer('route')) mapRef.current.removeLayer('route');
       if (mapRef.current.getSource('route')) mapRef.current.removeSource('route');
       return;
@@ -409,7 +433,7 @@ const MapComponent = ({
     const fetchRoute = async () => {
       try {
         const response = await fetch(
-          `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}?geometries=geojson&access_token=${token}`,
+          `https://api.mapbox.com/directions/v5/mapbox/driving/${routeStart!.lng},${routeStart!.lat};${routeEnd!.lng},${routeEnd!.lat}?geometries=geojson&access_token=${token}`,
           { signal: abort.signal }
         );
         const data = await response.json();
@@ -423,10 +447,18 @@ const MapComponent = ({
           geometry: route,
         };
 
+        // Determine route color based on mode
+        const routeColor = routeMode === 'driver-to-pickup' ? '#a855f7' : 
+                           routeMode === 'driver-to-dropoff' ? '#84cc16' : '#a855f7';
+
         // Update existing source instead of removing/re-adding layers (reduces UI freezes on mobile).
         const existingSource = mapRef.current?.getSource('route') as GeoJSONSourceLike | undefined;
         if (existingSource) {
           existingSource.setData(feature as any);
+          // Update line color if layer exists
+          if (mapRef.current?.getLayer('route')) {
+            mapRef.current.setPaintProperty('route', 'line-color', routeColor);
+          }
           return;
         }
 
@@ -444,7 +476,7 @@ const MapComponent = ({
             'line-cap': 'round',
           },
           paint: {
-            'line-color': '#a855f7',
+            'line-color': routeColor,
             'line-width': 5,
             'line-opacity': 0.8,
           },
@@ -459,7 +491,7 @@ const MapComponent = ({
     fetchRoute();
 
     return () => abort.abort();
-  }, [pickup, dropoff, mapLoaded, token]);
+  }, [pickup, dropoff, driverLocation, routeMode, mapLoaded, token]);
 
   // Fit bounds when markers change
   useEffect(() => {
