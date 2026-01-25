@@ -96,7 +96,14 @@ export default function AdminDriversLive() {
     zoom: 11,
   });
 
-  const driversList = useMemo(() => Object.values(drivers), [drivers]);
+  // Filter to only show active (non-stale) drivers
+  const driversList = useMemo(() => {
+    const now = Date.now();
+    return Object.values(drivers).filter((d) => {
+      const ageSec = Math.floor((now - new Date(d.updated_at).getTime()) / 1000);
+      return ageSec <= STALE_THRESHOLD_SECONDS;
+    });
+  }, [drivers]);
 
   // Auth guard
   useEffect(() => {
@@ -309,9 +316,6 @@ export default function AdminDriversLive() {
 
   const now = Date.now();
   const onlineCount = driversList.length;
-  const staleCount = driversList.filter(
-    (d) => Math.floor((now - new Date(d.updated_at).getTime()) / 1000) > STALE_THRESHOLD_SECONDS
-  ).length;
 
   const getTimeSinceLastSeen = (updatedAt: string) => {
     const seconds = Math.floor((Date.now() - new Date(updatedAt).getTime()) / 1000);
@@ -375,8 +379,7 @@ export default function AdminDriversLive() {
                 Live Drivers
               </h1>
               <p className="text-muted-foreground">
-                {onlineCount} driver{onlineCount !== 1 ? 's' : ''} online
-                {staleCount > 0 && <span className="text-amber-500 ml-2">({staleCount} stale)</span>}
+                {onlineCount} active driver{onlineCount !== 1 ? 's' : ''}
               </p>
             </div>
           </div>
@@ -406,8 +409,6 @@ export default function AdminDriversLive() {
                   <NavigationControl position="top-right" />
 
                   {driversList.map((d) => {
-                    const ageSec = Math.floor((now - new Date(d.updated_at).getTime()) / 1000);
-                    const isStale = ageSec > STALE_THRESHOLD_SECONDS;
                     const carColor = getCarColor(d.vehicle_color);
 
                     return (
@@ -428,10 +429,8 @@ export default function AdminDriversLive() {
                             style={{ backgroundColor: carColor }}
                           >
                             <Car className="h-5 w-5 text-primary-foreground" />
-                            {/* Stale indicator */}
-                            {isStale && (
-                              <div className="absolute -top-1 -right-1 w-3 h-3 bg-destructive rounded-full border border-background" />
-                            )}
+                            {/* Active pulse indicator */}
+                            <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border border-background animate-pulse" />
                           </div>
                           {/* Driver name */}
                           <div className="mt-1 px-2 py-0.5 bg-card border border-border rounded text-xs text-foreground font-medium max-w-[120px] truncate">
