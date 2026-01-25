@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle, Bell } from 'lucide-react';
+import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle, Bell, Map } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -25,6 +25,7 @@ import { useDriverGPSStreaming } from '@/hooks/useDriverGPSStreaming';
 import { useDriverLocationTracking } from '@/hooks/useDriverLocationTracking';
 import { DriverLocationStatus } from '@/components/DriverLocationStatus';
 import DriverActiveRidePanel from '@/components/DriverActiveRidePanel';
+import DriverNavigationMap from '@/components/DriverNavigationMap';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
 
@@ -83,6 +84,7 @@ const DriverDashboard = () => {
   const [todayEarnings, setTodayEarnings] = useState(0);
   const [todayRides, setTodayRides] = useState(0);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [showGPSNavigation, setShowGPSNavigation] = useState(false);
 
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
@@ -898,6 +900,17 @@ const DriverDashboard = () => {
               }}
             />
 
+            {/* GPS Navigation Button - Prominent when there's an active ride */}
+            {currentRide && ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(currentRide.status) && (
+              <Button
+                className="w-full mb-4 py-6 text-lg font-bold bg-primary hover:bg-primary/90"
+                onClick={() => setShowGPSNavigation(true)}
+              >
+                <Map className="h-6 w-6 mr-3" />
+                {language === 'fr' ? 'Ouvrir Navigation GPS' : 'Open GPS Navigation'}
+              </Button>
+            )}
+
             {/* Profile Button */}
             <Button
               variant="outline"
@@ -1310,6 +1323,20 @@ const DriverDashboard = () => {
 
       {/* PWA Install Prompt for Drivers */}
       <PWAInstallPrompt />
+
+      {/* Fullscreen GPS Navigation Map */}
+      {showGPSNavigation && currentRide && (
+        <DriverNavigationMap
+          driverLocation={driverLocation}
+          destination={
+            currentRide.status === 'in_progress'
+              ? { lat: currentRide.dropoff_lat, lng: currentRide.dropoff_lng, address: currentRide.dropoff_address }
+              : { lat: currentRide.pickup_lat, lng: currentRide.pickup_lng, address: currentRide.pickup_address }
+          }
+          destinationType={currentRide.status === 'in_progress' ? 'dropoff' : 'pickup'}
+          onClose={() => setShowGPSNavigation(false)}
+        />
+      )}
     </div>
   );
 };
