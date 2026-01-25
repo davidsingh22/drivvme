@@ -159,7 +159,7 @@ const RideBooking = () => {
       }
 
       // If roles are present and not driver, allow rider flow.
-      if (roles.length > 0) return;
+      if (roles.length > 0 && !isDriver) return;
 
       // Roles missing: do a one-shot backend role check to avoid misrouting drivers to /ride.
       // Use RPC since it is SECURITY DEFINER (works even if direct roles reads are blocked).
@@ -168,6 +168,22 @@ const RideBooking = () => {
       if (cancelled) return;
 
       if (isDriverRpc) {
+        setIsRedirecting(true);
+        navigate('/driver', { replace: true });
+        return;
+      }
+
+      // Extra resilience: check if user has an active ride AS A DRIVER
+      const { data: activeDriverRide } = await supabase
+        .from('rides')
+        .select('id')
+        .eq('driver_id', user.id)
+        .in('status', ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'])
+        .limit(1)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (activeDriverRide) {
         setIsRedirecting(true);
         navigate('/driver', { replace: true });
         return;
