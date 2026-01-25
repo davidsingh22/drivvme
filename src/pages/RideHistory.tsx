@@ -147,6 +147,19 @@ const RideHistory = () => {
     fetchRides();
   }, [user, isRider, isDriver, filter]);
 
+  // Debug why the driver completion button might not show on some devices.
+  // This will help confirm the ride status + ownership conditions.
+  useEffect(() => {
+    if (!user) return;
+    const active = rides.filter((r) => ['arrived', 'in_progress'].includes(r.status));
+    if (active.length === 0) return;
+    console.debug('[RideHistory] user.id', user.id);
+    console.debug(
+      '[RideHistory] active rides (arrived/in_progress)',
+      active.map((r) => ({ id: r.id, status: r.status, driver_id: r.driver_id, rider_id: r.rider_id }))
+    );
+  }, [rides, user]);
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed':
