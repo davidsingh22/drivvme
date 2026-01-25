@@ -17,6 +17,7 @@ interface MapComponentProps {
   routeMode?: RouteMode;
   onMapClick?: (lat: number, lng: number) => void;
   showUserLocation?: boolean;
+  followDriver?: boolean;
 }
 
 const defaultCenter: [number, number] = [-73.5673, 45.5017]; // Montreal [lng, lat]
@@ -57,6 +58,7 @@ const MapComponent = ({
   routeMode = 'pickup-dropoff',
   onMapClick,
   showUserLocation = true,
+  followDriver = false,
 }: MapComponentProps) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -493,14 +495,24 @@ const MapComponent = ({
     return () => abort.abort();
   }, [pickup, dropoff, driverLocation, routeMode, mapLoaded, token]);
 
-  // Fit bounds when markers change
+  // Fit bounds when markers change OR follow driver mode
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
 
     let raf = 0;
 
-    // Throttle to a frame; fitBounds can be heavy on mobile.
     raf = requestAnimationFrame(() => {
+      // Follow driver mode: center on driver with smooth animation
+      if (followDriver && driverLocation) {
+        mapRef.current?.easeTo({
+          center: [driverLocation.lng, driverLocation.lat],
+          zoom: 16,
+          duration: 800,
+        });
+        return;
+      }
+
+      // Default: fit all points in view
       const points: [number, number][] = [];
       if (pickup) points.push([pickup.lng, pickup.lat]);
       if (dropoff) points.push([dropoff.lng, dropoff.lat]);
@@ -521,7 +533,7 @@ const MapComponent = ({
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [pickup, dropoff, driverLocation, riderLocation, mapLoaded]);
+  }, [pickup, dropoff, driverLocation, riderLocation, mapLoaded, followDriver]);
 
   if (loading) {
     return (
