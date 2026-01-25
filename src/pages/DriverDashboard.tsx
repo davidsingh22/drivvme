@@ -766,6 +766,7 @@ const DriverDashboard = () => {
                 secondsSinceLastUpdate={gpsSecondsSinceLastUpdate}
                 retryCount={gpsRetryCount}
                 onRetry={retryGPS}
+                rideId={currentRide?.id ?? null}
               />
             )}
             

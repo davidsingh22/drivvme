@@ -11,6 +11,7 @@ interface DriverGPSStatusIndicatorProps {
   secondsSinceLastUpdate: number;
   retryCount: number;
   onRetry: () => void;
+  rideId: string | null;
 }
 
 export function DriverGPSStatusIndicator({
@@ -20,6 +21,7 @@ export function DriverGPSStatusIndicator({
   secondsSinceLastUpdate,
   retryCount,
   onRetry,
+  rideId,
 }: DriverGPSStatusIndicatorProps) {
   const { t } = useLanguage();
 
@@ -125,6 +127,24 @@ export function DriverGPSStatusIndicator({
           </div>
         </div>
 
+        {/* Ride ID Debug Display */}
+        <div className="mt-2 pt-2 border-t border-border/30">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Active Ride ID:</span>
+            <span className={`font-mono ${rideId ? 'text-primary' : 'text-destructive'}`}>
+              {rideId ? rideId.slice(0, 12) + '...' : 'NULL (not streaming to DB)'}
+            </span>
+          </div>
+          {position && (
+            <div className="flex items-center justify-between text-xs mt-1">
+              <span className="text-muted-foreground">Lat/Lng:</span>
+              <span className="font-mono text-foreground">
+                {position.lat.toFixed(6)}, {position.lng.toFixed(6)}
+              </span>
+            </div>
+          )}
+        </div>
+
         {/* Warning message if stale */}
         {secondsSinceLastUpdate > 10 && (
           <motion.div
@@ -138,6 +158,23 @@ export function DriverGPSStatusIndicator({
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-warning"></span>
               </span>
               {t('riderMayNotSee') || "Rider may not see your current position"}
+            </p>
+          </motion.div>
+        )}
+
+        {/* Warning if no rideId */}
+        {!rideId && isStreaming && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="mt-2 pt-2 border-t border-border/30"
+          >
+            <p className="text-xs text-destructive flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-destructive"></span>
+              </span>
+              ⚠️ No active ride - location NOT being saved to ride_locations
             </p>
           </motion.div>
         )}
