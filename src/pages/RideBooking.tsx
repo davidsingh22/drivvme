@@ -23,6 +23,8 @@ import InRideStatusBar from '@/components/ride/InRideStatusBar';
 import InRideDriverCard from '@/components/ride/InRideDriverCard';
 import SafetySheet from '@/components/ride/SafetySheet';
 import TripCompletionScreen from '@/components/ride/TripCompletionScreen';
+import { MapRecenterButton } from '@/components/MapRecenterButton';
+import { useRealtimeDriverTracking } from '@/hooks/useRealtimeDriverTracking';
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -70,8 +72,29 @@ const RideBooking = () => {
   const [notificationTier, setNotificationTier] = useState(1);
   const [safetySheetOpen, setSafetySheetOpen] = useState(false);
   const [minutesAway, setMinutesAway] = useState<number | null>(null);
+  const [followDriver, setFollowDriver] = useState(true);
   const paymentGateCheckedRef = useRef<string | null>(null);
   const riderLocationWatchId = useRef<number | null>(null);
+  const mapRef = useRef<any>(null);
+
+  // Realtime driver tracking with live ETA
+  const isActiveRidePhase = step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress';
+  const targetLocation = step === 'inProgress' ? dropoff : pickup;
+  
+  const { 
+    driverLocation: realtimeDriverLocation,
+    eta: realtimeETA,
+    lastUpdateSeconds,
+  } = useRealtimeDriverTracking({
+    driverId: currentRide?.driver_id ?? null,
+    targetLocation: targetLocation,
+    enabled: isActiveRidePhase && !!currentRide?.driver_id,
+  });
+
+  // Use realtime driver location when available
+  const effectiveDriverLocation = realtimeDriverLocation 
+    ? { lat: realtimeDriverLocation.lat, lng: realtimeDriverLocation.lng }
+    : driverLocation;
 
   const { token: mapboxToken } = useMapboxToken();
 
@@ -839,9 +862,7 @@ const RideBooking = () => {
     hasRestoredRide.current = false;
   };
 
-  // Check if we're in an active ride phase (fullscreen map mode)
-  const isActiveRidePhase = step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress';
-
+  // isActiveRidePhase already declared above for realtime tracking
   // Use ride notifications hook (must be before any returns)
   useRideNotifications({
     phase: isActiveRidePhase ? (step as 'matched' | 'arriving' | 'arrived' | 'inProgress') : 'matched',

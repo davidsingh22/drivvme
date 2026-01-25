@@ -20,6 +20,7 @@ import { DriverNewRideAlert } from '@/components/DriverNewRideAlert';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { DriverWakeLockBanner } from '@/components/DriverWakeLockBanner';
 import { DriverGPSErrorBanner } from '@/components/DriverGPSErrorBanner';
+import { DriverGPSStatusIndicator } from '@/components/DriverGPSStatusIndicator';
 import { useDriverGPSStreaming } from '@/hooks/useDriverGPSStreaming';
 
 const PLATFORM_FEE = 5.00;
@@ -84,18 +85,21 @@ const DriverDashboard = () => {
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
   const prevRideIdsRef = useRef<Set<string>>(new Set());
   
-  // GPS Streaming for live driver location
+  // GPS Streaming for live driver location (continuous foreground tracking)
   const {
     position: gpsPosition,
     error: gpsError,
     isStreaming: isGPSStreaming,
+    isConnected: isGPSConnected,
+    secondsSinceLastUpdate: gpsSecondsSinceLastUpdate,
     retryCount: gpsRetryCount,
     retry: retryGPS,
   } = useDriverGPSStreaming({
     driverId: user?.id ?? null,
     rideId: currentRide?.id ?? null,
     isOnTrip: isOnline || !!currentRide,
-    updateIntervalMs: 3000, // Update every 3 seconds
+    updateIntervalMs: 2500, // Stream every 2.5 seconds
+    minDistanceMeters: 15, // Or when moved 15+ meters
   });
 
   // Sync GPS position to local state for map
@@ -752,6 +756,18 @@ const DriverDashboard = () => {
           {/* Wake Lock Banner - Keep screen awake while driving */}
           <div className="pt-4">
             <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
+            
+            {/* GPS Status Indicator - Show when streaming */}
+            {(isOnline || currentRide) && !gpsError && (
+              <DriverGPSStatusIndicator
+                isStreaming={isGPSStreaming}
+                isConnected={isGPSConnected}
+                position={gpsPosition}
+                secondsSinceLastUpdate={gpsSecondsSinceLastUpdate}
+                retryCount={gpsRetryCount}
+                onRetry={retryGPS}
+              />
+            )}
             
             {/* GPS Error Banner - Show when location fails */}
             <DriverGPSErrorBanner 
