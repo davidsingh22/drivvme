@@ -16,7 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
 import { useAlertSound } from '@/hooks/useAlertSound';
-import { DriverNewRideAlert } from '@/components/DriverNewRideAlert';
+import { RideOfferModal } from '@/components/RideOfferModal';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { DriverWakeLockBanner } from '@/components/DriverWakeLockBanner';
 import { DriverGPSErrorBanner } from '@/components/DriverGPSErrorBanner';
@@ -24,7 +24,7 @@ import { DriverGPSStatusIndicator } from '@/components/DriverGPSStatusIndicator'
 import { useDriverGPSStreaming } from '@/hooks/useDriverGPSStreaming';
 import DriverActiveRidePanel from '@/components/DriverActiveRidePanel';
 
-const PLATFORM_FEE = 5.00;
+import { calculatePlatformFee } from '@/lib/platformFees';
 
 interface RideRequest {
   id: string;
@@ -159,10 +159,11 @@ const DriverDashboard = () => {
         id: ride.id,
         pickup_address: ride.pickup_address || 'Unknown pickup',
         dropoff_address: ride.dropoff_address || 'Unknown destination',
-        estimated_fare: typeof ride.estimated_fare === 'number' ? ride.estimated_fare : undefined,
+        estimated_fare: ride.estimated_fare,
+        distance_km: ride.distance_km,
+        estimated_duration_minutes: ride.estimated_duration_minutes,
         pickup_eta_minutes: pickupEtaMinutes,
-        minimum_earnings: typeof ride.estimated_fare === 'number' ? ride.estimated_fare - PLATFORM_FEE : undefined,
-        is_priority: false, // Can be set based on surge or rider preference
+        is_priority: false,
       };
     } catch (err) {
       console.error('[DriverDashboard] Error computing alertRide:', err);
@@ -618,7 +619,9 @@ const DriverDashboard = () => {
     } else if (status === 'completed') {
       updates.dropoff_at = new Date().toISOString();
       updates.actual_fare = currentRide.estimated_fare;
-      updates.driver_earnings = currentRide.estimated_fare - PLATFORM_FEE;
+      const fee = calculatePlatformFee(currentRide.estimated_fare);
+      updates.platform_fee = fee;
+      updates.driver_earnings = currentRide.estimated_fare - fee;
     }
 
     const { error } = await supabase
@@ -653,9 +656,10 @@ const DriverDashboard = () => {
     }
 
     if (status === 'completed') {
+      const fee = calculatePlatformFee(currentRide.estimated_fare);
       toast({
         title: 'Ride completed!',
-        description: `You earned ${formatCurrency(currentRide.estimated_fare - PLATFORM_FEE, language)}`,
+        description: `You earned ${formatCurrency(currentRide.estimated_fare - fee, language)}`,
       });
       setCurrentRide(null);
       setRiderInfo(null);
@@ -693,7 +697,8 @@ const DriverDashboard = () => {
     setRiderInfo(null);
   };
 
-  const driverEarnings = currentRide ? currentRide.estimated_fare - PLATFORM_FEE : 0;
+  const currentRideFee = currentRide ? calculatePlatformFee(currentRide.estimated_fare) : 0;
+  const driverEarnings = currentRide ? currentRide.estimated_fare - currentRideFee : 0;
 
   // Loading states: never redirect while we are still restoring session/profile on iOS.
   if (authLoading) {
@@ -743,21 +748,23 @@ const DriverDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <DriverNewRideAlert
+      <RideOfferModal
         open={newRideAlertOpen}
         ride={alertRide}
-        onDismiss={() => {
+        countdownSeconds={20}
+        onDecline={() => {
           setNewRideAlertOpen(false);
           stopAlertSound();
           alertStartTimeRef.current = null;
         }}
-        onView={() => {
-          setNewRideAlertOpen(false);
-          stopAlertSound();
-          // Don't reset alertStartTimeRef - keep timing for fast acceptance reward
-          if (!isOnline) void toggleOnlineStatus();
+        onAccept={() => {
+          if (alertRide) {
+            const ride = availableRides.find((r) => r.id === alertRide.id);
+            if (ride) {
+              acceptRide(ride);
+            }
+          }
         }}
-        showPriorityReward={true}
       />
       <Navbar />
       
@@ -1004,8 +1011,8 @@ const DriverDashboard = () => {
               {/* Platform Fee Info */}
               <div className="bg-background/50 rounded-lg p-3 mb-3">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">{language === 'fr' ? 'Frais plateforme par course' : 'Platform Fee per Ride'}</span>
-                  <span className="font-medium text-destructive">-{formatCurrency(PLATFORM_FEE, language)}</span>
+                  <span className="text-muted-foreground">{language === 'fr' ? 'Frais plateforme' : 'Platform Fee'}</span>
+                  <span className="font-medium text-destructive">{language === 'fr' ? 'Basé sur tarif' : 'Based on fare'}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {language === 'fr' 
@@ -1112,7 +1119,7 @@ const DriverDashboard = () => {
                     </div>
                     <div className="flex justify-between text-sm text-destructive mb-1">
                       <span>{t('driver.platformFee')}</span>
-                      <span>-{formatCurrency(PLATFORM_FEE, language)}</span>
+                      <span>-{formatCurrency(currentRideFee, language)}</span>
                     </div>
                     <div className="flex justify-between font-bold text-accent pt-2 border-t border-border">
                       <span>{t('driver.yourEarnings')}</span>
@@ -1221,11 +1228,11 @@ const DriverDashboard = () => {
                           </div>
                           <div className="flex justify-between text-sm text-destructive mb-1">
                             <span>{t('driver.platformFee')}</span>
-                            <span>-{formatCurrency(PLATFORM_FEE, language)}</span>
+                            <span>-{formatCurrency(calculatePlatformFee(Number(ride.estimated_fare)), language)}</span>
                           </div>
                           <div className="flex justify-between font-bold text-accent pt-2 border-t border-border">
                             <span>{t('driver.yourEarnings')}</span>
-                            <span>{formatCurrency(Number(ride.estimated_fare) - PLATFORM_FEE, language)}</span>
+                            <span>{formatCurrency(Number(ride.estimated_fare) - calculatePlatformFee(Number(ride.estimated_fare)), language)}</span>
                           </div>
                         </div>
 
