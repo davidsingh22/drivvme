@@ -12,120 +12,89 @@ export function useDriverLocationTracking({
   userId,
   driverId,
   isOnline,
-  updateIntervalMs = 3000
+  updateIntervalMs = 4000
 }: UseDriverLocationTrackingOptions) {
-  const watchIdRef = useRef<number | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const lastPositionRef = useRef<GeolocationPosition | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
 
-  const updateLocation = useCallback(async (position: GeolocationPosition) => {
+  const updateOnce = useCallback(async (online: boolean) => {
     if (!userId || !driverId) return;
 
-    const { latitude: lat, longitude: lng, heading, speed } = position.coords;
-    const speedKph = speed !== null ? speed * 3.6 : null; // m/s to km/h
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        const heading = pos.coords.heading;
+        const speedKph = pos.coords.speed != null ? pos.coords.speed * 3.6 : null;
 
-    try {
-      await upsertDriverLocation({
-        driverId,
-        userId,
-        lat,
-        lng,
-        heading,
-        speedKph,
-        isOnline: true,
-      });
-      setLastUpdate(new Date());
-    } catch (err) {
-      console.error('[DriverLocationTracking] Error updating location:', err);
-    }
+        try {
+          await upsertDriverLocation({
+            driverId,
+            userId,
+            lat,
+            lng,
+            heading: heading ?? null,
+            speedKph,
+            isOnline: online,
+          });
+          setLastUpdate(new Date());
+        } catch (err) {
+          console.error('[DriverLocationTracking] Upsert error:', err);
+        }
+      },
+      (error) => console.error('[DriverLocationTracking] Geolocation error:', error),
+      { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+    );
   }, [userId, driverId]);
 
-  const goOffline = useCallback(async () => {
-    if (!driverId) return;
+  const startSharing = useCallback(async () => {
+    if (!userId || !driverId || timerRef.current) return;
 
-    try {
-      await setDriverOffline(driverId);
-    } catch (err) {
-      console.error('[DriverLocationTracking] Error setting offline:', err);
-    }
-  }, [driverId]);
-
-  const startTracking = useCallback(() => {
-    if (!navigator.geolocation || watchIdRef.current !== null) return;
-
-    console.log('[DriverLocationTracking] Starting tracking...');
-
-    // Get initial position
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        lastPositionRef.current = position;
-        updateLocation(position);
-      },
-      (error) => console.error('[DriverLocationTracking] Initial position error:', error),
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-
-    // Watch position
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        lastPositionRef.current = position;
-      },
-      (error) => console.error('[DriverLocationTracking] Watch error:', error),
-      { enableHighAccuracy: true, maximumAge: 1000 }
-    );
-
-    // Interval for database updates
-    intervalRef.current = setInterval(() => {
-      if (lastPositionRef.current) {
-        updateLocation(lastPositionRef.current);
-      }
-    }, updateIntervalMs);
-
+    console.log('[DriverLocationTracking] Starting location sharing...');
+    
+    // First update immediately
+    await updateOnce(true);
+    
+    // Then set interval
+    timerRef.current = setInterval(() => updateOnce(true), updateIntervalMs);
     setIsTracking(true);
-  }, [updateLocation, updateIntervalMs]);
+  }, [userId, driverId, updateOnce, updateIntervalMs]);
 
-  const stopTracking = useCallback(() => {
-    console.log('[DriverLocationTracking] Stopping tracking...');
+  const stopSharing = useCallback(async () => {
+    console.log('[DriverLocationTracking] Stopping location sharing...');
 
-    if (watchIdRef.current !== null) {
-      navigator.geolocation.clearWatch(watchIdRef.current);
-      watchIdRef.current = null;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
     }
 
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (driverId) {
+      try {
+        await setDriverOffline(driverId);
+      } catch (err) {
+        console.error('[DriverLocationTracking] Error setting offline:', err);
+      }
     }
 
-    goOffline();
     setIsTracking(false);
-  }, [goOffline]);
+  }, [driverId]);
 
   // Start/stop based on online status
   useEffect(() => {
     if (isOnline && userId && driverId) {
-      startTracking();
+      startSharing();
     } else if (!isOnline && isTracking) {
-      stopTracking();
+      stopSharing();
     }
-
-    return () => {
-      if (isTracking) {
-        stopTracking();
-      }
-    };
-  }, [isOnline, userId, driverId, startTracking, stopTracking, isTracking]);
+  }, [isOnline, userId, driverId, startSharing, stopSharing, isTracking]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (watchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-      }
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
   }, []);
@@ -133,6 +102,6 @@ export function useDriverLocationTracking({
   return {
     isTracking,
     lastUpdate,
-    stopTracking
+    stopSharing
   };
 }
