@@ -20,6 +20,7 @@ interface DriverNavigationMapProps {
   destination: { lat: number; lng: number; address: string };
   destinationType: 'pickup' | 'dropoff';
   onClose?: () => void;
+  onArrived?: () => void;
 }
 
 const DriverNavigationMap = ({
@@ -27,6 +28,7 @@ const DriverNavigationMap = ({
   destination,
   destinationType,
   onClose,
+  onArrived,
 }: DriverNavigationMapProps) => {
   const { language } = useLanguage();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -442,6 +444,17 @@ const DriverNavigationMap = ({
             </div>
           </div>
         </Card>
+
+        {/* I've Arrived button for pickup */}
+        {destinationType === 'pickup' && onArrived && (
+          <Button
+            className="w-full h-14 mb-3 text-lg font-bold bg-green-500 hover:bg-green-600 text-white"
+            onClick={onArrived}
+          >
+            <MapPin className="h-5 w-5 mr-2" />
+            {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
+          </Button>
+        )}
 
         {/* Control buttons */}
         <div className="flex items-center justify-between gap-3">

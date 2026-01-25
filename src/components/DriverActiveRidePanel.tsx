@@ -359,6 +359,43 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     }
   };
 
+  // Mark as arrived at pickup
+  const markArrived = async () => {
+    if (!activeRide || !driverId) return;
+    
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('rides')
+        .update({
+          status: 'arrived',
+        })
+        .eq('id', activeRide.id)
+        .eq('driver_id', driverId);
+
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      toast({
+        title: language === 'fr' ? 'Arrivé!' : 'Arrived!',
+        description: language === 'fr' 
+          ? 'Le passager a été notifié de votre arrivée.' 
+          : 'The rider has been notified of your arrival.',
+      });
+
+      setShowNavigation(false);
+      await fetchActiveRide();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   // Open in Maps (Google Maps or Apple Maps deep link)
   const openInMaps = (lat: number, lng: number, label: string) => {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
@@ -597,6 +634,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           }
           destinationType={activeRide.status === 'in_progress' ? 'dropoff' : 'pickup'}
           onClose={() => setShowNavigation(false)}
+          onArrived={activeRide.status !== 'in_progress' && activeRide.status !== 'arrived' ? markArrived : undefined}
         />
       )}
 
