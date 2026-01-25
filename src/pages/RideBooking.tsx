@@ -136,8 +136,8 @@ const RideBooking = () => {
   const [isRedirecting, setIsRedirecting] = useState(false);
   
   useEffect(() => {
-    // Don't redirect during initial auth load unless we have cached roles
-    if (authLoading && roles.length === 0) return;
+    // Don't redirect while auth state is still being resolved.
+    if (authLoading) return;
 
     if (!user) {
       setIsRedirecting(true);
@@ -161,17 +161,27 @@ const RideBooking = () => {
       // If roles are present and not driver, allow rider flow.
       if (roles.length > 0) return;
 
-      // Roles missing: do a one-shot role lookup to avoid misrouting drivers to /ride.
-      const { data: roleRows } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user.id)
-        .limit(10);
+      // Roles missing: do a one-shot backend role check to avoid misrouting drivers to /ride.
+      // Use RPC since it is SECURITY DEFINER (works even if direct roles reads are blocked).
+      const { data: isDriverRpc } = await supabase.rpc('is_driver', { _user_id: user.id });
 
       if (cancelled) return;
 
-      const hasDriverRole = (roleRows ?? []).some((r) => r.role === 'driver');
-      if (hasDriverRole) {
+      if (isDriverRpc) {
+        setIsRedirecting(true);
+        navigate('/driver', { replace: true });
+        return;
+      }
+
+      // Extra resilience: infer driver if a driver_profile exists.
+      const { data: dp } = await supabase
+        .from('driver_profiles')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (dp?.id) {
         setIsRedirecting(true);
         navigate('/driver', { replace: true });
       }
