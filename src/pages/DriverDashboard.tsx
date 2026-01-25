@@ -289,14 +289,16 @@ const DriverDashboard = () => {
   }, [driverProfile]);
 
   // Restore active ride on page load (critical for iOS resume / page refresh)
+  // NOTE: use the session user id (more reliable than the derived `user` field in edge cases)
   useEffect(() => {
-    if (!user) return;
+    const driverId = session?.user?.id;
+    if (!driverId) return;
 
     const restoreActiveRide = async () => {
       const { data, error } = await supabase
         .from('rides')
         .select('*')
-        .eq('driver_id', user.id)
+        .eq('driver_id', driverId)
         .in('status', ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'])
         .order('created_at', { ascending: false })
         .limit(1)
@@ -320,7 +322,7 @@ const DriverDashboard = () => {
     };
 
     restoreActiveRide();
-  }, [user]);
+  }, [session?.user?.id]);
 
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
@@ -1066,8 +1068,8 @@ const DriverDashboard = () => {
                       </Button>
                     )}
                     
-                    {/* End Ride Button - Always visible during active ride */}
-                    {(currentRide.status === 'in_progress' || currentRide.status === 'arrived') && (
+                    {/* End Ride Button - Always visible during any active ride */}
+                    {['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(currentRide.status) && (
                       <Button
                         className="w-full bg-success hover:bg-success/90 shadow-button py-6 text-lg font-bold"
                         onClick={() => updateRideStatus('completed')}
