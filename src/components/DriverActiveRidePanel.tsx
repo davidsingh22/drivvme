@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   MapPin, 
   Navigation, 
@@ -7,6 +7,7 @@ import {
   DollarSign, 
   User, 
   Phone, 
+  MessageSquare,
   CheckCircle, 
   PlayCircle, 
   ExternalLink,
@@ -14,6 +15,7 @@ import {
   Map
 } from 'lucide-react';
 import DriverNavigationMap from '@/components/DriverNavigationMap';
+import InAppMessaging from '@/components/InAppMessaging';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -66,6 +68,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const [isUpdating, setIsUpdating] = useState(false);
   const [driverMismatch, setDriverMismatch] = useState<string | null>(null);
   const [showNavigation, setShowNavigation] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   const driverId = session?.user?.id ?? user?.id;
@@ -350,16 +353,39 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
               <p className="font-semibold text-sm">
                 {riderInfo.first_name} {riderInfo.last_name?.[0]}.
               </p>
-              {riderInfo.phone_number && (
-                <a
-                  href={`tel:${riderInfo.phone_number}`}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
-                >
-                  <Phone className="h-3 w-3" />
-                  {riderInfo.phone_number}
-                </a>
-              )}
+              <p className="text-xs text-muted-foreground">
+                {language === 'fr' ? 'Passager' : 'Rider'}
+              </p>
             </div>
+            {/* Call and Message buttons - phone number hidden */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={() => {
+                if (riderInfo.phone_number) {
+                  toast({
+                    title: language === 'fr' 
+                      ? `Appel de ${riderInfo.first_name}...` 
+                      : `Calling ${riderInfo.first_name}...`,
+                  });
+                  setTimeout(() => {
+                    window.location.href = `tel:${riderInfo.phone_number}`;
+                  }, 500);
+                }
+              }}
+              disabled={!riderInfo.phone_number}
+            >
+              <Phone className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={() => setShowChat(true)}
+            >
+              <MessageSquare className="h-4 w-4" />
+            </Button>
           </div>
         )}
 
@@ -481,6 +507,18 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           onClose={() => setShowNavigation(false)}
         />
       )}
+
+      {/* In-app messaging with rider */}
+      <AnimatePresence>
+        {showChat && activeRide && riderInfo && (
+          <InAppMessaging
+            rideId={activeRide.id}
+            recipientId={activeRide.rider_id}
+            recipientName={`${riderInfo.first_name || 'Rider'} ${riderInfo.last_name?.[0] || ''}.`.trim()}
+            onClose={() => setShowChat(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 };
