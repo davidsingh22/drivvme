@@ -169,6 +169,11 @@ const RideHistory = () => {
     return ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(status);
   };
 
+  // Only allow completing when the ride is actually underway.
+  const isCompletableRide = (status: string) => {
+    return ['arrived', 'in_progress'].includes(status);
+  };
+
   const handleRideClick = (ride: Ride) => {
     if (isActiveRide(ride.status)) {
       // Navigate to the correct live map based on who is viewing.
@@ -304,8 +309,13 @@ const RideHistory = () => {
                         </div>
                       )}
 
-                      {/* Complete Ride Button for Drivers */}
-                      {isActive && ride.driver_id && user?.id && ride.driver_id === user.id && (
+                      {/* Ride completed button (drivers can end an active ride) */}
+                      {isActive &&
+                        isCompletableRide(ride.status) &&
+                        isDriver &&
+                        ride.driver_id &&
+                        user?.id &&
+                        ride.driver_id === user.id && (
                         <div className="mb-4">
                           <Button
                             className="w-full bg-success hover:bg-success/90 py-4 text-lg font-bold"
@@ -315,7 +325,7 @@ const RideHistory = () => {
                             <CheckCircle className="h-5 w-5 mr-2" />
                             {completingRideId === ride.id
                               ? (language === 'fr' ? 'Finalisation...' : 'Completing...')
-                              : (language === 'fr' ? 'Terminer la course' : 'Complete Ride')}
+                              : (language === 'fr' ? 'Course terminée' : 'Ride completed')}
                           </Button>
                         </div>
                       )}
