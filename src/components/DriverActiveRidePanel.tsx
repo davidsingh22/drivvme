@@ -13,7 +13,8 @@ import {
   ExternalLink,
   AlertTriangle,
   Map,
-  MessageSquare
+  MessageSquare,
+  XCircle
 } from 'lucide-react';
 import DriverNavigationMap from '@/components/DriverNavigationMap';
 import { Button } from '@/components/ui/button';
@@ -316,6 +317,48 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     }
   };
 
+  // Cancel Ride action
+  const cancelRide = async () => {
+    if (!activeRide || !driverId) return;
+    
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('rides')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: driverId,
+          cancellation_reason: 'Driver cancelled',
+        })
+        .eq('id', activeRide.id)
+        .eq('driver_id', driverId);
+
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      toast({
+        title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+        description: language === 'fr' 
+          ? 'La course a été annulée.' 
+          : 'The ride has been cancelled.',
+        variant: 'destructive',
+      });
+
+      setActiveRide(null);
+      setRiderInfo(null);
+      onRideCompleted?.();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
   // Open in Maps (Google Maps or Apple Maps deep link)
   const openInMaps = (lat: number, lng: number, label: string) => {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
@@ -505,73 +548,41 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           </span>
         </div>
 
-        {/* Navigation Button - prominent GPS navigation */}
-        <Button
-          className="w-full mb-3 py-5 text-base font-bold bg-primary hover:bg-primary/90"
-          onClick={() => setShowNavigation(true)}
-        >
-          <Map className="h-5 w-5 mr-2" />
-          {language === 'fr' ? 'Ouvrir Navigation GPS' : 'Open GPS Navigation'}
-        </Button>
-
-        {/* Action Buttons */}
-        <div className="space-y-2">
-          {/* Messages - REQUIRED: visible inside Active Ride card above End Ride */}
+        {/* ===== 3 ACTION BUTTONS ===== */}
+        <div className="space-y-3">
+          {/* 1. Start Navigation - Purple */}
           <Button
-            variant="outline"
-            className="w-full py-5 text-base font-bold relative"
-            onClick={() => navigate(`/driver/messages?rideId=${activeRide.id}`)}
+            className="w-full py-6 text-lg font-bold bg-primary hover:bg-primary/90 rounded-xl"
+            onClick={() => setShowNavigation(true)}
           >
-            <MessageSquare className="h-5 w-5 mr-2" />
-            {language === 'fr' ? 'Messages' : 'Messages'}
-            {unreadMessages > 0 && (
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 h-6 min-w-6 px-2 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">
-                {unreadMessages > 9 ? '9+' : unreadMessages}
-              </span>
-            )}
+            <Map className="h-6 w-6 mr-2" />
+            {language === 'fr' ? 'Démarrer Navigation' : 'Start Navigation'}
           </Button>
 
-          {/* Start Ride - only show when arrived at pickup */}
-          {activeRide.status === 'arrived' && (
-            <Button
-              className="w-full gradient-primary py-5 text-base font-bold"
-              onClick={startRide}
-              disabled={isUpdating}
-            >
-              <PlayCircle className="h-5 w-5 mr-2" />
-              {isUpdating 
-                ? (language === 'fr' ? 'Démarrage...' : 'Starting...') 
-                : (language === 'fr' ? 'Démarrer la course' : 'Start Ride')}
-            </Button>
-          )}
+          {/* 2. Complete Ride - Green */}
+          <Button
+            className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl"
+            onClick={endRide}
+            disabled={isUpdating}
+          >
+            <CheckCircle className="h-6 w-6 mr-2" />
+            {isUpdating 
+              ? (language === 'fr' ? 'Finalisation...' : 'Completing...') 
+              : (language === 'fr' ? 'Terminer la course' : 'Complete Ride')}
+          </Button>
 
-          {/* End Ride - always visible during in_progress, also available during arrived for quick completion */}
-          {['arrived', 'in_progress'].includes(activeRide.status) && (
-            <Button
-              className="w-full bg-success hover:bg-success/90 py-5 text-base font-bold"
-              onClick={endRide}
-              disabled={isUpdating}
-            >
-              <CheckCircle className="h-5 w-5 mr-2" />
-              {isUpdating 
-                ? (language === 'fr' ? 'Finalisation...' : 'Completing...') 
-                : (language === 'fr' ? 'Terminer la course' : 'End Ride')}
-            </Button>
-          )}
-
-          {/* For earlier statuses (assigned, en_route), show a prominent End Ride button too */}
-          {['driver_assigned', 'driver_en_route'].includes(activeRide.status) && (
-            <Button
-              className="w-full bg-success hover:bg-success/90 py-5 text-base font-bold"
-              onClick={endRide}
-              disabled={isUpdating}
-            >
-              <CheckCircle className="h-5 w-5 mr-2" />
-              {isUpdating 
-                ? (language === 'fr' ? 'Finalisation...' : 'Completing...') 
-                : (language === 'fr' ? 'Terminer la course' : 'End Ride')}
-            </Button>
-          )}
+          {/* 3. Cancel Ride - Yellow-Green */}
+          <Button
+            className="w-full py-6 text-lg font-bold rounded-xl"
+            style={{ backgroundColor: 'hsl(75, 80%, 50%)', color: 'hsl(0, 0%, 10%)' }}
+            onClick={cancelRide}
+            disabled={isUpdating}
+          >
+            <XCircle className="h-6 w-6 mr-2" />
+            {isUpdating 
+              ? (language === 'fr' ? 'Annulation...' : 'Cancelling...') 
+              : (language === 'fr' ? 'Annuler la course' : 'Cancel Ride')}
+          </Button>
         </div>
       </Card>
 
