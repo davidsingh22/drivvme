@@ -843,25 +843,7 @@ const DriverDashboard = () => {
             </Card>
           </div>
 
-          {/* Floating Complete Ride Button on Map - Always visible during active ride */}
-          <AnimatePresence>
-            {currentRide && ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(currentRide.status) && (
-              <motion.div
-                initial={{ y: 100, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 100, opacity: 0 }}
-                className="absolute bottom-6 left-4 right-4"
-              >
-                <Button
-                  className="w-full bg-success hover:bg-success/90 shadow-xl py-6 text-lg font-bold"
-                  onClick={() => updateRideStatus('completed')}
-                >
-                  <CheckCircle className="h-6 w-6 mr-2" />
-                  {t('driver.completeRide')}
-                </Button>
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* Floating Complete Ride Button removed - buttons now in Active Ride panel */}
         </div>
 
         {/* Driver Panel */}
@@ -1053,61 +1035,7 @@ const DriverDashboard = () => {
               </div>
             )}
 
-            {/* My Earnings Section */}
-            <Card className="p-4 mb-6 gradient-card border-primary/20">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5 text-primary" />
-                  <h3 className="font-display font-semibold">{language === 'fr' ? 'Mes Gains' : 'My Earnings'}</h3>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => navigate('/earnings')}>
-                  {language === 'fr' ? 'Voir tout' : 'View All'}
-                </Button>
-              </div>
-              
-              {/* Today's Summary */}
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="bg-background/50 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground mb-1">{language === 'fr' ? 'Gains aujourd\'hui' : 'Today\'s Earnings'}</p>
-                  <p className="text-2xl font-bold text-accent">{formatCurrency(todayEarnings, language)}</p>
-                </div>
-                <div className="bg-background/50 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground mb-1">{language === 'fr' ? 'Courses aujourd\'hui' : 'Today\'s Rides'}</p>
-                  <p className="text-2xl font-bold">{todayRides}</p>
-                </div>
-              </div>
-
-              {/* Platform Fee Info */}
-              <div className="bg-background/50 rounded-lg p-3 mb-3">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">{language === 'fr' ? 'Frais plateforme' : 'Platform Fee'}</span>
-                  <span className="font-medium text-destructive">{language === 'fr' ? 'Basé sur tarif' : 'Based on fare'}</span>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {language === 'fr' 
-                    ? 'Déduit automatiquement de chaque course complétée' 
-                    : 'Automatically deducted from each completed ride'}
-                </p>
-              </div>
-
-              {/* Lifetime Stats */}
-              {driverProfile && (
-                <div className="grid grid-cols-3 gap-2 text-center pt-3 border-t border-border/50">
-                  <div>
-                    <p className="text-lg font-bold">{driverProfile.total_rides || 0}</p>
-                    <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Total courses' : 'Total Rides'}</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold text-accent">{formatCurrency(Number(driverProfile.total_earnings) || 0, language)}</p>
-                    <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Disponible' : 'Available'}</p>
-                  </div>
-                  <div>
-                    <p className="text-lg font-bold text-warning">{Number(driverProfile.average_rating || 5).toFixed(1)} ⭐</p>
-                    <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Note' : 'Rating'}</p>
-                  </div>
-                </div>
-              )}
-            </Card>
+            {/* Earnings moved to dedicated Earnings page (/earnings) */}
 
             {/* Current Active Ride - Always shown at top when exists */}
             <AnimatePresence>
