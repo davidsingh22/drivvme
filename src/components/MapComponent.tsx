@@ -138,44 +138,44 @@ const MapComponent = ({
     };
   }, [token, onMapClick]);
 
-  // Create driver marker element with rotation support
+  // Create driver marker element with car icon and rotation support
   const createDriverMarkerElement = useCallback(() => {
     const wrapper = document.createElement('div');
     wrapper.className = 'driver-marker-wrapper';
-    wrapper.style.width = '48px';
-    wrapper.style.height = '48px';
+    wrapper.style.width = '56px';
+    wrapper.style.height = '56px';
     wrapper.style.position = 'relative';
-    wrapper.style.transition = 'transform 0.3s ease-out';
 
     const pulse = document.createElement('div');
     pulse.className = 'driver-pulse';
     pulse.style.position = 'absolute';
-    pulse.style.inset = '0';
+    pulse.style.inset = '4px';
     pulse.style.borderRadius = '50%';
-    pulse.style.backgroundColor = 'rgba(168, 85, 247, 0.3)';
-    pulse.style.animation = 'pulse 2s infinite';
+    pulse.style.backgroundColor = 'rgba(168, 85, 247, 0.25)';
+    pulse.style.animation = 'driver-pulse 2s infinite';
     
     const marker = document.createElement('div');
+    marker.className = 'driver-arrow';
     marker.style.position = 'absolute';
     marker.style.top = '50%';
     marker.style.left = '50%';
     marker.style.transform = 'translate(-50%, -50%)';
-    marker.style.width = '36px';
-    marker.style.height = '36px';
+    marker.style.width = '44px';
+    marker.style.height = '44px';
     marker.style.borderRadius = '50%';
     marker.style.backgroundColor = '#a855f7';
     marker.style.border = '3px solid white';
-    marker.style.boxShadow = '0 4px 14px rgba(168, 85, 247, 0.5)';
+    marker.style.boxShadow = '0 4px 16px rgba(168, 85, 247, 0.6)';
     marker.style.display = 'flex';
     marker.style.alignItems = 'center';
     marker.style.justifyContent = 'center';
+    marker.style.transition = 'transform 0.3s ease-out';
     
-    const arrow = document.createElement('div');
-    arrow.className = 'driver-arrow';
-    arrow.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="white"><path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/></svg>`;
-    arrow.style.transition = 'transform 0.3s ease-out';
+    // Car icon SVG - distinct vehicle shape
+    marker.innerHTML = `<svg width="26" height="26" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
+    </svg>`;
     
-    marker.appendChild(arrow);
     wrapper.appendChild(pulse);
     wrapper.appendChild(marker);
 
@@ -184,10 +184,10 @@ const MapComponent = ({
       const style = document.createElement('style');
       style.id = 'driver-marker-styles';
       style.textContent = `
-        @keyframes pulse {
-          0% { transform: scale(0.8); opacity: 1; }
-          50% { transform: scale(1.2); opacity: 0.5; }
-          100% { transform: scale(0.8); opacity: 1; }
+        @keyframes driver-pulse {
+          0% { transform: scale(0.85); opacity: 1; }
+          50% { transform: scale(1.15); opacity: 0.4; }
+          100% { transform: scale(0.85); opacity: 1; }
         }
       `;
       document.head.appendChild(style);
