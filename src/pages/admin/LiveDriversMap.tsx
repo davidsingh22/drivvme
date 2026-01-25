@@ -30,6 +30,36 @@ type DriverLoc = {
 
 const STALE_THRESHOLD_SECONDS = 60;
 
+// Map common car color names to CSS colors
+const getCarColor = (colorName: string | null | undefined): string => {
+  if (!colorName) return "#a855f7"; // default purple
+  const color = colorName.toLowerCase().trim();
+  const colorMap: Record<string, string> = {
+    black: "#1a1a1a",
+    white: "#f5f5f5",
+    silver: "#c0c0c0",
+    gray: "#6b7280",
+    grey: "#6b7280",
+    red: "#ef4444",
+    blue: "#3b82f6",
+    navy: "#1e3a8a",
+    green: "#22c55e",
+    yellow: "#eab308",
+    gold: "#ca8a04",
+    orange: "#f97316",
+    brown: "#92400e",
+    beige: "#d4a574",
+    purple: "#a855f7",
+    pink: "#ec4899",
+    maroon: "#7f1d1d",
+    burgundy: "#722f37",
+    tan: "#d2b48c",
+    cream: "#fffdd0",
+    champagne: "#f7e7ce",
+  };
+  return colorMap[color] || "#a855f7"; // fallback to purple
+};
+
 export default function AdminDriversLive() {
   const navigate = useNavigate();
   const { session, authLoading, isAdmin } = useAuth();
@@ -166,18 +196,33 @@ export default function AdminDriversLive() {
           const row = (payload.new ?? payload.old) as DriverLoc | undefined;
           if (!row?.driver_id) return;
 
-          // Fetch name for new drivers
-          let displayName: string | null = null;
+          // Fetch full profile and vehicle info for new/updated drivers
+          let driverInfo: Partial<DriverLoc> = {};
           if (payload.eventType !== "DELETE" && row.is_online) {
-            const { data: profile } = await supabase
-              .from("profiles")
-              .select("first_name, last_name")
-              .eq("user_id", row.user_id)
-              .maybeSingle();
+            const [{ data: profile }, { data: driverProfile }] = await Promise.all([
+              supabase
+                .from("profiles")
+                .select("first_name, last_name, phone_number, email")
+                .eq("user_id", row.user_id)
+                .maybeSingle(),
+              supabase
+                .from("driver_profiles")
+                .select("vehicle_make, vehicle_model, vehicle_color, license_plate")
+                .eq("user_id", row.user_id)
+                .maybeSingle(),
+            ]);
 
-            displayName = profile
-              ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Driver"
-              : null;
+            driverInfo = {
+              display_name: profile
+                ? [profile.first_name, profile.last_name].filter(Boolean).join(" ") || "Driver"
+                : null,
+              phone_number: profile?.phone_number || null,
+              email: profile?.email || null,
+              vehicle_make: driverProfile?.vehicle_make || null,
+              vehicle_model: driverProfile?.vehicle_model || null,
+              vehicle_color: driverProfile?.vehicle_color || null,
+              license_plate: driverProfile?.license_plate || null,
+            };
           }
 
           setDrivers((prev) => {
@@ -191,7 +236,8 @@ export default function AdminDriversLive() {
             if (row.is_online === true) {
               next[row.driver_id] = {
                 ...row,
-                display_name: displayName || prev[row.driver_id]?.display_name || null,
+                ...driverInfo,
+                display_name: driverInfo.display_name || prev[row.driver_id]?.display_name || null,
               };
             }
             return next;
@@ -286,27 +332,51 @@ export default function AdminDriversLive() {
             {driversList.map((d) => {
               const ageSec = Math.floor((now - new Date(d.updated_at).getTime()) / 1000);
               const isStale = ageSec > STALE_THRESHOLD_SECONDS;
+              const carColor = getCarColor(d.vehicle_color);
 
               return (
                 <Marker
                   key={d.driver_id}
                   longitude={d.lng}
                   latitude={d.lat}
-                  anchor="center"
+                  anchor="bottom"
                   onClick={(e) => {
                     e.originalEvent.stopPropagation();
                     setSelected(d);
                   }}
                 >
-                  <div
-                    className={`w-8 h-8 rounded-full border-2 border-white flex items-center justify-center shadow-lg cursor-pointer transition-colors ${
-                      isStale ? "bg-amber-500" : "bg-emerald-500"
-                    }`}
-                    style={{
-                      transform: d.heading ? `rotate(${d.heading}deg)` : undefined,
-                    }}
-                  >
-                    <Car className="h-4 w-4 text-white" />
+                  <div className="flex flex-col items-center cursor-pointer group">
+                    {/* Phone number label */}
+                    {d.phone_number && (
+                      <a
+                        href={`tel:${d.phone_number}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="mb-1 px-2 py-0.5 bg-black/90 border border-primary/40 rounded text-xs font-mono text-primary hover:bg-primary/20 transition-colors whitespace-nowrap"
+                      >
+                        📞 {d.phone_number}
+                      </a>
+                    )}
+                    {/* Car icon with driver's car color */}
+                    <div
+                      className="relative w-10 h-10 rounded-full border-3 flex items-center justify-center shadow-lg transition-transform group-hover:scale-110"
+                      style={{
+                        backgroundColor: carColor,
+                        borderColor: isStale ? "#f59e0b" : "#a855f7",
+                        boxShadow: isStale
+                          ? "0 0 12px rgba(245, 158, 11, 0.5)"
+                          : `0 0 12px ${carColor}80`,
+                      }}
+                    >
+                      <Car className="h-5 w-5 text-white drop-shadow-md" />
+                      {/* Stale indicator */}
+                      {isStale && (
+                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full border border-white animate-pulse" />
+                      )}
+                    </div>
+                    {/* Driver name */}
+                    <div className="mt-1 px-2 py-0.5 bg-black/80 rounded text-xs text-primary font-medium max-w-[120px] truncate">
+                      {d.display_name || "Driver"}
+                    </div>
                   </div>
                 </Marker>
               );
