@@ -80,6 +80,7 @@ const DriverDashboard = () => {
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
   const prevRideIdsRef = useRef<Set<string>>(new Set());
+  const driverLocationWatchIdRef = useRef<number | null>(null);
   const { play: playAlertSound, stop: stopAlertSound, unlock: unlockAlertSound } = useAlertSound({ 
     volume: 0.25, 
     loop: true, 
@@ -256,8 +257,24 @@ const DriverDashboard = () => {
   }, [driverProfile]);
 
   // Get driver location and update in database
+  // IMPORTANT: keep sending GPS even if driver is "offline" while they have an active ride.
   useEffect(() => {
-    if (!isOnline || !session || !user) return;
+    if (!session || !user) return;
+    if (!('geolocation' in navigator)) return;
+
+    const shouldTrack = isOnline || !!currentRide;
+
+    // Stop tracking when not needed
+    if (!shouldTrack) {
+      if (driverLocationWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(driverLocationWatchIdRef.current);
+        driverLocationWatchIdRef.current = null;
+      }
+      return;
+    }
+
+    // Avoid duplicate watches
+    if (driverLocationWatchIdRef.current !== null) return;
 
     const updateLocationInDb = async (location: { lat: number; lng: number }) => {
       const { error } = await supabase
@@ -267,29 +284,33 @@ const DriverDashboard = () => {
           current_lng: location.lng,
         })
         .eq('user_id', user.id);
-      
+
       if (error) {
         console.error('[DriverDashboard] Failed to update location:', error);
       }
     };
 
-    const watchId = navigator.geolocation.watchPosition(
+    driverLocationWatchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
         const location = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
         };
         setDriverLocation(location);
-        
-        // Update location in database (fire and forget, but properly execute)
         void updateLocationInDb(location);
       },
       (error) => console.error('[DriverDashboard] Location error:', error),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+      // Slightly more forgiving to reduce iOS timeout failures
+      { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 }
     );
 
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [isOnline, user, session]);
+    return () => {
+      if (driverLocationWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(driverLocationWatchIdRef.current);
+        driverLocationWatchIdRef.current = null;
+      }
+    };
+  }, [isOnline, currentRide?.id, session, user]);
 
   // Fetch available rides when online
   useEffect(() => {

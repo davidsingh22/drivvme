@@ -16,7 +16,6 @@ import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
 import { useActiveRide } from '@/hooks/useActiveRide';
-import { RideStatusBanner } from '@/components/RideStatusBanner';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { useDriverNotificationEscalation } from '@/hooks/useDriverNotificationEscalation';
 
@@ -63,7 +62,6 @@ const RideBooking = () => {
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [riderLiveLocation, setRiderLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showStatusBanner, setShowStatusBanner] = useState(false);
   const [notificationTier, setNotificationTier] = useState(1);
   const paymentGateCheckedRef = useRef<string | null>(null);
   const riderLocationWatchId = useRef<number | null>(null);
@@ -136,7 +134,6 @@ const RideBooking = () => {
     // Check if payment was completed for this ride before restoring to searching step
     const checkPaymentAndRestore = async () => {
       setCurrentRide(activeRide);
-      setShowStatusBanner(true);
       
       // Restore locations
       setPickup({
@@ -244,7 +241,6 @@ const RideBooking = () => {
           const updatedRide = payload.new as any;
           setCurrentRide(updatedRide);
           updateRide(updatedRide); // Persist to localStorage
-          setShowStatusBanner(true);
           
           // Update step based on status
           switch (updatedRide.status) {
@@ -379,7 +375,6 @@ const RideBooking = () => {
         console.log('[RideBooking] Poll detected status change:', data.status);
         setCurrentRide(data);
         updateRide(data);
-        setShowStatusBanner(true);
 
         if (data.status === 'driver_assigned') {
           setStep('matched');
@@ -705,7 +700,6 @@ const RideBooking = () => {
 
         setCurrentRide(ride);
         updateRide(ride);
-        setShowStatusBanner(true);
 
         // Test accounts go directly to searching (escalation hook will handle notifications)
         if (skipPayment) {
@@ -816,7 +810,6 @@ const RideBooking = () => {
     setCurrentRide(null);
     setDriverInfo(null);
     setDriverLocation(null);
-    setShowStatusBanner(false);
     clearRide(); // Clear from localStorage
     hasRestoredRide.current = false;
   };
@@ -835,16 +828,6 @@ const RideBooking = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
-      
-      {/* Persistent status banner for active rides */}
-      {showStatusBanner && currentRide && !['completed', 'cancelled'].includes(currentRide.status) && (
-        <RideStatusBanner
-          status={currentRide.status}
-          driverName={driverInfo ? `${driverInfo.first_name || ''} ${driverInfo.last_name || ''}`.trim() : undefined}
-          pickupAddress={currentRide.pickup_address}
-          onDismiss={() => setShowStatusBanner(false)}
-        />
-      )}
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
         {/* Map */}
