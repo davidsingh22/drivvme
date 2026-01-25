@@ -11,6 +11,7 @@ interface MapComponentProps {
   pickup?: { lat: number; lng: number } | null;
   dropoff?: { lat: number; lng: number } | null;
   driverLocation?: { lat: number; lng: number } | null;
+  riderLocation?: { lat: number; lng: number } | null;
   onMapClick?: (lat: number, lng: number) => void;
   showUserLocation?: boolean;
 }
@@ -49,6 +50,7 @@ const MapComponent = ({
   pickup,
   dropoff,
   driverLocation,
+  riderLocation,
   onMapClick,
   showUserLocation = true,
 }: MapComponentProps) => {
@@ -58,6 +60,7 @@ const MapComponent = ({
   const dropoffMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const driverMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const driverMarkerElementRef = useRef<HTMLDivElement | null>(null);
+  const riderMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const userMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const previousDriverLocationRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -256,6 +259,64 @@ const MapComponent = ({
     }
   }, [dropoff, mapLoaded, createMarkerElement]);
 
+  // Create rider marker element with pulsing effect
+  const createRiderMarkerElement = useCallback(() => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'rider-marker-wrapper';
+    wrapper.style.width = '40px';
+    wrapper.style.height = '40px';
+    wrapper.style.position = 'relative';
+
+    const pulse = document.createElement('div');
+    pulse.className = 'rider-pulse';
+    pulse.style.position = 'absolute';
+    pulse.style.inset = '0';
+    pulse.style.borderRadius = '50%';
+    pulse.style.backgroundColor = 'rgba(59, 130, 246, 0.3)';
+    pulse.style.animation = 'pulse 2s infinite';
+    
+    const marker = document.createElement('div');
+    marker.style.position = 'absolute';
+    marker.style.top = '50%';
+    marker.style.left = '50%';
+    marker.style.transform = 'translate(-50%, -50%)';
+    marker.style.width = '28px';
+    marker.style.height = '28px';
+    marker.style.borderRadius = '50%';
+    marker.style.backgroundColor = '#3b82f6';
+    marker.style.border = '3px solid white';
+    marker.style.boxShadow = '0 4px 14px rgba(59, 130, 246, 0.5)';
+    marker.style.display = 'flex';
+    marker.style.alignItems = 'center';
+    marker.style.justifyContent = 'center';
+    
+    // Add person icon
+    marker.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="8" r="4"/><path d="M12 14c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/></svg>`;
+    
+    wrapper.appendChild(pulse);
+    wrapper.appendChild(marker);
+
+    return wrapper;
+  }, []);
+
+  // Update rider location marker (real-time during ride)
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return;
+
+    if (riderLocation) {
+      if (riderMarkerRef.current) {
+        riderMarkerRef.current.setLngLat([riderLocation.lng, riderLocation.lat]);
+      } else {
+        riderMarkerRef.current = new mapboxgl.Marker(createRiderMarkerElement())
+          .setLngLat([riderLocation.lng, riderLocation.lat])
+          .addTo(mapRef.current);
+      }
+    } else if (riderMarkerRef.current) {
+      riderMarkerRef.current.remove();
+      riderMarkerRef.current = null;
+    }
+  }, [riderLocation, mapLoaded, createRiderMarkerElement]);
+
   // Update driver marker with smooth animation
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return;
@@ -412,6 +473,7 @@ const MapComponent = ({
       if (pickup) points.push([pickup.lng, pickup.lat]);
       if (dropoff) points.push([dropoff.lng, dropoff.lat]);
       if (driverLocation) points.push([driverLocation.lng, driverLocation.lat]);
+      if (riderLocation) points.push([riderLocation.lng, riderLocation.lat]);
 
       if (points.length >= 2) {
         const bounds = points.reduce(
@@ -427,7 +489,7 @@ const MapComponent = ({
     return () => {
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [pickup, dropoff, driverLocation, mapLoaded]);
+  }, [pickup, dropoff, driverLocation, riderLocation, mapLoaded]);
 
   if (loading) {
     return (
