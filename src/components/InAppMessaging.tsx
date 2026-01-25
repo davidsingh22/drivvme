@@ -52,6 +52,9 @@ export default function InAppMessaging({
       const { data } = await supabase
         .from('notifications')
         .select('id, user_id, message, created_at, title')
+        // IMPORTANT: due to RLS, each user can only read their own notifications.
+        // We store a copy of each sent message for the sender as well.
+        .eq('user_id', user.id)
         .eq('ride_id', rideId)
         .eq('type', 'ride_message')
         .order('created_at', { ascending: true });
@@ -59,9 +62,11 @@ export default function InAppMessaging({
       if (data) {
         setMessages(data.map(n => ({
           id: n.id,
-          sender_id: n.title === 'from_driver' 
-            ? (senderRole === 'driver' ? user.id : recipientId)
-            : (senderRole === 'rider' ? user.id : recipientId),
+          // For the current user, infer sender based on title.
+          sender_id:
+            (senderRole === 'driver')
+              ? (n.title === 'from_driver' ? user.id : recipientId)
+              : (n.title === 'from_rider' ? user.id : recipientId),
           message: n.message,
           created_at: n.created_at,
         })));
@@ -79,16 +84,18 @@ export default function InAppMessaging({
           event: 'INSERT',
           schema: 'public',
           table: 'notifications',
-          filter: `ride_id=eq.${rideId}`,
+          // Only listen to messages addressed to the current user (RLS-compatible).
+          filter: `user_id=eq.${user.id}`,
         },
         (payload) => {
           const notification = payload.new as any;
           if (notification.type === 'ride_message') {
             setMessages(prev => [...prev, {
               id: notification.id,
-              sender_id: notification.title === 'from_driver'
-                ? (senderRole === 'driver' ? user?.id || '' : recipientId)
-                : (senderRole === 'rider' ? user?.id || '' : recipientId),
+              sender_id:
+                (senderRole === 'driver')
+                  ? (notification.title === 'from_driver' ? user?.id || '' : recipientId)
+                  : (notification.title === 'from_rider' ? user?.id || '' : recipientId),
               message: notification.message,
               created_at: notification.created_at,
             }]);
@@ -118,16 +125,31 @@ export default function InAppMessaging({
     
     setIsSending(true);
     try {
-      // Insert message as notification for the recipient
+      const title = senderRole === 'driver' ? 'from_driver' : 'from_rider';
+
+      // IMPORTANT: store two copies so both sides can read via existing RLS:
+      // 1) recipient inbox (requires special rider/driver policy)
+      // 2) sender inbox (allowed by insert_own_notifications)
       const { error } = await supabase
         .from('notifications')
-        .insert({
-          user_id: recipientId,
-          ride_id: rideId,
-          title: senderRole === 'driver' ? 'from_driver' : 'from_rider',
-          message: newMessage.trim(),
-          type: 'ride_message',
-        });
+        .insert([
+          {
+            user_id: recipientId,
+            ride_id: rideId,
+            title,
+            message: newMessage.trim(),
+            type: 'ride_message',
+          },
+          {
+            user_id: user.id,
+            ride_id: rideId,
+            title,
+            message: newMessage.trim(),
+            type: 'ride_message',
+            // mark sender copy as read so it doesn't inflate unread counts
+            is_read: true,
+          },
+        ]);
 
       if (error) throw error;
 
