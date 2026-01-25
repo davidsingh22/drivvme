@@ -311,6 +311,7 @@ const InRideDriverCard = ({
           rideId={rideId}
           recipientId={driverId}
           recipientName={driverInfo.first_name}
+          senderRole="rider"
           onClose={() => setShowChat(false)}
         />
       )}

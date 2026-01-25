@@ -194,6 +194,7 @@ export default function DriverMessagesBadge() {
             rideId={activeRideMessage.rideId}
             recipientId={activeRideMessage.riderId}
             recipientName={activeRideMessage.riderName}
+            senderRole="driver"
             onClose={() => setShowChat(false)}
           />
         )}
