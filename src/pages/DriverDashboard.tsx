@@ -789,6 +789,26 @@ const DriverDashboard = () => {
               />
             </Card>
           </div>
+
+          {/* Floating Complete Ride Button on Map - Always visible during active ride */}
+          <AnimatePresence>
+            {currentRide && ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(currentRide.status) && (
+              <motion.div
+                initial={{ y: 100, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 100, opacity: 0 }}
+                className="absolute bottom-6 left-4 right-4"
+              >
+                <Button
+                  className="w-full bg-success hover:bg-success/90 shadow-xl py-6 text-lg font-bold"
+                  onClick={() => updateRideStatus('completed')}
+                >
+                  <CheckCircle className="h-6 w-6 mr-2" />
+                  {t('driver.completeRide')}
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Driver Panel */}
