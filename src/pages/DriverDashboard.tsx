@@ -121,7 +121,9 @@ const DriverDashboard = () => {
     permissionStatus: locationPermission,
   } = useDriverLocationTracking({
     userId: user?.id,
-    driverId: driverProfile?.id,
+    // Use auth user id as the stable driver identifier for driver_locations.
+    // (driver_profiles.id is a separate UUID and won't match admin map expectations.)
+    driverId: user?.id,
     isOnline,
     updateIntervalMs: 3000,
   });
