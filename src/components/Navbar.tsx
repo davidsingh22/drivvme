@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Menu, X, User, LogOut, Shield, MessageSquare } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Logo from './Logo';
 import LanguageToggle from './LanguageToggle';
 import { PushNotificationToggle } from './PushNotificationToggle';
@@ -10,6 +10,7 @@ import RiderProfileModal from './RiderProfileModal';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +26,59 @@ const Navbar = () => {
   const { t, language } = useLanguage();
   const { user, profile, isRider, isDriver, isAdmin, signOut } = useAuth();
   const navigate = useNavigate();
+
+  const [activeDriverRideId, setActiveDriverRideId] = useState<string | null>(null);
+
+  // Best-effort active ride lookup for driver deep-linking (mobile menu).
+  useEffect(() => {
+    if (!user?.id || !isDriver) {
+      setActiveDriverRideId(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const fetchActiveDriverRide = async () => {
+      const { data, error } = await supabase
+        .from('rides')
+        .select('id, status')
+        .eq('driver_id', user.id)
+        .in('status', ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error || !data) {
+        setActiveDriverRideId(null);
+        return;
+      }
+      setActiveDriverRideId(data.id);
+    };
+
+    fetchActiveDriverRide();
+
+    const channel = supabase
+      .channel(`navbar-driver-active-ride-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'rides',
+          filter: `driver_id=eq.${user.id}`,
+        },
+        () => {
+          fetchActiveDriverRide();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, isDriver]);
 
   const handleSignOut = () => {
     // Navigate immediately for instant feedback, signOut runs in background
@@ -209,14 +263,6 @@ const Navbar = () => {
                         {t('nav.availableRides')}
                       </Link>
                       <Link
-                        to="/driver/messages"
-                        className="px-4 py-2 text-muted-foreground hover:text-foreground flex items-center gap-2"
-                        onClick={() => setIsOpen(false)}
-                      >
-                        <MessageSquare className="h-4 w-4" />
-                        {language === 'fr' ? 'Messages' : 'Messages'}
-                      </Link>
-                      <Link
                         to="/earnings"
                         className="px-4 py-2 text-muted-foreground hover:text-foreground"
                         onClick={() => setIsOpen(false)}
@@ -232,6 +278,22 @@ const Navbar = () => {
                   >
                     {t('nav.history')}
                   </Link>
+
+                  {/* Driver Messages (required: directly under My Rides) */}
+                  {isDriver && (
+                    <Link
+                      to={
+                        activeDriverRideId
+                          ? `/driver/messages?rideId=${activeDriverRideId}`
+                          : '/driver/messages'
+                      }
+                      className="px-4 py-2 text-muted-foreground hover:text-foreground flex items-center gap-2"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      {language === 'fr' ? 'Messages' : 'Messages'}
+                    </Link>
+                  )}
                   {isAdmin && (
                     <Link
                       to="/admin"
