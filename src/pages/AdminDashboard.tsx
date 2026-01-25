@@ -771,6 +771,10 @@ const AdminDashboard = () => {
             <p className="text-muted-foreground">Manage users, payments, and refunds</p>
           </div>
           <div className="flex gap-2">
+            <Button onClick={() => navigate('/admin/riders-live')} variant="outline" className="gap-2">
+              <User className="w-4 h-4" />
+              Live Riders
+            </Button>
             <Button onClick={() => navigate('/admin/drivers-live')} variant="outline" className="gap-2">
               <Radio className="w-4 h-4" />
               Live Drivers
