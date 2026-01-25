@@ -16,6 +16,7 @@ import RideHistory from "./pages/RideHistory";
 import Earnings from "./pages/Earnings";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminRefunds from "./pages/AdminRefunds";
+import DriverLive from "./pages/DriverLive";
 import NotFound from "./pages/NotFound";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
@@ -43,6 +44,7 @@ const AppRoutes = () => {
         <Route path="/earnings" element={<Earnings />} />
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/refunds" element={<AdminRefunds />} />
+        <Route path="/driver-live" element={<DriverLive />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
         <Route path="*" element={<NotFound />} />
       </Routes>
