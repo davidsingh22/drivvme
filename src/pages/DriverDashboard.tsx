@@ -1117,11 +1117,14 @@ const DriverDashboard = () => {
                         {t('driver.startRide')}
                       </Button>
                     )}
-                    {currentRide.status === 'in_progress' && (
+                    
+                    {/* End Ride Button - Always visible during active ride */}
+                    {(currentRide.status === 'in_progress' || currentRide.status === 'arrived') && (
                       <Button
-                        className="w-full bg-success hover:bg-success/90 shadow-button py-6"
+                        className="w-full bg-success hover:bg-success/90 shadow-button py-6 text-lg font-bold"
                         onClick={() => updateRideStatus('completed')}
                       >
+                        <CheckCircle className="h-6 w-6 mr-2" />
                         {t('driver.completeRide')}
                       </Button>
                     )}
