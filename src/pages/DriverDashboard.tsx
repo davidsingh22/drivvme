@@ -18,6 +18,7 @@ import { NotificationPermissionHelpDialog } from '@/components/NotificationPermi
 import { useAlertSound } from '@/hooks/useAlertSound';
 import { DriverNewRideAlert } from '@/components/DriverNewRideAlert';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
+import { DriverWakeLockBanner } from '@/components/DriverWakeLockBanner';
 
 const PLATFORM_FEE = 5.00;
 
@@ -783,6 +784,11 @@ const DriverDashboard = () => {
           animate={{ x: 0, opacity: 1 }}
           className="w-full lg:w-[420px] bg-card border-l border-border flex flex-col"
         >
+          {/* Wake Lock Banner - Keep screen awake while driving */}
+          <div className="pt-4">
+            <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
+          </div>
+
           <div className="p-6 flex-1 overflow-y-auto">
             {/* Profile Button */}
             <Button
