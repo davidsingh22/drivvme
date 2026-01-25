@@ -120,9 +120,25 @@ const RideHistory = () => {
       case 'cancelled':
         return 'text-destructive bg-destructive/10';
       case 'in_progress':
+      case 'driver_en_route':
+      case 'driver_assigned':
+      case 'arrived':
+      case 'searching':
         return 'text-primary bg-primary/10';
       default:
         return 'text-muted-foreground bg-muted';
+    }
+  };
+
+  // Check if a ride is currently active (clickable to view on map)
+  const isActiveRide = (status: string) => {
+    return ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(status);
+  };
+
+  const handleRideClick = (ride: Ride) => {
+    if (isActiveRide(ride.status)) {
+      // Navigate to ride booking page - it will auto-restore the active ride
+      navigate('/ride');
     }
   };
 
@@ -207,69 +223,93 @@ const RideHistory = () => {
             </Card>
           ) : (
             <div className="space-y-4">
-              {rides.map((ride, index) => (
-                <motion.div
-                  key={ride.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.05 }}
-                >
-                  <Card className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Calendar className="h-4 w-4" />
-                        {formatDate(ride.requested_at)}
-                      </div>
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(ride.status)}`}>
-                        {getStatusLabel(ride.status)}
-                      </span>
-                    </div>
-
-                    <div className="space-y-3 mb-4">
-                      <div className="flex items-start gap-3">
-                        <MapPin className="h-4 w-4 text-primary mt-1" />
-                        <p className="text-sm">{ride.pickup_address}</p>
-                      </div>
-                      <div className="flex items-start gap-3">
-                        <Navigation className="h-4 w-4 text-accent mt-1" />
-                        <p className="text-sm">{ride.dropoff_address}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-                      <span className="flex items-center gap-1">
-                        <Navigation className="h-4 w-4" />
-                        {formatDistance(Number(ride.distance_km), language)}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="h-4 w-4" />
-                        {formatDuration(ride.estimated_duration_minutes, language)}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-4 border-t border-border">
-                      <div className="flex items-center gap-2">
-                        <DollarSign className="h-5 w-5 text-accent" />
-                        <span className="font-bold text-lg">
-                          {formatCurrency(Number(ride.actual_fare || ride.estimated_fare), language)}
-                        </span>
-                        {isDriver && ride.driver_id === user?.id && ride.status === 'completed' && (
-                          <span className="text-sm text-muted-foreground">
-                            (earned {formatCurrency(Number(ride.driver_earnings), language)})
+              {rides.map((ride, index) => {
+                const isActive = isActiveRide(ride.status);
+                return (
+                  <motion.div
+                    key={ride.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                  >
+                    <Card 
+                      className={`p-6 ${isActive ? 'cursor-pointer border-primary/50 hover:border-primary hover:shadow-lg transition-all ring-2 ring-primary/20' : ''}`}
+                      onClick={() => handleRideClick(ride)}
+                    >
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Calendar className="h-4 w-4" />
+                          {formatDate(ride.requested_at)}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isActive && (
+                            <motion.div
+                              animate={{ scale: [1, 1.2, 1] }}
+                              transition={{ duration: 1.5, repeat: Infinity }}
+                              className="w-2 h-2 rounded-full bg-primary"
+                            />
+                          )}
+                          <span className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(ride.status)}`}>
+                            {getStatusLabel(ride.status)}
                           </span>
-                        )}
+                        </div>
                       </div>
 
-                      {ratings[ride.id] && (
-                        <div className="flex items-center gap-1 text-warning">
-                          <Star className="h-4 w-4 fill-current" />
-                          <span className="font-medium">{ratings[ride.id].rating}</span>
+                      {/* Tap to view prompt for active rides */}
+                      {isActive && (
+                        <div className="mb-4 p-3 bg-primary/10 rounded-lg border border-primary/30">
+                          <p className="text-sm text-primary font-medium text-center">
+                            {language === 'fr' ? '👆 Appuyez pour voir sur la carte' : '👆 Tap to view on map'}
+                          </p>
                         </div>
                       )}
-                    </div>
-                  </Card>
-                </motion.div>
-              ))}
+
+                      <div className="space-y-3 mb-4">
+                        <div className="flex items-start gap-3">
+                          <MapPin className="h-4 w-4 text-primary mt-1" />
+                          <p className="text-sm">{ride.pickup_address}</p>
+                        </div>
+                        <div className="flex items-start gap-3">
+                          <Navigation className="h-4 w-4 text-accent mt-1" />
+                          <p className="text-sm">{ride.dropoff_address}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
+                        <span className="flex items-center gap-1">
+                          <Navigation className="h-4 w-4" />
+                          {formatDistance(Number(ride.distance_km), language)}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-4 w-4" />
+                          {formatDuration(ride.estimated_duration_minutes, language)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-4 border-t border-border">
+                        <div className="flex items-center gap-2">
+                          <DollarSign className="h-5 w-5 text-accent" />
+                          <span className="font-bold text-lg">
+                            {formatCurrency(Number(ride.actual_fare || ride.estimated_fare), language)}
+                          </span>
+                          {isDriver && ride.driver_id === user?.id && ride.status === 'completed' && (
+                            <span className="text-sm text-muted-foreground">
+                              (earned {formatCurrency(Number(ride.driver_earnings), language)})
+                            </span>
+                          )}
+                        </div>
+
+                        {ratings[ride.id] && (
+                          <div className="flex items-center gap-1 text-warning">
+                            <Star className="h-4 w-4 fill-current" />
+                            <span className="font-medium">{ratings[ride.id].rating}</span>
+                          </div>
+                        )}
+                      </div>
+                    </Card>
+                  </motion.div>
+                );
+              })}
             </div>
           )}
         </motion.div>
