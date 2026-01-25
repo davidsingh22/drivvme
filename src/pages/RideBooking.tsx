@@ -367,6 +367,10 @@ const RideBooking = () => {
             case 'completed':
               setStep('completed');
               clearRide(); // Clear from localStorage
+              // Save the dropoff destination for future suggestions
+              if (dropoff && user?.id) {
+                saveDropoffDestination(dropoff);
+              }
               break;
             case 'cancelled':
               toast({
@@ -631,7 +635,55 @@ const RideBooking = () => {
     });
   };
 
-  // Start tiered notification escalation when entering searching state
+  // Save dropoff destination for frequent places suggestions
+  const saveDropoffDestination = async (destination: Location) => {
+    if (!user?.id) return;
+
+    try {
+      // Extract name from address (first part before comma)
+      const parts = destination.address.split(',');
+      const name = parts[0]?.trim() || destination.address;
+      const address = parts.slice(1).join(',').trim() || destination.address;
+
+      // Check if destination already exists
+      const { data: existing } = await supabase
+        .from('rider_destinations')
+        .select('id, visit_count')
+        .eq('user_id', user.id)
+        .eq('lat', destination.lat)
+        .eq('lng', destination.lng)
+        .maybeSingle();
+
+      if (existing) {
+        // Update visit count
+        await supabase
+          .from('rider_destinations')
+          .update({
+            visit_count: existing.visit_count + 1,
+            last_visited_at: new Date().toISOString(),
+            name,
+            address,
+          })
+          .eq('id', existing.id);
+      } else {
+        // Insert new destination
+        await supabase
+          .from('rider_destinations')
+          .insert({
+            user_id: user.id,
+            name,
+            address,
+            lat: destination.lat,
+            lng: destination.lng,
+            visit_count: 1,
+            last_visited_at: new Date().toISOString(),
+          });
+      }
+      console.log('[RideBooking] Saved dropoff destination for future suggestions');
+    } catch (err) {
+      console.error('[RideBooking] Error saving dropoff destination:', err);
+    }
+  };
   useEffect(() => {
     if (step === 'searching' && currentRide && pickup && dropoff && fareEstimate) {
       startEscalation();

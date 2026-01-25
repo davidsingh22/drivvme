@@ -576,6 +576,42 @@ export type Database = {
         }
         Relationships: []
       }
+      rider_destinations: {
+        Row: {
+          address: string
+          created_at: string
+          id: string
+          last_visited_at: string
+          lat: number
+          lng: number
+          name: string
+          user_id: string
+          visit_count: number
+        }
+        Insert: {
+          address: string
+          created_at?: string
+          id?: string
+          last_visited_at?: string
+          lat: number
+          lng: number
+          name: string
+          user_id: string
+          visit_count?: number
+        }
+        Update: {
+          address?: string
+          created_at?: string
+          id?: string
+          last_visited_at?: string
+          lat?: number
+          lng?: number
+          name?: string
+          user_id?: string
+          visit_count?: number
+        }
+        Relationships: []
+      }
       rider_locations: {
         Row: {
           accuracy: number | null

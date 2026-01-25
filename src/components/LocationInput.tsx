@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useCallback, forwardRef } from 'react';
-import { MapPin, Navigation, Loader2 } from 'lucide-react';
+import { MapPin, Navigation, Loader2, Clock, Star } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface LocationInputProps {
   type: 'pickup' | 'dropoff';
@@ -20,6 +21,8 @@ interface Suggestion {
   address: string;
   center: [number, number];
   isCustom?: boolean;
+  isRecent?: boolean;
+  visitCount?: number;
 }
 
 const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
@@ -30,8 +33,10 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   onUseCurrentLocation,
 }, ref) => {
   const { t } = useLanguage();
+  const { user } = useAuth();
   const { token, loading: tokenLoading } = useMapboxToken();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [recentDestinations, setRecentDestinations] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -43,6 +48,39 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   ) : (
     <Navigation className="h-5 w-5 text-accent" />
   );
+
+  // Fetch recent destinations for dropoff field
+  useEffect(() => {
+    if (type !== 'dropoff' || !user?.id) return;
+
+    const fetchRecent = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('rider_destinations')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('visit_count', { ascending: false })
+          .order('last_visited_at', { ascending: false })
+          .limit(5);
+
+        if (error) throw error;
+
+        const recent: Suggestion[] = (data || []).map((d: any) => ({
+          id: `recent-${d.id}`,
+          name: d.name,
+          address: d.address,
+          center: [d.lng, d.lat] as [number, number],
+          isRecent: true,
+          visitCount: d.visit_count,
+        }));
+        setRecentDestinations(recent);
+      } catch (err) {
+        console.error('Error fetching recent destinations:', err);
+      }
+    };
+
+    fetchRecent();
+  }, [type, user?.id]);
 
   // Search custom locations from database
   const searchCustomLocations = async (query: string): Promise<Suggestion[]> => {
@@ -71,22 +109,48 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     }
   };
 
+  // Search recent destinations
+  const searchRecentDestinations = (query: string): Suggestion[] => {
+    if (!query || query.length < 2) return [];
+    const lowerQuery = query.toLowerCase();
+    return recentDestinations.filter(
+      d => d.name.toLowerCase().includes(lowerQuery) || 
+           d.address.toLowerCase().includes(lowerQuery)
+    );
+  };
+
   const searchPlaces = useCallback(async (query: string) => {
     if (!token || query.length < 2) {
-      setSuggestions([]);
+      // If no query but we have recent destinations (dropoff only), show them
+      if (type === 'dropoff' && recentDestinations.length > 0 && query.length === 0) {
+        setSuggestions(recentDestinations);
+        setShowSuggestions(true);
+      } else {
+        setSuggestions([]);
+      }
       return;
     }
 
     setIsSearching(true);
     try {
-      // Search custom locations and Mapbox in parallel
+      // Search recent destinations, custom locations, and Mapbox in parallel
+      const recentResults = searchRecentDestinations(query);
       const [customResults, mapboxResults] = await Promise.all([
         searchCustomLocations(query),
         searchMapbox(query, token),
       ]);
 
-      // Combine results: custom locations first, then Mapbox
-      const combined = [...customResults, ...mapboxResults];
+      // Combine results: recent first, then custom, then Mapbox
+      // Deduplicate by removing Mapbox results that match recent destinations
+      const recentIds = new Set(recentResults.map(r => `${r.center[0]}-${r.center[1]}`));
+      const customIds = new Set(customResults.map(r => `${r.center[0]}-${r.center[1]}`));
+      
+      const filteredMapbox = mapboxResults.filter(m => {
+        const key = `${m.center[0]}-${m.center[1]}`;
+        return !recentIds.has(key) && !customIds.has(key);
+      });
+
+      const combined = [...recentResults, ...customResults, ...filteredMapbox];
       setSuggestions(combined);
       setShowSuggestions(combined.length > 0);
     } catch (err) {
@@ -94,7 +158,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     } finally {
       setIsSearching(false);
     }
-  }, [token]);
+  }, [token, type, recentDestinations]);
 
   const searchMapbox = async (query: string, accessToken: string): Promise<Suggestion[]> => {
     try {
@@ -256,7 +320,15 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           ref={inputRef}
           value={value}
           onChange={handleInputChange}
-          onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+          onFocus={() => {
+            // Show recent destinations when focusing on empty dropoff field
+            if (type === 'dropoff' && !value && recentDestinations.length > 0) {
+              setSuggestions(recentDestinations);
+              setShowSuggestions(true);
+            } else if (suggestions.length > 0) {
+              setShowSuggestions(true);
+            }
+          }}
           placeholder={placeholder || t(`booking.${type}`)}
           className="pl-10 py-6 bg-background"
           disabled={tokenLoading}
@@ -272,9 +344,20 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                 className="w-full px-4 py-3 text-left hover:bg-muted transition-colors border-b border-border last:border-b-0 flex items-start gap-3"
                 onClick={() => handleSelectSuggestion(suggestion)}
               >
-                <MapPin className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
-                <div className="flex flex-col min-w-0">
-                  <span className="font-medium text-foreground truncate">{suggestion.name}</span>
+                {suggestion.isRecent ? (
+                  <Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+                ) : (
+                  <MapPin className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
+                )}
+                <div className="flex flex-col min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-foreground truncate">{suggestion.name}</span>
+                    {suggestion.isRecent && suggestion.visitCount && suggestion.visitCount > 1 && (
+                      <span className="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        {suggestion.visitCount}x
+                      </span>
+                    )}
+                  </div>
                   {suggestion.address && (
                     <span className="text-sm text-muted-foreground truncate">{suggestion.address}</span>
                   )}
