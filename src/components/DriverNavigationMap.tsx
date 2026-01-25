@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
-import { AlertCircle, Loader2, Navigation, MapPin, ArrowUp, RotateCcw, Volume2, VolumeX } from 'lucide-react';
+import { AlertCircle, Loader2, Navigation, MapPin, ArrowUp, RotateCcw, Volume2, VolumeX, PlayCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +21,8 @@ interface DriverNavigationMapProps {
   destinationType: 'pickup' | 'dropoff';
   onClose?: () => void;
   onArrived?: () => void;
+  onStartRide?: () => void;
+  hasArrived?: boolean;
 }
 
 const DriverNavigationMap = ({
@@ -29,6 +31,8 @@ const DriverNavigationMap = ({
   destinationType,
   onClose,
   onArrived,
+  onStartRide,
+  hasArrived,
 }: DriverNavigationMapProps) => {
   const { language } = useLanguage();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -445,14 +449,25 @@ const DriverNavigationMap = ({
           </div>
         </Card>
 
-        {/* I've Arrived button for pickup */}
-        {destinationType === 'pickup' && onArrived && (
+        {/* I've Arrived button for pickup (before arrival) */}
+        {destinationType === 'pickup' && onArrived && !hasArrived && (
           <Button
-            className="w-full h-14 mb-3 text-lg font-bold bg-green-500 hover:bg-green-600 text-white"
+            className="w-full h-14 mb-3 text-lg font-bold bg-amber-500 hover:bg-amber-600 text-white"
             onClick={onArrived}
           >
             <MapPin className="h-5 w-5 mr-2" />
             {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
+          </Button>
+        )}
+
+        {/* Start Ride button for pickup (after arrival) */}
+        {destinationType === 'pickup' && onStartRide && hasArrived && (
+          <Button
+            className="w-full h-14 mb-3 text-lg font-bold bg-success hover:bg-success/90 text-white"
+            onClick={onStartRide}
+          >
+            <PlayCircle className="h-5 w-5 mr-2" />
+            {language === 'fr' ? "Démarrer la course" : "Start Ride"}
           </Button>
         )}
 
