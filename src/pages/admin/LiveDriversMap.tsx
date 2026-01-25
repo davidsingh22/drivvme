@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useMapboxToken } from "@/hooks/useMapboxToken";
 import Navbar from "@/components/Navbar";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Radio, Users, Clock, Car } from "lucide-react";
+import { ArrowLeft, Radio, Users, Clock, Car, Phone, Mail, MapPin, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 type DriverLoc = {
@@ -20,6 +20,12 @@ type DriverLoc = {
   is_online: boolean;
   updated_at: string;
   display_name?: string | null;
+  phone_number?: string | null;
+  email?: string | null;
+  vehicle_make?: string | null;
+  vehicle_model?: string | null;
+  vehicle_color?: string | null;
+  license_plate?: string | null;
 };
 
 const STALE_THRESHOLD_SECONDS = 60;
@@ -30,6 +36,8 @@ export default function AdminDriversLive() {
   const { token, loading: tokenLoading, error: tokenError } = useMapboxToken();
   const [drivers, setDrivers] = useState<Record<string, DriverLoc>>({});
   const [selected, setSelected] = useState<DriverLoc | null>(null);
+  const [selectedAddress, setSelectedAddress] = useState<string | null>(null);
+  const [addressLoading, setAddressLoading] = useState(false);
   const [, setTick] = useState(0);
 
   const driversList = useMemo(() => Object.values(drivers), [drivers]);
@@ -61,24 +69,48 @@ export default function AdminDriversLive() {
 
       if (!mounted || !data) return;
 
-      // Fetch driver names
+      // Fetch driver names and contact info
       const userIds = data.map((d) => d.user_id);
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("user_id, first_name, last_name")
-        .in("user_id", userIds);
+      const [{ data: profiles }, { data: driverProfiles }] = await Promise.all([
+        supabase
+          .from("profiles")
+          .select("user_id, first_name, last_name, phone_number, email")
+          .in("user_id", userIds),
+        supabase
+          .from("driver_profiles")
+          .select("user_id, vehicle_make, vehicle_model, vehicle_color, license_plate")
+          .in("user_id", userIds),
+      ]);
 
-      const nameMap = new Map<string, string>();
+      const profileMap = new Map<string, { name: string; phone: string | null; email: string | null }>();
       profiles?.forEach((p) => {
         const name = [p.first_name, p.last_name].filter(Boolean).join(" ") || "Driver";
-        nameMap.set(p.user_id, name);
+        profileMap.set(p.user_id, { name, phone: p.phone_number, email: p.email });
+      });
+
+      const vehicleMap = new Map<string, { make: string | null; model: string | null; color: string | null; plate: string | null }>();
+      driverProfiles?.forEach((dp) => {
+        vehicleMap.set(dp.user_id, {
+          make: dp.vehicle_make,
+          model: dp.vehicle_model,
+          color: dp.vehicle_color,
+          plate: dp.license_plate,
+        });
       });
 
       const next: Record<string, DriverLoc> = {};
       data.forEach((d) => {
+        const profile = profileMap.get(d.user_id);
+        const vehicle = vehicleMap.get(d.user_id);
         next[d.driver_id] = {
           ...d,
-          display_name: nameMap.get(d.user_id) || null,
+          display_name: profile?.name || null,
+          phone_number: profile?.phone || null,
+          email: profile?.email || null,
+          vehicle_make: vehicle?.make || null,
+          vehicle_model: vehicle?.model || null,
+          vehicle_color: vehicle?.color || null,
+          license_plate: vehicle?.plate || null,
         };
       });
       setDrivers(next);
@@ -89,6 +121,39 @@ export default function AdminDriversLive() {
       mounted = false;
     };
   }, []);
+
+  // Reverse geocode address when driver is selected
+  useEffect(() => {
+    if (!selected || !token) {
+      setSelectedAddress(null);
+      return;
+    }
+
+    let cancelled = false;
+    setAddressLoading(true);
+    setSelectedAddress(null);
+
+    async function fetchAddress() {
+      try {
+        const res = await fetch(
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/${selected!.lng},${selected!.lat}.json?access_token=${token}&limit=1`
+        );
+        const data = await res.json();
+        if (!cancelled && data.features?.[0]?.place_name) {
+          setSelectedAddress(data.features[0].place_name);
+        }
+      } catch (err) {
+        console.error("Reverse geocode failed:", err);
+      } finally {
+        if (!cancelled) setAddressLoading(false);
+      }
+    }
+
+    fetchAddress();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, token]);
 
   // Realtime updates
   useEffect(() => {
@@ -254,29 +319,94 @@ export default function AdminDriversLive() {
                 anchor="bottom"
                 onClose={() => setSelected(null)}
                 closeOnClick={false}
+                maxWidth="320px"
               >
-                <div className="p-2 min-w-[180px] text-sm">
-                  <div className="font-bold text-foreground">
-                    {selected.display_name ?? `Driver ${selected.driver_id.slice(0, 8)}`}
+                <div className="p-3 min-w-[280px] text-sm space-y-3">
+                  {/* Header */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+                      <Car className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <div className="font-bold text-foreground text-base">
+                        {selected.display_name ?? `Driver ${selected.driver_id.slice(0, 8)}`}
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`w-2 h-2 rounded-full ${
+                            selected.is_online ? "bg-green-500" : "bg-muted"
+                          }`}
+                        />
+                        <span className="text-muted-foreground text-xs">
+                          {selected.is_online ? "Online" : "Offline"}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 mt-1">
-                    <span
-                      className={`w-2 h-2 rounded-full ${
-                        selected.is_online ? "bg-emerald-500" : "bg-muted"
-                      }`}
-                    />
-                    <span className="text-muted-foreground">
-                      {selected.is_online ? "Online" : "Offline"}
-                    </span>
+
+                  {/* Current Location */}
+                  <div className="bg-muted/50 rounded-lg p-2.5">
+                    <div className="flex items-start gap-2">
+                      <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                      <div className="flex-1">
+                        <div className="text-xs font-medium text-muted-foreground mb-0.5">Current Location</div>
+                        {addressLoading ? (
+                          <div className="flex items-center gap-1.5 text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span className="text-xs">Loading address...</span>
+                          </div>
+                        ) : selectedAddress ? (
+                          <div className="text-foreground text-sm leading-snug">{selectedAddress}</div>
+                        ) : (
+                          <div className="text-muted-foreground text-xs font-mono">
+                            {selected.lat.toFixed(5)}, {selected.lng.toFixed(5)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-muted-foreground mt-1">
-                    Speed: {selected.speed_kph ? `${selected.speed_kph.toFixed(1)} km/h` : "—"}
-                  </div>
-                  <div className="text-muted-foreground">
-                    Updated: {new Date(selected.updated_at).toLocaleTimeString()}
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-1 font-mono">
-                    {selected.lat.toFixed(5)}, {selected.lng.toFixed(5)}
+
+                  {/* Contact Info */}
+                  {(selected.phone_number || selected.email) && (
+                    <div className="space-y-1.5">
+                      {selected.phone_number && (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Phone className="h-3.5 w-3.5" />
+                          <span>{selected.phone_number}</span>
+                        </div>
+                      )}
+                      {selected.email && (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Mail className="h-3.5 w-3.5" />
+                          <span className="truncate">{selected.email}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Vehicle Info */}
+                  {(selected.vehicle_make || selected.license_plate) && (
+                    <div className="border-t border-border pt-2.5">
+                      <div className="text-xs font-medium text-muted-foreground mb-1">Vehicle</div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-foreground">
+                          {[selected.vehicle_color, selected.vehicle_make, selected.vehicle_model]
+                            .filter(Boolean)
+                            .join(" ") || "Unknown"}
+                        </span>
+                        {selected.license_plate && (
+                          <span className="bg-muted px-2 py-0.5 rounded text-xs font-mono font-medium">
+                            {selected.license_plate}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stats */}
+                  <div className="border-t border-border pt-2.5 flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Speed: {selected.speed_kph ? `${selected.speed_kph.toFixed(1)} km/h` : "—"}</span>
+                    <span>Updated: {new Date(selected.updated_at).toLocaleTimeString()}</span>
                   </div>
                 </div>
               </Popup>
