@@ -35,7 +35,8 @@ import {
   Wallet,
   Mail,
   Phone,
-  Radio
+  Radio,
+  FileText
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
@@ -827,6 +828,10 @@ const AdminDashboard = () => {
             <Button onClick={() => navigate('/admin/drivers-live')} variant="outline" className="gap-2">
               <Radio className="w-4 h-4" />
               Live Drivers
+            </Button>
+            <Button onClick={() => navigate('/admin/driver-documents')} variant="outline" className="gap-2">
+              <FileText className="w-4 h-4" />
+              Driver Documents
             </Button>
             <Button onClick={() => navigate('/admin/refunds')} className="gap-2">
               <RefreshCw className="w-4 h-4" />

@@ -19,6 +19,8 @@ import Earnings from "./pages/Earnings";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminRefunds from "./pages/AdminRefunds";
 import AdminRideLocations from "./pages/AdminRideLocations";
+import AdminDriverDocuments from "./pages/AdminDriverDocuments";
+import AdminDriverDocumentDetail from "./pages/AdminDriverDocumentDetail";
 import LiveDriversMap from "@/pages/admin/LiveDriversMap";
 import LiveRidersMap from "@/pages/admin/LiveRidersMap";
 import DriverLive from "./pages/DriverLive";
@@ -118,6 +120,8 @@ const AppRoutes = () => {
         <Route path="/admin/ride-locations" element={<AdminRideLocations />} />
         <Route path="/admin/drivers-live" element={<LiveDriversMap />} />
         <Route path="/admin/riders-live" element={<LiveRidersMap />} />
+        <Route path="/admin/driver-documents" element={<AdminDriverDocuments />} />
+        <Route path="/admin/driver-documents/:driverId" element={<AdminDriverDocumentDetail />} />
         <Route path="/driver-live" element={<DriverLive />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
         <Route path="*" element={<NotFound />} />
