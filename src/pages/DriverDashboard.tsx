@@ -288,6 +288,40 @@ const DriverDashboard = () => {
     }
   }, [driverProfile]);
 
+  // Restore active ride on page load (critical for iOS resume / page refresh)
+  useEffect(() => {
+    if (!user) return;
+
+    const restoreActiveRide = async () => {
+      const { data, error } = await supabase
+        .from('rides')
+        .select('*')
+        .eq('driver_id', user.id)
+        .in('status', ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        console.log('[DriverDashboard] Restored active ride:', data.id, data.status);
+        setCurrentRide(data);
+        
+        // Fetch rider info inline
+        const { data: riderData } = await supabase
+          .from('profiles')
+          .select('first_name, last_name, phone_number, avatar_url')
+          .eq('user_id', data.rider_id)
+          .single();
+        
+        if (riderData) {
+          setRiderInfo(riderData);
+        }
+      }
+    };
+
+    restoreActiveRide();
+  }, [user]);
+
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
@@ -466,7 +500,7 @@ const DriverDashboard = () => {
     });
   };
 
-  const fetchRiderInfo = async (riderId: string) => {
+  const fetchRiderInfo = useCallback(async (riderId: string) => {
     const { data } = await supabase
       .from('profiles')
       .select('first_name, last_name, phone_number, avatar_url')
@@ -476,7 +510,7 @@ const DriverDashboard = () => {
     if (data) {
       setRiderInfo(data);
     }
-  };
+  }, []);
 
   const sendPushNotification = async (userId: string, title: string, body: string, url?: string) => {
     try {
