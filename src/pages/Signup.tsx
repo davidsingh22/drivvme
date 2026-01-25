@@ -16,6 +16,7 @@ import ProfilePictureUpload from '@/components/signup/ProfilePictureUpload';
 import CriminalRecordQuestion from '@/components/signup/CriminalRecordQuestion';
 import DriverAgreement from '@/components/signup/DriverAgreement';
 import ApplicationReviewPage from '@/components/signup/ApplicationReviewPage';
+import RiderDisclosure from '@/components/signup/RiderDisclosure';
 import { useToast } from '@/hooks/use-toast';
 
 type DriverSignupStep = 'info' | 'agreement' | 'review';
@@ -51,6 +52,9 @@ const Signup = () => {
   const [driverStep, setDriverStep] = useState<DriverSignupStep>('info');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // Rider agreement
+  const [riderAgreementChecked, setRiderAgreementChecked] = useState(false);
+  
   // Store created user ID for later steps
   const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
@@ -83,6 +87,10 @@ const Signup = () => {
     }
     if (password !== confirmPassword) {
       setError('Passwords do not match');
+      return false;
+    }
+    if (!riderAgreementChecked) {
+      setError('You must agree to the Rider Terms of Use and acknowledge the Disclosure');
       return false;
     }
     return true;
@@ -139,11 +147,59 @@ const Signup = () => {
 
     if (!validateRiderForm()) return;
 
+    setIsSubmitting(true);
+
     try {
-      await signUp(email, password, 'rider', firstName, lastName, phone);
+      // Sign up the rider
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+
+      if (authError) throw authError;
+      if (!authData.user) throw new Error('Failed to create account');
+
+      const userId = authData.user.id;
+
+      // Update profile
+      await supabase
+        .from('profiles')
+        .update({
+          first_name: firstName,
+          last_name: lastName,
+          phone_number: phone,
+        })
+        .eq('user_id', userId);
+
+      // Add rider role
+      await supabase
+        .from('user_roles')
+        .insert({ user_id: userId, role: 'rider' });
+
+      // Store the rider agreement
+      await supabase
+        .from('rider_agreements')
+        .insert({
+          rider_id: userId,
+          agrees_to_terms: true,
+          agrees_to_disclosure: true,
+          user_agent: navigator.userAgent,
+        });
+
+      toast({
+        title: 'Account Created!',
+        description: 'Welcome to Drivveme.',
+      });
+
       navigate('/ride', { replace: true });
     } catch (err: any) {
+      console.error('Signup error:', err);
       setError(err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -571,6 +627,14 @@ const Signup = () => {
                   className="bg-background"
                 />
               </div>
+
+              {/* Rider Disclosure - only show for riders */}
+              {role === 'rider' && (
+                <RiderDisclosure
+                  checked={riderAgreementChecked}
+                  onCheckedChange={setRiderAgreementChecked}
+                />
+              )}
 
               {error && (
                 <p className="text-destructive text-sm text-center">{error}</p>

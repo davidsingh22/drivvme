@@ -543,6 +543,39 @@ export type Database = {
         }
         Relationships: []
       }
+      rider_agreements: {
+        Row: {
+          agrees_to_disclosure: boolean
+          agrees_to_terms: boolean
+          created_at: string
+          id: string
+          ip_address: string | null
+          rider_id: string
+          signed_at: string
+          user_agent: string | null
+        }
+        Insert: {
+          agrees_to_disclosure?: boolean
+          agrees_to_terms?: boolean
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          rider_id: string
+          signed_at?: string
+          user_agent?: string | null
+        }
+        Update: {
+          agrees_to_disclosure?: boolean
+          agrees_to_terms?: boolean
+          created_at?: string
+          id?: string
+          ip_address?: string | null
+          rider_id?: string
+          signed_at?: string
+          user_agent?: string | null
+        }
+        Relationships: []
+      }
       rider_locations: {
         Row: {
           accuracy: number | null
