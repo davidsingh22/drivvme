@@ -87,6 +87,18 @@ const DriverDashboard = () => {
   });
   const alertStartTimeRef = useRef<number | null>(null);
 
+  // Helper function for distance calculation (must be defined before any hooks that call it)
+  const calculateDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
   const alertRide = useMemo(() => {
     if (!newRideAlertRideId) return null;
     const ride = availableRides.find((r) => r.id === newRideAlertRideId);
@@ -112,15 +124,6 @@ const DriverDashboard = () => {
       is_priority: false, // Can be set based on surge or rider preference
     };
   }, [availableRides, newRideAlertRideId, driverLocation]);
-
-  // Helper function for distance calculation
-  const calculateDistanceKm = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-    const R = 6371;
-    const dLat = ((lat2 - lat1) * Math.PI) / 180;
-    const dLng = ((lng2 - lng1) * Math.PI) / 180;
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  };
 
   const [redirectGraceOver, setRedirectGraceOver] = useState(false);
 
