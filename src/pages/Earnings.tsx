@@ -1,18 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { DollarSign, TrendingUp, Calendar, Car, ArrowUp, ArrowDown, Wallet, ExternalLink, Loader2 } from 'lucide-react';
+import { DollarSign, TrendingUp, Car, ArrowUp, ArrowDown, Wallet, ExternalLink } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { formatCurrency } from '@/lib/pricing';
 import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
+import { DailyEarningsDetail } from '@/components/DailyEarningsDetail';
+import { WithdrawDialog } from '@/components/WithdrawDialog';
 
 const PLATFORM_FEE = 5.00;
 
@@ -26,6 +26,7 @@ interface EarningsSummary {
 
 interface DailyEarnings {
   date: string;
+  dateKey: string;
   earnings: number;
   rides: number;
   fares: number;
@@ -48,9 +49,7 @@ const Earnings = () => {
   });
   const [dailyData, setDailyData] = useState<DailyEarnings[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [payoutDialog, setPayoutDialog] = useState(false);
-  const [payoutAmount, setPayoutAmount] = useState('');
-  const [isProcessingPayout, setIsProcessingPayout] = useState(false);
+  const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!authLoading && (!user || !isDriver)) {
@@ -121,16 +120,18 @@ const Earnings = () => {
           availableBalance,
         });
 
-        // Group by day
+        // Group by day - use ISO format for easier parsing
         const dailyMap: Record<string, DailyEarnings> = {};
         data.forEach((ride) => {
-          const date = new Date(ride.dropoff_at!).toLocaleDateString(language === 'fr' ? 'fr-CA' : 'en-CA');
-          if (!dailyMap[date]) {
-            dailyMap[date] = { date, earnings: 0, rides: 0, fares: 0 };
+          const rideDate = new Date(ride.dropoff_at!);
+          const dateKey = rideDate.toISOString().split('T')[0]; // YYYY-MM-DD format
+          const displayDate = rideDate.toLocaleDateString(language === 'fr' ? 'fr-CA' : 'en-CA');
+          if (!dailyMap[dateKey]) {
+            dailyMap[dateKey] = { date: displayDate, dateKey, earnings: 0, rides: 0, fares: 0 };
           }
-          dailyMap[date].earnings += Number(ride.driver_earnings) || 0;
-          dailyMap[date].fares += Number(ride.actual_fare) || 0;
-          dailyMap[date].rides += 1;
+          dailyMap[dateKey].earnings += Number(ride.driver_earnings) || 0;
+          dailyMap[dateKey].fares += Number(ride.actual_fare) || 0;
+          dailyMap[dateKey].rides += 1;
         });
 
         setDailyData(Object.values(dailyMap));
@@ -141,77 +142,6 @@ const Earnings = () => {
 
     fetchEarnings();
   }, [user, period, language, driverProfile?.total_earnings]);
-
-  const handlePayout = async () => {
-    const amount = parseFloat(payoutAmount);
-    const availableBalance = Number(driverProfile?.total_earnings) || 0;
-
-    if (isNaN(amount) || amount <= 0) {
-      toast({
-        title: 'Invalid Amount',
-        description: 'Please enter a valid amount to withdraw',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (amount > availableBalance) {
-      toast({
-        title: 'Insufficient Balance',
-        description: `You can only withdraw up to ${formatCurrency(availableBalance, language)}`,
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsProcessingPayout(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('driver-payout', {
-        body: { amount }
-      });
-
-      if (error) throw error;
-
-      if (data.needsOnboarding) {
-        // Redirect to Stripe onboarding
-        toast({
-          title: 'Setup Required',
-          description: 'Please complete your payment account setup',
-        });
-        window.location.href = data.onboardingUrl;
-        return;
-      }
-
-      toast({
-        title: 'Payout Successful! 🎉',
-        description: data.message,
-      });
-
-      setPayoutDialog(false);
-      setPayoutAmount('');
-      
-      // Refresh driver profile to get updated balance
-      if (refreshDriverProfile) {
-        await refreshDriverProfile();
-      }
-
-      // Update local state
-      setSummary(prev => ({
-        ...prev,
-        availableBalance: data.newBalance
-      }));
-
-    } catch (error: any) {
-      console.error('Payout error:', error);
-      toast({
-        title: 'Payout Failed',
-        description: error.message || 'Failed to process payout',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsProcessingPayout(false);
-    }
-  };
 
   const availableBalance = Number(driverProfile?.total_earnings) || 0;
 
@@ -240,23 +170,23 @@ const Earnings = () => {
               <div>
                 <div className="flex items-center gap-2 text-muted-foreground mb-2">
                   <Wallet className="h-5 w-5" />
-                  <span>Available Balance</span>
+                  <span>{language === 'fr' ? 'Solde disponible' : 'Available Balance'}</span>
                 </div>
                 <p className="font-display text-4xl font-bold text-accent">
                   {formatCurrency(availableBalance, language)}
                 </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Ready to withdraw anytime
+                  {language === 'fr' ? 'Prêt à retirer' : 'Ready to withdraw anytime'}
                 </p>
               </div>
               <Button 
                 size="lg" 
-                onClick={() => setPayoutDialog(true)}
+                onClick={() => setWithdrawDialogOpen(true)}
                 disabled={availableBalance <= 0}
                 className="gap-2"
               >
                 <ExternalLink className="h-4 w-4" />
-                Withdraw
+                {language === 'fr' ? 'Retirer' : 'Withdraw'}
               </Button>
             </div>
           </Card>
@@ -264,10 +194,10 @@ const Earnings = () => {
           {/* Period Tabs */}
           <Tabs value={period} onValueChange={(v) => setPeriod(v as typeof period)} className="mb-6">
             <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="today">Today</TabsTrigger>
-              <TabsTrigger value="week">Week</TabsTrigger>
-              <TabsTrigger value="month">Month</TabsTrigger>
-              <TabsTrigger value="all">All Time</TabsTrigger>
+              <TabsTrigger value="today">{language === 'fr' ? "Aujourd'hui" : 'Today'}</TabsTrigger>
+              <TabsTrigger value="week">{language === 'fr' ? 'Semaine' : 'Week'}</TabsTrigger>
+              <TabsTrigger value="month">{language === 'fr' ? 'Mois' : 'Month'}</TabsTrigger>
+              <TabsTrigger value="all">{language === 'fr' ? 'Total' : 'All Time'}</TabsTrigger>
             </TabsList>
           </Tabs>
 
@@ -276,7 +206,7 @@ const Earnings = () => {
             <Card className="p-6">
               <div className="flex items-center gap-2 text-muted-foreground mb-2">
                 <DollarSign className="h-5 w-5" />
-                <span>Period Earnings</span>
+                <span>{language === 'fr' ? 'Gains période' : 'Period Earnings'}</span>
               </div>
               <p className="font-display text-3xl font-bold">
                 {formatCurrency(summary.totalEarnings, language)}
@@ -285,7 +215,7 @@ const Earnings = () => {
             <Card className="p-6">
               <div className="flex items-center gap-2 text-muted-foreground mb-2">
                 <Car className="h-5 w-5" />
-                <span>Completed Rides</span>
+                <span>{language === 'fr' ? 'Courses complétées' : 'Completed Rides'}</span>
               </div>
               <p className="font-display text-3xl font-bold">
                 {summary.totalRides}
@@ -295,24 +225,26 @@ const Earnings = () => {
 
           {/* Breakdown */}
           <Card className="p-6 mb-8">
-            <h3 className="font-display text-lg font-semibold mb-4">Earnings Breakdown</h3>
+            <h3 className="font-display text-lg font-semibold mb-4">
+              {language === 'fr' ? 'Détail des gains' : 'Earnings Breakdown'}
+            </h3>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <ArrowUp className="h-4 w-4 text-success" />
-                  <span>Total Fares Collected</span>
+                  <span>{language === 'fr' ? 'Tarifs collectés' : 'Total Fares Collected'}</span>
                 </div>
                 <span className="font-medium">{formatCurrency(summary.totalFares, language)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <ArrowDown className="h-4 w-4 text-destructive" />
-                  <span>Platform Fees ({formatCurrency(PLATFORM_FEE, language)}/ride)</span>
+                  <span>{language === 'fr' ? 'Frais plateforme' : 'Platform Fees'} ({formatCurrency(PLATFORM_FEE, language)}/{language === 'fr' ? 'course' : 'ride'})</span>
                 </div>
                 <span className="font-medium text-destructive">-{formatCurrency(summary.totalPlatformFees, language)}</span>
               </div>
               <div className="flex items-center justify-between pt-3 border-t border-border">
-                <span className="font-semibold">Your Earnings</span>
+                <span className="font-semibold">{language === 'fr' ? 'Vos gains' : 'Your Earnings'}</span>
                 <span className="font-bold text-lg text-accent">{formatCurrency(summary.totalEarnings, language)}</span>
               </div>
             </div>
@@ -321,54 +253,54 @@ const Earnings = () => {
           {/* Lifetime Stats from profile */}
           {driverProfile && (
             <Card className="p-6 mb-8 bg-muted/50">
-              <h3 className="font-display text-lg font-semibold mb-4">Lifetime Stats</h3>
+              <h3 className="font-display text-lg font-semibold mb-4">
+                {language === 'fr' ? 'Statistiques' : 'Lifetime Stats'}
+              </h3>
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div>
                   <p className="text-2xl font-bold">{driverProfile.total_rides}</p>
-                  <p className="text-sm text-muted-foreground">Total Rides</p>
+                  <p className="text-sm text-muted-foreground">{language === 'fr' ? 'Courses' : 'Total Rides'}</p>
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-accent">
                     {formatCurrency(Number(driverProfile.total_earnings), language)}
                   </p>
-                  <p className="text-sm text-muted-foreground">Available</p>
+                  <p className="text-sm text-muted-foreground">{language === 'fr' ? 'Disponible' : 'Available'}</p>
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-warning">
                     {Number(driverProfile.average_rating).toFixed(1)}
                   </p>
-                  <p className="text-sm text-muted-foreground">Rating</p>
+                  <p className="text-sm text-muted-foreground">{language === 'fr' ? 'Note' : 'Rating'}</p>
                 </div>
               </div>
             </Card>
           )}
 
-          {/* Daily Breakdown */}
+          {/* Daily Breakdown - Click to expand */}
           {!isLoading && dailyData.length > 0 && (
             <div>
-              <h3 className="font-display text-lg font-semibold mb-4">Daily Breakdown</h3>
+              <h3 className="font-display text-lg font-semibold mb-4">
+                {language === 'fr' ? 'Détail par jour' : 'Daily Breakdown'}
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                {language === 'fr' ? 'Cliquez sur un jour pour voir les détails' : 'Click on a day to see details'}
+              </p>
               <div className="space-y-3">
                 {dailyData.map((day, index) => (
                   <motion.div
-                    key={day.date}
+                    key={day.dateKey}
                     initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: index * 0.05 }}
                   >
-                    <Card className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <Calendar className="h-5 w-5 text-muted-foreground" />
-                          <div>
-                            <p className="font-medium">{day.date}</p>
-                            <p className="text-sm text-muted-foreground">{day.rides} rides</p>
-                          </div>
-                        </div>
-                        <p className="font-bold text-accent">
-                          {formatCurrency(day.earnings, language)}
-                        </p>
-                      </div>
-                    </Card>
+                    <DailyEarningsDetail
+                      date={day.date}
+                      earnings={day.earnings}
+                      rides={day.rides}
+                      fares={day.fares}
+                      driverId={user?.id || ''}
+                    />
                   </motion.div>
                 ))}
               </div>
@@ -378,91 +310,29 @@ const Earnings = () => {
           {!isLoading && dailyData.length === 0 && (
             <Card className="p-12 text-center">
               <TrendingUp className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="font-display text-xl font-semibold mb-2">No earnings yet</h3>
+              <h3 className="font-display text-xl font-semibold mb-2">
+                {language === 'fr' ? 'Pas encore de gains' : 'No earnings yet'}
+              </h3>
               <p className="text-muted-foreground">
-                Complete rides to start earning!
+                {language === 'fr' ? 'Complétez des courses pour commencer à gagner!' : 'Complete rides to start earning!'}
               </p>
             </Card>
           )}
         </motion.div>
       </div>
 
-      {/* Payout Dialog */}
-      <Dialog open={payoutDialog} onOpenChange={setPayoutDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Withdraw Earnings</DialogTitle>
-            <DialogDescription>
-              Transfer funds directly to your bank account. Available balance: {formatCurrency(availableBalance, language)}
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div>
-              <label className="text-sm font-medium">Amount to withdraw</label>
-              <div className="relative mt-2">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                <Input
-                  type="number"
-                  placeholder="0.00"
-                  value={payoutAmount}
-                  onChange={(e) => setPayoutAmount(e.target.value)}
-                  className="pl-8"
-                  min="0"
-                  max={availableBalance}
-                  step="0.01"
-                />
-              </div>
-              <div className="flex gap-2 mt-2">
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setPayoutAmount((availableBalance * 0.25).toFixed(2))}
-                >
-                  25%
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setPayoutAmount((availableBalance * 0.5).toFixed(2))}
-                >
-                  50%
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setPayoutAmount((availableBalance * 0.75).toFixed(2))}
-                >
-                  75%
-                </Button>
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={() => setPayoutAmount(availableBalance.toFixed(2))}
-                >
-                  Max
-                </Button>
-              </div>
-            </div>
-            
-            <div className="p-4 bg-muted rounded-lg">
-              <p className="text-sm text-muted-foreground">
-                Funds will be transferred to your connected bank account. First-time users will need to complete a quick setup process.
-              </p>
-            </div>
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPayoutDialog(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handlePayout} disabled={isProcessingPayout || !payoutAmount}>
-              {isProcessingPayout && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              Withdraw {payoutAmount ? formatCurrency(parseFloat(payoutAmount) || 0, language) : ''}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Withdraw Dialog */}
+      <WithdrawDialog
+        open={withdrawDialogOpen}
+        onOpenChange={setWithdrawDialogOpen}
+        availableBalance={availableBalance}
+        driverId={user?.id || ''}
+        onSuccess={() => {
+          if (refreshDriverProfile) {
+            refreshDriverProfile();
+          }
+        }}
+      />
     </div>
   );
 };

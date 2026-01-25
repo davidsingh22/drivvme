@@ -600,6 +600,45 @@ export type Database = {
         }
         Relationships: []
       }
+      withdraw_requests: {
+        Row: {
+          admin_notes: string | null
+          amount: number
+          contact_method: string
+          contact_value: string
+          created_at: string
+          driver_id: string
+          id: string
+          processed_at: string | null
+          processed_by: string | null
+          status: string
+        }
+        Insert: {
+          admin_notes?: string | null
+          amount: number
+          contact_method: string
+          contact_value: string
+          created_at?: string
+          driver_id: string
+          id?: string
+          processed_at?: string | null
+          processed_by?: string | null
+          status?: string
+        }
+        Update: {
+          admin_notes?: string | null
+          amount?: number
+          contact_method?: string
+          contact_value?: string
+          created_at?: string
+          driver_id?: string
+          id?: string
+          processed_at?: string | null
+          processed_by?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
