@@ -784,6 +784,14 @@ const DriverDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* TEMPORARY DEBUG BANNER */}
+      <div className="bg-yellow-400 text-black px-4 py-6 text-center font-bold sticky top-0 z-[9999]">
+        <div className="text-2xl md:text-3xl">DEBUG: DRIVER DASHBOARD UPDATED – MESSAGES v1</div>
+        <div className="text-sm mt-2 font-mono">
+          path: {typeof window !== 'undefined' ? window.location.pathname : 'N/A'} | userId: {user?.id ?? 'null'}
+        </div>
+      </div>
+
       <RideOfferModal
         open={newRideAlertOpen}
         ride={alertRide}
