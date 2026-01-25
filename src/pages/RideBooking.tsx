@@ -514,44 +514,38 @@ const RideBooking = () => {
 
   const fetchDriverInfo = async (driverId: string) => {
     console.log('[RideBooking] Fetching driver info for:', driverId);
-    
+
     const [profileResult, driverProfileResult] = await Promise.all([
       supabase
         .from('profiles')
         .select('first_name, last_name, phone_number, avatar_url')
         .eq('user_id', driverId)
-        .single(),
+        .maybeSingle(),
       supabase
         .from('driver_profiles')
         .select('vehicle_make, vehicle_model, vehicle_color, license_plate, average_rating')
         .eq('user_id', driverId)
-        .single()
+        .maybeSingle(),
     ]);
 
     const { data: profile, error: profileError } = profileResult;
     const { data: driverProfile, error: driverProfileError } = driverProfileResult;
 
-    if (profileError) {
-      console.error('[RideBooking] Error fetching driver profile:', profileError);
-    }
-    if (driverProfileError) {
-      console.error('[RideBooking] Error fetching driver vehicle info:', driverProfileError);
-    }
+    if (profileError) console.error('[RideBooking] Error fetching driver profile:', profileError);
+    if (driverProfileError) console.error('[RideBooking] Error fetching driver vehicle info:', driverProfileError);
 
-    // Use partial data if available, with fallbacks
-    if (profile || driverProfile) {
-      setDriverInfo({
-        first_name: profile?.first_name || 'Driver',
-        last_name: profile?.last_name || '',
-        phone_number: profile?.phone_number || null,
-        avatar_url: profile?.avatar_url || null,
-        vehicle_make: driverProfile?.vehicle_make || 'Vehicle',
-        vehicle_model: driverProfile?.vehicle_model || '',
-        vehicle_color: driverProfile?.vehicle_color || '',
-        license_plate: driverProfile?.license_plate || '---',
-        average_rating: driverProfile?.average_rating || 5.0,
-      });
-    }
+    // Always set something so the in-ride UI can render (never blank screen)
+    setDriverInfo({
+      first_name: profile?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver'),
+      last_name: profile?.last_name || '',
+      phone_number: profile?.phone_number || null,
+      avatar_url: profile?.avatar_url || null,
+      vehicle_make: driverProfile?.vehicle_make || '',
+      vehicle_model: driverProfile?.vehicle_model || '',
+      vehicle_color: driverProfile?.vehicle_color || '',
+      license_plate: driverProfile?.license_plate || '—',
+      average_rating: Number(driverProfile?.average_rating ?? 5),
+    });
   };
 
   // Start tiered notification escalation when entering searching state
@@ -927,17 +921,8 @@ const RideBooking = () => {
   };
 
   // FULLSCREEN ACTIVE RIDE EXPERIENCE
-  // Show loading state while fetching driver info for active rides
-  if (isActiveRidePhase && currentRide?.driver_id && !driverInfo) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-        <p className="text-muted-foreground">{language === 'fr' ? 'Chargement du trajet...' : 'Loading trip details...'}</p>
-      </div>
-    );
-  }
-
-  if (isActiveRidePhase && driverInfo) {
+  // Never block rendering on driverInfo (RLS/network delays can otherwise cause a blank screen)
+  if (isActiveRidePhase) {
     return (
       <div className="h-screen w-screen relative overflow-hidden">
         {/* Fullscreen Map */}
@@ -963,28 +948,48 @@ const RideBooking = () => {
         />
 
         {/* Driver Card at Bottom */}
-        <InRideDriverCard
-          driverInfo={driverInfo}
-          pickupAddress={pickup?.address || ''}
-          dropoffAddress={dropoff?.address || ''}
-          estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0}
-          distanceKm={distanceKm || currentRide?.distance_km || 0}
-          durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0}
-          rideId={currentRide?.id || ''}
-          phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'}
-          minutesAway={minutesAway}
-          onShareTrip={handleShareTrip}
-          onSafetyPress={() => setSafetySheetOpen(true)}
-        />
+        {driverInfo ? (
+          <InRideDriverCard
+            driverInfo={driverInfo}
+            pickupAddress={pickup?.address || currentRide?.pickup_address || ''}
+            dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''}
+            estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0}
+            distanceKm={distanceKm || currentRide?.distance_km || 0}
+            durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0}
+            rideId={currentRide?.id || ''}
+            phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'}
+            minutesAway={minutesAway}
+            onShareTrip={handleShareTrip}
+            onSafetyPress={() => setSafetySheetOpen(true)}
+          />
+        ) : (
+          <div className="absolute bottom-0 left-0 right-0 z-10">
+            <Card className="rounded-t-3xl rounded-b-none border-b-0 shadow-2xl p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">
+                    {language === 'fr' ? 'Chargement des détails...' : 'Loading trip details...'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {language === 'fr'
+                      ? 'La carte et le trajet sont en direct — les infos du chauffeur arrivent.'
+                      : 'Map is live — driver details will appear shortly.'}
+                  </p>
+                </div>
+                <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              </div>
+            </Card>
+          </div>
+        )}
 
         {/* Safety Sheet */}
         <SafetySheet
           open={safetySheetOpen}
           onOpenChange={setSafetySheetOpen}
           rideId={currentRide?.id || ''}
-          driverName={driverInfo.first_name}
-          vehicleInfo={`${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}`}
-          licensePlate={driverInfo.license_plate}
+          driverName={driverInfo?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver')}
+          vehicleInfo={driverInfo ? `${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}` : ''}
+          licensePlate={driverInfo?.license_plate || ''}
           onShareLocation={handleShareTrip}
         />
 
