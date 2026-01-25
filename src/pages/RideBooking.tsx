@@ -829,6 +829,11 @@ const RideBooking = () => {
             dropoff={dropoff}
             driverLocation={driverLocation}
             riderLocation={riderLiveLocation}
+            routeMode={
+              step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' :
+              step === 'inProgress' ? 'driver-to-dropoff' :
+              'pickup-dropoff'
+            }
           />
         </div>
 
