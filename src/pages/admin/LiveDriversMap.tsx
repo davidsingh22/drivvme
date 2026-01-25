@@ -351,30 +351,24 @@ export default function AdminDriversLive() {
                       <a
                         href={`tel:${d.phone_number}`}
                         onClick={(e) => e.stopPropagation()}
-                        className="mb-1 px-2 py-0.5 bg-black/90 border border-primary/40 rounded text-xs font-mono text-primary hover:bg-primary/20 transition-colors whitespace-nowrap"
+                        className="mb-1 px-2 py-0.5 bg-black border border-primary rounded text-xs font-mono text-primary hover:bg-primary hover:text-black transition-colors whitespace-nowrap"
                       >
                         📞 {d.phone_number}
                       </a>
                     )}
                     {/* Car icon with driver's car color */}
                     <div
-                      className="relative w-10 h-10 rounded-full border-3 flex items-center justify-center shadow-lg transition-transform group-hover:scale-110"
-                      style={{
-                        backgroundColor: carColor,
-                        borderColor: isStale ? "#f59e0b" : "#a855f7",
-                        boxShadow: isStale
-                          ? "0 0 12px rgba(245, 158, 11, 0.5)"
-                          : `0 0 12px ${carColor}80`,
-                      }}
+                      className="relative w-10 h-10 rounded-full border-2 border-white flex items-center justify-center transition-transform group-hover:scale-110"
+                      style={{ backgroundColor: carColor }}
                     >
-                      <Car className="h-5 w-5 text-white drop-shadow-md" />
+                      <Car className="h-5 w-5 text-white" />
                       {/* Stale indicator */}
                       {isStale && (
-                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full border border-white animate-pulse" />
+                        <div className="absolute -top-1 -right-1 w-3 h-3 bg-amber-500 rounded-full border border-white" />
                       )}
                     </div>
                     {/* Driver name */}
-                    <div className="mt-1 px-2 py-0.5 bg-black/80 rounded text-xs text-primary font-medium max-w-[120px] truncate">
+                    <div className="mt-1 px-2 py-0.5 bg-black border border-white/20 rounded text-xs text-white font-medium max-w-[120px] truncate">
                       {d.display_name || "Driver"}
                     </div>
                   </div>
