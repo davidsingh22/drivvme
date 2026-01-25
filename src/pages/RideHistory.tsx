@@ -312,7 +312,6 @@ const RideHistory = () => {
                       {/* Ride completed button (drivers can end an active ride) */}
                       {isActive &&
                         isCompletableRide(ride.status) &&
-                        isDriver &&
                         ride.driver_id &&
                         user?.id &&
                         ride.driver_id === user.id && (
