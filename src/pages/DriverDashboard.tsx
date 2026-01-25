@@ -952,94 +952,8 @@ const DriverDashboard = () => {
               </Card>
             </div>
 
-            <AnimatePresence mode="wait">
-              {/* No Active Ride - Show Available Rides */}
-              {!currentRide && (
-                <motion.div
-                  key="available"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                >
-                  <h2 className="font-display text-xl font-bold mb-4">
-                    {isOnline ? 'Available Rides' : 'Go online to see rides'}
-                  </h2>
-
-                  {isOnline && availableRides.length === 0 && (
-                    <div className="text-center py-12 text-muted-foreground">
-                      <Navigation className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>No rides available nearby</p>
-                      <p className="text-sm">New requests will appear here</p>
-                    </div>
-                  )}
-
-                  <div className="space-y-4">
-                    {availableRides.map((ride) => (
-                      <motion.div
-                        key={ride.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                      >
-                        <Card className="p-4 border-primary/20 hover:border-primary/50 transition-colors">
-                          <div className="space-y-3 mb-4">
-                            <div className="flex items-start gap-2">
-                              <MapPin className="h-4 w-4 text-primary mt-1" />
-                              <p className="text-sm line-clamp-1">{ride.pickup_address}</p>
-                            </div>
-                            <div className="flex items-start gap-2">
-                              <Navigation className="h-4 w-4 text-accent mt-1" />
-                              <p className="text-sm line-clamp-1">{ride.dropoff_address}</p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                              <span>{formatDistance(Number(ride.distance_km), language)}</span>
-                              <span>{formatDuration(ride.estimated_duration_minutes, language)}</span>
-                            </div>
-                          </div>
-
-                          {/* Earnings breakdown */}
-                          <div className="p-3 bg-muted/50 rounded-lg mb-4">
-                            <div className="flex justify-between text-sm mb-1">
-                              <span>Fare</span>
-                              <span>{formatCurrency(Number(ride.estimated_fare), language)}</span>
-                            </div>
-                            <div className="flex justify-between text-sm text-destructive mb-1">
-                              <span>{t('driver.platformFee')}</span>
-                              <span>-{formatCurrency(PLATFORM_FEE, language)}</span>
-                            </div>
-                            <div className="flex justify-between font-bold text-accent pt-2 border-t border-border">
-                              <span>{t('driver.yourEarnings')}</span>
-                              <span>{formatCurrency(Number(ride.estimated_fare) - PLATFORM_FEE, language)}</span>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button
-                              variant="outline"
-                              className="text-destructive border-destructive/50"
-                              onClick={() => setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id))}
-                            >
-                              <XCircle className="h-4 w-4 mr-2" />
-                              {t('driver.decline')}
-                            </Button>
-                            <Button
-                              className="gradient-primary"
-                              onClick={() => acceptRide(ride)}
-                            >
-                              <CheckCircle className="h-4 w-4 mr-2" />
-                              {t('driver.accept')}
-                            </Button>
-                          </div>
-                        </Card>
-                      </motion.div>
-                    ))}
-                  </div>
-                </motion.div>
-              )}
-
-              {/* Active Ride */}
+            {/* Current Active Ride - Always shown at top when exists */}
+            <AnimatePresence>
               {currentRide && (
                 <motion.div
                   key="active"
@@ -1176,6 +1090,96 @@ const DriverDashboard = () => {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* Available Rides Section - Always visible when online */}
+            {isOnline && (
+              <div className={currentRide ? 'mt-8 pt-6 border-t border-border' : ''}>
+                <h2 className="font-display text-xl font-bold mb-4">
+                  {currentRide ? 'Other Available Rides' : 'Available Rides'}
+                </h2>
+
+                {availableRides.length === 0 && (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Navigation className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                    <p>No rides available nearby</p>
+                    <p className="text-sm">New requests will appear here</p>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  {availableRides.map((ride) => (
+                    <motion.div
+                      key={ride.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                    >
+                      <Card className="p-4 border-primary/20 hover:border-primary/50 transition-colors">
+                        <div className="space-y-3 mb-4">
+                          <div className="flex items-start gap-2">
+                            <MapPin className="h-4 w-4 text-primary mt-1" />
+                            <p className="text-sm line-clamp-1">{ride.pickup_address}</p>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <Navigation className="h-4 w-4 text-accent mt-1" />
+                            <p className="text-sm line-clamp-1">{ride.dropoff_address}</p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            <span>{formatDistance(Number(ride.distance_km), language)}</span>
+                            <span>{formatDuration(ride.estimated_duration_minutes, language)}</span>
+                          </div>
+                        </div>
+
+                        {/* Earnings breakdown */}
+                        <div className="p-3 bg-muted/50 rounded-lg mb-4">
+                          <div className="flex justify-between text-sm mb-1">
+                            <span>Fare</span>
+                            <span>{formatCurrency(Number(ride.estimated_fare), language)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm text-destructive mb-1">
+                            <span>{t('driver.platformFee')}</span>
+                            <span>-{formatCurrency(PLATFORM_FEE, language)}</span>
+                          </div>
+                          <div className="flex justify-between font-bold text-accent pt-2 border-t border-border">
+                            <span>{t('driver.yourEarnings')}</span>
+                            <span>{formatCurrency(Number(ride.estimated_fare) - PLATFORM_FEE, language)}</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <Button
+                            variant="outline"
+                            className="text-destructive border-destructive/50"
+                            onClick={() => setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id))}
+                          >
+                            <XCircle className="h-4 w-4 mr-2" />
+                            {t('driver.decline')}
+                          </Button>
+                          <Button
+                            className="gradient-primary"
+                            onClick={() => acceptRide(ride)}
+                            disabled={!!currentRide}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            {t('driver.accept')}
+                          </Button>
+                        </div>
+                      </Card>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Offline message */}
+            {!isOnline && !currentRide && (
+              <div className="text-center py-12 text-muted-foreground">
+                <Navigation className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Go online to see rides</p>
+              </div>
+            )}
           </div>
         </motion.div>
       </div>
