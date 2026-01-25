@@ -39,7 +39,49 @@ export default function DriverInbox({ className }: DriverInboxProps) {
   const [selectedThread, setSelectedThread] = useState<RideThread | null>(null);
   const [totalUnread, setTotalUnread] = useState(0);
 
-  // Fetch all ride message threads for the driver
+  // Fetch unread count proactively (even when closed) so badge is visible
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchUnreadCount = async () => {
+      const { count } = await supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('type', 'ride_message')
+        .eq('is_read', false);
+
+      setTotalUnread(count || 0);
+    };
+
+    fetchUnreadCount();
+
+    // Subscribe to new messages for badge updates
+    const badgeChannel = supabase
+      .channel(`driver-inbox-badge-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const notification = payload.new as any;
+          if (notification?.type === 'ride_message') {
+            fetchUnreadCount();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(badgeChannel);
+    };
+  }, [user?.id]);
+
+  // Fetch full threads when the inbox sheet is opened
   useEffect(() => {
     if (!user?.id || !isOpen) return;
 
@@ -113,9 +155,9 @@ export default function DriverInbox({ className }: DriverInboxProps) {
 
     fetchThreads();
 
-    // Subscribe to new messages
+    // Subscribe to new messages while sheet is open
     const channel = supabase
-      .channel('driver-inbox-messages')
+      .channel(`driver-inbox-threads-${user.id}`)
       .on(
         'postgres_changes',
         {

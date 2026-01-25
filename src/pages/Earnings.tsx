@@ -51,6 +51,13 @@ const Earnings = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false);
 
+  // Force refresh driver profile on mount to ensure fresh data
+  useEffect(() => {
+    if (user && isDriver && refreshDriverProfile) {
+      refreshDriverProfile();
+    }
+  }, [user, isDriver]);
+
   useEffect(() => {
     if (!authLoading && (!user || !isDriver)) {
       navigate('/login');
