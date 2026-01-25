@@ -61,10 +61,12 @@ const RideBooking = () => {
   const [currentRide, setCurrentRide] = useState<any>(null);
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [riderLiveLocation, setRiderLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showStatusBanner, setShowStatusBanner] = useState(false);
   const [notificationTier, setNotificationTier] = useState(1);
   const paymentGateCheckedRef = useRef<string | null>(null);
+  const riderLocationWatchId = useRef<number | null>(null);
 
   const { token: mapboxToken } = useMapboxToken();
 
@@ -440,6 +442,49 @@ const RideBooking = () => {
     };
   }, [currentRide?.driver_id]);
 
+  // Track rider's live location during active ride phases
+  useEffect(() => {
+    const shouldTrackRider = 
+      step === 'arriving' || 
+      step === 'arrived' || 
+      step === 'inProgress';
+
+    if (!shouldTrackRider || !('geolocation' in navigator)) {
+      // Clear tracking if not needed
+      if (riderLocationWatchId.current !== null) {
+        navigator.geolocation.clearWatch(riderLocationWatchId.current);
+        riderLocationWatchId.current = null;
+      }
+      setRiderLiveLocation(null);
+      return;
+    }
+
+    // Start watching rider's position
+    riderLocationWatchId.current = navigator.geolocation.watchPosition(
+      (position) => {
+        setRiderLiveLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      (error) => {
+        console.log('[RideBooking] Rider location watch error:', error.message);
+      },
+      { 
+        enableHighAccuracy: true, 
+        timeout: 10000, 
+        maximumAge: 5000 
+      }
+    );
+
+    return () => {
+      if (riderLocationWatchId.current !== null) {
+        navigator.geolocation.clearWatch(riderLocationWatchId.current);
+        riderLocationWatchId.current = null;
+      }
+    };
+  }, [step]);
+
   const fetchDriverInfo = async (driverId: string) => {
     const { data: profile } = await supabase
       .from('profiles')
@@ -783,6 +828,7 @@ const RideBooking = () => {
             pickup={pickup}
             dropoff={dropoff}
             driverLocation={driverLocation}
+            riderLocation={riderLiveLocation}
           />
         </div>
 
