@@ -155,8 +155,10 @@ export default function RideMessaging({
         .insert({
           ride_id: rideId,
           sender_id: user.id,
+          sender_user_id: user.id,
           sender_role: 'rider',
           message: newMessage.trim(),
+          body: newMessage.trim(),
         });
 
       if (error) {
