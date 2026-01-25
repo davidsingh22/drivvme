@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell } from 'lucide-react';
@@ -25,8 +25,9 @@ import SafetySheet from '@/components/ride/SafetySheet';
 import TripCompletionScreen from '@/components/ride/TripCompletionScreen';
 import { MapRecenterButton } from '@/components/MapRecenterButton';
 import { useRealtimeDriverTracking } from '@/hooks/useRealtimeDriverTracking';
-import { RideDebugBar } from '@/components/RideDebugBar';
-import { RideLocationHistory } from '@/components/RideLocationHistory';
+// Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
+const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({ default: m.RideDebugBar })));
+const RideLocationHistory = React.lazy(() => import('@/components/RideLocationHistory').then(m => ({ default: m.RideLocationHistory })));
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -945,6 +946,10 @@ const RideBooking = () => {
       });
     }
   };
+  // Check if debug mode is enabled
+  const showDebug = typeof window !== 'undefined' && (() => {
+    try { return localStorage.getItem('DEBUG_RIDE') === '1'; } catch { return false; }
+  })();
 
   // FULLSCREEN ACTIVE RIDE EXPERIENCE
   // Never block rendering on driverInfo (RLS/network delays can otherwise cause a blank screen)
@@ -955,7 +960,7 @@ const RideBooking = () => {
         <MapComponent
           pickup={pickup}
           dropoff={dropoff}
-          driverLocation={driverLocation}
+          driverLocation={effectiveDriverLocation}
           riderLocation={riderLiveLocation}
           routeMode={
             step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' :
@@ -965,40 +970,57 @@ const RideBooking = () => {
           followDriver={step === 'inProgress'}
         />
 
-        {/* Debug Bar Overlay (visible for diagnostics) */}
-        <div className="absolute top-4 left-4 right-4 z-20 max-w-md">
-          <RideDebugBar
-            rideId={currentRide?.id ?? null}
-            rideStatus={currentRide?.status ?? null}
-            driverLocation={realtimeDriverLocation ? {
-              lat: realtimeDriverLocation.lat,
-              lng: realtimeDriverLocation.lng,
-              speed: realtimeDriverLocation.speed,
-              accuracy: realtimeDriverLocation.accuracy,
-              heading: realtimeDriverLocation.heading,
-              updatedAt: realtimeDriverLocation.updatedAt,
-            } : null}
-            lastUpdateSeconds={lastUpdateSeconds}
-            dataSource={dataSource}
-            isConnected={!!realtimeDriverLocation}
-            hasError={hasNoUpdatesError}
-          />
-          
-          {/* Location History Table */}
-          <div className="mt-2">
-            <RideLocationHistory
-              rideId={currentRide?.id ?? null}
-              enabled={isActiveRidePhase}
-            />
+        {/* Debug Bar Overlay - ONLY visible if localStorage.DEBUG_RIDE === "1" */}
+        {showDebug && (
+          <Suspense fallback={null}>
+            <div className="absolute top-4 left-4 right-4 z-20 max-w-md">
+              <RideDebugBar
+                rideId={currentRide?.id ?? null}
+                rideStatus={currentRide?.status ?? null}
+                driverLocation={realtimeDriverLocation ? {
+                  lat: realtimeDriverLocation.lat,
+                  lng: realtimeDriverLocation.lng,
+                  speed: realtimeDriverLocation.speed,
+                  accuracy: realtimeDriverLocation.accuracy,
+                  heading: realtimeDriverLocation.heading,
+                  updatedAt: realtimeDriverLocation.updatedAt,
+                } : null}
+                lastUpdateSeconds={lastUpdateSeconds}
+                dataSource={dataSource}
+                isConnected={!!realtimeDriverLocation}
+                hasError={hasNoUpdatesError}
+              />
+              
+              {/* Location History Table */}
+              <div className="mt-2">
+                <RideLocationHistory
+                  rideId={currentRide?.id ?? null}
+                  enabled={isActiveRidePhase}
+                />
+              </div>
+            </div>
+          </Suspense>
+        )}
+
+        {/* Connecting to driver message - shown when no updates for 10+ seconds */}
+        {hasNoUpdatesError && !showDebug && (
+          <div className="absolute top-4 left-4 right-4 z-20">
+            <div className="bg-muted/90 backdrop-blur-sm rounded-lg px-4 py-3 flex items-center gap-3">
+              <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <span className="text-sm text-muted-foreground">
+                {language === 'fr' ? 'Connexion à la position du chauffeur…' : 'Connecting to driver location…'}
+              </span>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Status Bar Overlay */}
         <InRideStatusBar
           phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'}
-          driverLocation={driverLocation}
+          driverLocation={effectiveDriverLocation}
           pickupLocation={pickup}
           dropoffLocation={dropoff}
+          lastUpdateSeconds={lastUpdateSeconds}
         />
 
         {/* Driver Card at Bottom */}

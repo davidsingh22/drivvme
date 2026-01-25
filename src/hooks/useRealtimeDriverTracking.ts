@@ -199,13 +199,47 @@ export function useRealtimeDriverTracking({
     fetchInitial();
   }, [rideId, driverId, enabled, targetLocation, fetchETA]);
 
-  // Subscribe to realtime ride_locations updates (preferred)
+  // Subscribe to realtime ride_locations updates (INSERT + UPDATE for UPSERT)
   useEffect(() => {
     if (!rideId || !enabled) {
       return;
     }
 
     console.log('[Tracking] Subscribing to ride_locations for rideId:', rideId);
+
+    const handleLocationPayload = (payload: any) => {
+      const updated = payload.new as {
+        lat: number;
+        lng: number;
+        speed: number | null;
+        accuracy: number | null;
+        heading: number | null;
+        created_at: string;
+        updated_at?: string;
+      };
+
+      console.log('[Tracking] Realtime location update:', updated);
+      
+      const location: DriverLocation = {
+        lat: updated.lat,
+        lng: updated.lng,
+        speed: updated.speed,
+        accuracy: updated.accuracy,
+        heading: updated.heading,
+        updatedAt: new Date(updated.updated_at || updated.created_at).getTime(),
+      };
+      setDriverLocation(location);
+      setIsConnected(true);
+      setDataSource('REALTIME');
+      setLastUpdateSeconds(0);
+      setHasNoUpdatesError(false);
+      lastRealtimeUpdateRef.current = Date.now();
+
+      // Update ETA when driver moves
+      if (targetLocation) {
+        fetchETA(location, targetLocation);
+      }
+    };
 
     const channel = supabase
       .channel(`ride-locations-realtime-${rideId}`)
@@ -217,38 +251,17 @@ export function useRealtimeDriverTracking({
           table: 'ride_locations',
           filter: `ride_id=eq.${rideId}`,
         },
-        (payload) => {
-          const updated = payload.new as {
-            lat: number;
-            lng: number;
-            speed: number | null;
-            accuracy: number | null;
-            heading: number | null;
-            created_at: string;
-          };
-
-          console.log('[Tracking] Realtime location update:', updated);
-          
-          const location: DriverLocation = {
-            lat: updated.lat,
-            lng: updated.lng,
-            speed: updated.speed,
-            accuracy: updated.accuracy,
-            heading: updated.heading,
-            updatedAt: new Date(updated.created_at).getTime(),
-          };
-          setDriverLocation(location);
-          setIsConnected(true);
-          setDataSource('REALTIME');
-          setLastUpdateSeconds(0);
-          setHasNoUpdatesError(false);
-          lastRealtimeUpdateRef.current = Date.now();
-
-          // Update ETA when driver moves
-          if (targetLocation) {
-            fetchETA(location, targetLocation);
-          }
-        }
+        handleLocationPayload
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'ride_locations',
+          filter: `ride_id=eq.${rideId}`,
+        },
+        handleLocationPayload
       )
       .subscribe((status) => {
         console.log('[Tracking] Realtime subscription status:', status);
