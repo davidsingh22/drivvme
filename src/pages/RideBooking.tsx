@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, Star, Phone, MessageSquare, CreditCard, Bell } from 'lucide-react';
-import LiveRideProgress from '@/components/LiveRideProgress';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -19,6 +18,11 @@ import { NotificationPermissionHelpDialog } from '@/components/NotificationPermi
 import { useActiveRide } from '@/hooks/useActiveRide';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { useDriverNotificationEscalation } from '@/hooks/useDriverNotificationEscalation';
+import useRideNotifications from '@/hooks/useRideNotifications';
+import InRideStatusBar from '@/components/ride/InRideStatusBar';
+import InRideDriverCard from '@/components/ride/InRideDriverCard';
+import SafetySheet from '@/components/ride/SafetySheet';
+import TripCompletionScreen from '@/components/ride/TripCompletionScreen';
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -64,6 +68,8 @@ const RideBooking = () => {
   const [riderLiveLocation, setRiderLiveLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [notificationTier, setNotificationTier] = useState(1);
+  const [safetySheetOpen, setSafetySheetOpen] = useState(false);
+  const [minutesAway, setMinutesAway] = useState<number | null>(null);
   const paymentGateCheckedRef = useRef<string | null>(null);
   const riderLocationWatchId = useRef<number | null>(null);
 
@@ -815,8 +821,51 @@ const RideBooking = () => {
     hasRestoredRide.current = false;
   };
 
+  // Check if we're in an active ride phase (fullscreen map mode)
+  const isActiveRidePhase = step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress';
+
+  // Use ride notifications hook (must be before any returns)
+  useRideNotifications({
+    phase: isActiveRidePhase ? (step as 'matched' | 'arriving' | 'arrived' | 'inProgress') : 'matched',
+    driverName: driverInfo?.first_name || 'Driver',
+    minutesAway,
+    language,
+  });
+
+  // Calculate minutes away from target
+  useEffect(() => {
+    if (!driverLocation || !mapboxToken) {
+      setMinutesAway(null);
+      return;
+    }
+
+    const targetLocation = step === 'inProgress' ? dropoff : pickup;
+    if (!targetLocation) return;
+
+    const controller = new AbortController();
+
+    const fetchETA = async () => {
+      try {
+        const response = await fetch(
+          `https://api.mapbox.com/directions/v5/mapbox/driving/${driverLocation.lng},${driverLocation.lat};${targetLocation.lng},${targetLocation.lat}?access_token=${mapboxToken}`,
+          { signal: controller.signal }
+        );
+        const data = await response.json();
+        if (data.routes?.[0]) {
+          setMinutesAway(Math.round(data.routes[0].duration / 60));
+        }
+      } catch (err) {
+        if ((err as any)?.name !== 'AbortError') {
+          console.error('ETA fetch error:', err);
+        }
+      }
+    };
+
+    fetchETA();
+    return () => controller.abort();
+  }, [driverLocation?.lat, driverLocation?.lng, step, pickup, dropoff, mapboxToken]);
+
   // Avoid blocking the whole page during background token refreshes.
-  // If roles are already loaded, keep the UI responsive.
   // Show loading while redirecting to prevent black screen flash
   if (isRedirecting || (authLoading && roles.length === 0)) {
     return (
@@ -826,6 +875,127 @@ const RideBooking = () => {
     );
   }
 
+  // Share trip handler
+  const handleShareTrip = async () => {
+    if (!currentRide || !driverInfo) return;
+
+    const shareData = {
+      title: language === 'fr' ? 'Mon trajet Drivvme' : 'My Drivvme Trip',
+      text: language === 'fr'
+        ? `Je suis en route avec ${driverInfo.first_name}. Véhicule: ${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}, Plaque: ${driverInfo.license_plate}`
+        : `I'm on my way with ${driverInfo.first_name}. Vehicle: ${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}, Plate: ${driverInfo.license_plate}`,
+      url: window.location.href,
+    };
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (err) {
+        console.log('Share cancelled');
+      }
+    } else {
+      await navigator.clipboard.writeText(shareData.text);
+      toast({
+        title: language === 'fr' ? 'Copié!' : 'Copied!',
+        description: language === 'fr' ? 'Infos du trajet copiées' : 'Trip info copied to clipboard',
+      });
+    }
+  };
+
+  // FULLSCREEN ACTIVE RIDE EXPERIENCE
+  if (isActiveRidePhase && driverInfo) {
+    return (
+      <div className="h-screen w-screen relative overflow-hidden">
+        {/* Fullscreen Map */}
+        <MapComponent
+          pickup={pickup}
+          dropoff={dropoff}
+          driverLocation={driverLocation}
+          riderLocation={riderLiveLocation}
+          routeMode={
+            step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' :
+            step === 'inProgress' ? 'driver-to-dropoff' :
+            'pickup-dropoff'
+          }
+          followDriver={step === 'inProgress'}
+        />
+
+        {/* Status Bar Overlay */}
+        <InRideStatusBar
+          phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'}
+          driverLocation={driverLocation}
+          pickupLocation={pickup}
+          dropoffLocation={dropoff}
+        />
+
+        {/* Driver Card at Bottom */}
+        <InRideDriverCard
+          driverInfo={driverInfo}
+          pickupAddress={pickup?.address || ''}
+          dropoffAddress={dropoff?.address || ''}
+          estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0}
+          distanceKm={distanceKm || currentRide?.distance_km || 0}
+          durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0}
+          rideId={currentRide?.id || ''}
+          phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'}
+          minutesAway={minutesAway}
+          onShareTrip={handleShareTrip}
+          onSafetyPress={() => setSafetySheetOpen(true)}
+        />
+
+        {/* Safety Sheet */}
+        <SafetySheet
+          open={safetySheetOpen}
+          onOpenChange={setSafetySheetOpen}
+          rideId={currentRide?.id || ''}
+          driverName={driverInfo.first_name}
+          vehicleInfo={`${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}`}
+          licensePlate={driverInfo.license_plate}
+          onShareLocation={handleShareTrip}
+        />
+
+        {/* Cancel button for early phases */}
+        {(step === 'matched' || step === 'arriving') && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="absolute bottom-[280px] left-4 right-4 z-10"
+          >
+            <Button
+              variant="outline"
+              onClick={handleCancelRide}
+              className="w-full bg-background/80 backdrop-blur-sm text-destructive border-destructive/50 hover:bg-destructive/10"
+            >
+              {t('common.cancel')} Ride
+            </Button>
+          </motion.div>
+        )}
+      </div>
+    );
+  }
+
+  // TRIP COMPLETION SCREEN
+  if (step === 'completed' && currentRide && driverInfo) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="pt-20 pb-12 container mx-auto px-4 max-w-md">
+          <TripCompletionScreen
+            rideId={currentRide.id}
+            driverId={currentRide.driver_id}
+            riderId={user?.id || ''}
+            driverInfo={driverInfo}
+            actualFare={currentRide.actual_fare || fareEstimate?.total || 0}
+            estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0}
+            savings={fareEstimate?.savings || 0}
+            onComplete={resetBooking}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // DEFAULT BOOKING FLOW
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -837,16 +1007,7 @@ const RideBooking = () => {
             pickup={pickup}
             dropoff={dropoff}
             driverLocation={driverLocation}
-            riderLocation={
-              (step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress') 
-                ? riderLiveLocation 
-                : null
-            }
-            routeMode={
-              step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' :
-              step === 'inProgress' ? 'driver-to-dropoff' :
-              'pickup-dropoff'
-            }
+            routeMode="pickup-dropoff"
           />
         </div>
 
@@ -1005,7 +1166,7 @@ const RideBooking = () => {
                           <p className="font-medium text-sm">Get notified when your driver arrives</p>
                           {!pushSupported ? (
                             <p className="text-xs text-muted-foreground">
-                              Push notifications aren9t available in this browser mode. On iPhone/iPad, install the app (Add to Home Screen) to enable push.
+                              Push notifications aren't available in this browser mode.
                             </p>
                           ) : pushPermission === 'denied' ? (
                             <p className="text-xs text-muted-foreground">
@@ -1042,38 +1203,14 @@ const RideBooking = () => {
                             onClick={async () => {
                               const ok = await subscribeToPush();
                               if (!ok) return;
-
-                              const { data, error } = await supabase.functions.invoke('send-push-notification', {
-                                body: {
-                                  userId: user?.id,
-                                  title: 'Test notification',
-                                  body: 'Notifications are working for your account.',
-                                  url: '/ride',
-                                },
-                              });
-
-                              if (error) {
-                                toast({ title: 'Test notification failed', description: error.message, variant: 'destructive' });
-                                return;
-                              }
-
-                              if (!data?.sent) {
-                                toast({
-                                  title: 'Not subscribed yet',
-                                  description: 'No subscription found for your device. Try enabling again.',
-                                  variant: 'destructive',
-                                });
-                                return;
-                              }
-
                               toast({
-                                title: 'Test notification sent',
-                                description: "If you don't see it, check notification settings (and iPhone requires Add to Home Screen).",
+                                title: 'Notifications enabled',
+                                description: 'You\'ll be notified when your driver arrives.',
                               });
                             }}
                             disabled={pushLoading}
                           >
-                            {pushLoading ? 'Enabling...' : 'Enable & Test'}
+                            {pushLoading ? 'Enabling...' : 'Enable'}
                           </Button>
                         )}
                       </div>
@@ -1181,192 +1318,6 @@ const RideBooking = () => {
                     className="mt-4"
                   >
                     {t('common.cancel')}
-                  </Button>
-                </motion.div>
-              )}
-
-              {/* Driver Matched / Arriving / Arrived / In Progress */}
-              {(step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress') && driverInfo && (
-                <motion.div
-                  key="driver"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className="space-y-4"
-                >
-                  <div className="text-center">
-                    <motion.div
-                      initial={{ scale: 0 }}
-                      animate={{ scale: 1 }}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-success/10 text-success mb-2"
-                    >
-                      <Car className="h-5 w-5" />
-                      <span className="font-medium">
-                        {step === 'matched' && t('booking.found')}
-                        {step === 'arriving' && t('booking.arriving')}
-                        {step === 'arrived' && t('booking.arrived')}
-                        {step === 'inProgress' && t('booking.inProgress')}
-                      </span>
-                    </motion.div>
-                  </div>
-
-                  {/* Live Ride Progress - ETA, Distance, Remaining */}
-                  {(step === 'arriving' || step === 'arrived' || step === 'inProgress') && (
-                    <LiveRideProgress
-                      driverLocation={driverLocation}
-                      targetLocation={
-                        step === 'inProgress' 
-                          ? dropoff 
-                          : pickup
-                      }
-                      targetLabel={
-                        step === 'inProgress'
-                          ? dropoff?.address || ''
-                          : pickup?.address || ''
-                      }
-                      phase={step as 'arriving' | 'arrived' | 'inProgress'}
-                    />
-                  )}
-
-                  {/* Driver Card */}
-                  <Card className="p-6">
-                    <div className="flex items-center gap-4 mb-4">
-                      <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
-                        {driverInfo.avatar_url ? (
-                          <img
-                            src={driverInfo.avatar_url}
-                            alt="Driver"
-                            className="w-16 h-16 rounded-full object-cover"
-                          />
-                        ) : (
-                          <span className="text-2xl font-bold text-primary">
-                            {driverInfo.first_name?.[0] || 'D'}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="font-semibold text-lg">
-                          {driverInfo.first_name} {driverInfo.last_name?.[0]}.
-                        </h3>
-                        <div className="flex items-center gap-1 text-warning">
-                          <Star className="h-4 w-4 fill-current" />
-                          <span>{Number(driverInfo.average_rating).toFixed(1)}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Vehicle Info */}
-                    <div className="p-4 bg-muted/50 rounded-lg mb-4">
-                      <p className="font-medium">
-                        {driverInfo.vehicle_color} {driverInfo.vehicle_make} {driverInfo.vehicle_model}
-                      </p>
-                      <p className="text-lg font-bold tracking-wider">
-                        {driverInfo.license_plate}
-                      </p>
-                    </div>
-
-                    {/* Contact Buttons */}
-                    <div className="grid grid-cols-2 gap-3">
-                      <Button
-                        asChild
-                        variant="outline"
-                        className="gap-2"
-                        disabled={!driverInfo.phone_number}
-                      >
-                        <a
-                          href={driverInfo.phone_number ? `tel:${driverInfo.phone_number}` : undefined}
-                          aria-disabled={!driverInfo.phone_number}
-                        >
-                          <Phone className="h-4 w-4" />
-                          Call
-                        </a>
-                      </Button>
-                      <Button
-                        asChild
-                        variant="outline"
-                        className="gap-2"
-                        disabled={!driverInfo.phone_number}
-                      >
-                        <a
-                          href={driverInfo.phone_number ? `sms:${driverInfo.phone_number}` : undefined}
-                          aria-disabled={!driverInfo.phone_number}
-                        >
-                          <MessageSquare className="h-4 w-4" />
-                          Message
-                        </a>
-                      </Button>
-                    </div>
-                  </Card>
-
-                  {/* Trip Details */}
-                  <div className="space-y-3">
-                    <div className="flex items-start gap-3">
-                      <MapPin className="h-5 w-5 text-primary mt-0.5" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Pickup</p>
-                        <p className="font-medium">{pickup?.address}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-start gap-3">
-                      <Navigation className="h-5 w-5 text-accent mt-0.5" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Destination</p>
-                        <p className="font-medium">{dropoff?.address}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {(step === 'matched' || step === 'arriving') && (
-                    <Button
-                      variant="outline"
-                      onClick={handleCancelRide}
-                      className="w-full text-destructive border-destructive/50 hover:bg-destructive/10"
-                    >
-                      {t('common.cancel')} Ride
-                    </Button>
-                  )}
-                </motion.div>
-              )}
-
-              {/* Completed Step */}
-              {step === 'completed' && (
-                <motion.div
-                  key="completed"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className="flex flex-col items-center justify-center h-full space-y-6"
-                >
-                  <motion.div
-                    initial={{ scale: 0 }}
-                    animate={{ scale: 1 }}
-                    className="w-20 h-20 rounded-full bg-success/10 flex items-center justify-center"
-                  >
-                    <Navigation className="h-10 w-10 text-success" />
-                  </motion.div>
-                  <h2 className="font-display text-2xl font-bold text-center">
-                    {t('booking.completed')}
-                  </h2>
-                  <p className="text-muted-foreground text-center">
-                    Thanks for riding with Drivveme!
-                  </p>
-                  <Card className="w-full p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <span>Total Fare</span>
-                      <span className="font-display text-2xl font-bold">
-                        {formatCurrency(currentRide?.actual_fare || fareEstimate?.total || 0, language)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 text-accent">
-                      <TrendingDown className="h-5 w-5" />
-                      <span>You saved {formatCurrency(fareEstimate?.savings || 0, language)}!</span>
-                    </div>
-                  </Card>
-                  <Button
-                    onClick={resetBooking}
-                    className="w-full gradient-primary shadow-button py-6"
-                  >
-                    Book Another Ride
                   </Button>
                 </motion.div>
               )}
