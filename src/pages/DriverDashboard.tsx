@@ -303,6 +303,21 @@ const DriverDashboard = () => {
     }
   }, [session?.user?.id, isDriver, driverProfile, refreshDriverProfile]);
 
+  // Force refresh driver profile on mount to ensure fresh data
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    
+    // Always try to refresh the driver profile once on mount
+    const timer = setTimeout(() => {
+      if (!driverProfile) {
+        console.log('[DriverDashboard] Force refreshing driver profile...');
+        void refreshDriverProfile();
+      }
+    }, 1000);
+    
+    return () => clearTimeout(timer);
+  }, [session?.user?.id]);
+
   // Initialize driver status
   useEffect(() => {
     if (driverProfile) {

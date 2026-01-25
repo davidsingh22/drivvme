@@ -166,6 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const fetchDriverProfile = async (userId: string) => {
+    console.log('[AuthContext] Fetching driver profile for:', userId);
     const { data, error } = await supabase
       .from('driver_profiles')
       .select('*')
@@ -173,9 +174,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       .maybeSingle();
 
     if (error && error.code !== 'PGRST116') {
-      console.error('Error fetching driver profile:', error);
+      console.error('[AuthContext] Error fetching driver profile:', error);
       throw error;
     }
+    console.log('[AuthContext] Driver profile fetched:', data ? 'found' : 'not found');
     return data;
   };
 
@@ -251,35 +253,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Set profile and roles immediately - don't wait for driver profile
       setProfile(profileData ?? null);
-      setRoles(rolesData.length > 0 ? rolesData : roles); // Keep existing roles if fetch failed
+      // Keep existing roles if fetch failed but we had cached ones
+      const finalRoles = rolesData.length > 0 ? rolesData : roles;
+      setRoles(finalRoles);
 
-      // Only fetch driver profile if user is a driver - do it in background
-      let driverData: DriverProfile | null = null;
-      if (rolesData.includes('driver')) {
-        // Non-blocking: fetch driver profile in background with longer timeout
-        fetchDriverProfile(userId)
-          .then((data) => {
-            setDriverProfile(data ?? null);
-            // Update cache with driver profile
-            writeAuthCache(userId, {
-              profile: (profileData ?? null) as any,
-              roles: rolesData,
-              driverProfile: data ?? null,
-              cachedAt: Date.now(),
-            });
-          })
-          .catch((e) => {
-            console.warn('Driver profile fetch failed, will retry on next load:', e);
+      // Fetch driver profile for ALL users who have the driver role
+      // Do this in the foreground (not background) to ensure it's available for the dashboard
+      if (finalRoles.includes('driver')) {
+        try {
+          const driverData = await withTimeout(fetchDriverProfile(userId), fastTimeout);
+          setDriverProfile(driverData ?? null);
+          
+          // Update cache with driver profile
+          writeAuthCache(userId, {
+            profile: (profileData ?? null) as any,
+            roles: finalRoles,
+            driverProfile: driverData ?? null,
+            cachedAt: Date.now(),
           });
+        } catch (e) {
+          console.warn('Driver profile fetch failed, will retry on next load:', e);
+          // Still cache what we have
+          writeAuthCache(userId, {
+            profile: (profileData ?? null) as any,
+            roles: finalRoles,
+            driverProfile: null,
+            cachedAt: Date.now(),
+          });
+        }
+      } else {
+        // Cache what we have for non-drivers
+        writeAuthCache(userId, {
+          profile: (profileData ?? null) as any,
+          roles: finalRoles,
+          driverProfile: null,
+          cachedAt: Date.now(),
+        });
       }
-
-      // Cache what we have immediately
-      writeAuthCache(userId, {
-        profile: (profileData ?? null) as any,
-        roles: rolesData,
-        driverProfile: driverData,
-        cachedAt: Date.now(),
-      });
 
     } catch (e) {
       console.error('Error in loadUserData:', e);
