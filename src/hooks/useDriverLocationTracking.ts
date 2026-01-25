@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { upsertDriverLocation, setDriverOffline } from '@/lib/driverLocation';
 
 interface UseDriverLocationTrackingOptions {
   userId: string | undefined;
@@ -27,42 +27,26 @@ export function useDriverLocationTracking({
     const speedKph = speed !== null ? speed * 3.6 : null; // m/s to km/h
 
     try {
-      const { error } = await supabase
-        .from('driver_locations')
-        .upsert({
-          driver_id: driverId,
-          user_id: userId,
-          lat,
-          lng,
-          heading,
-          speed_kph: speedKph,
-          is_online: true,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'driver_id'
-        });
-
-      if (error) {
-        console.error('[DriverLocationTracking] Error updating location:', error);
-      } else {
-        setLastUpdate(new Date());
-      }
+      await upsertDriverLocation({
+        driverId,
+        userId,
+        lat,
+        lng,
+        heading,
+        speedKph,
+        isOnline: true,
+      });
+      setLastUpdate(new Date());
     } catch (err) {
-      console.error('[DriverLocationTracking] Exception:', err);
+      console.error('[DriverLocationTracking] Error updating location:', err);
     }
   }, [userId, driverId]);
 
-  const setOffline = useCallback(async () => {
+  const goOffline = useCallback(async () => {
     if (!driverId) return;
 
     try {
-      await supabase
-        .from('driver_locations')
-        .update({ 
-          is_online: false,
-          updated_at: new Date().toISOString()
-        })
-        .eq('driver_id', driverId);
+      await setDriverOffline(driverId);
     } catch (err) {
       console.error('[DriverLocationTracking] Error setting offline:', err);
     }
@@ -115,9 +99,9 @@ export function useDriverLocationTracking({
       intervalRef.current = null;
     }
 
-    setOffline();
+    goOffline();
     setIsTracking(false);
-  }, [setOffline]);
+  }, [goOffline]);
 
   // Start/stop based on online status
   useEffect(() => {
@@ -134,7 +118,7 @@ export function useDriverLocationTracking({
     };
   }, [isOnline, userId, driverId, startTracking, stopTracking, isTracking]);
 
-  // Cleanup on unmount and set offline
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (watchIdRef.current !== null) {
