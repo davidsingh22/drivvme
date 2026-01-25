@@ -73,6 +73,12 @@ export function useDriverGPSStreaming({
   const lastSentPositionRef = useRef<{ lat: number; lng: number } | null>(null);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const updateTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const currentRideIdRef = useRef<string | null>(null);
+
+  // Keep rideId ref updated
+  useEffect(() => {
+    currentRideIdRef.current = rideId;
+  }, [rideId]);
 
   // Timer to track seconds since last update
   useEffect(() => {
@@ -94,6 +100,7 @@ export function useDriverGPSStreaming({
   }, [state.isStreaming]);
 
   // Update location in database with smart throttling
+  // Writes to BOTH driver_profiles (for backwards compat) AND ride_locations (for realtime tracking)
   const updateLocationInDb = useCallback(async (position: GPSPosition, force = false) => {
     if (!driverId) return;
 
@@ -126,7 +133,8 @@ export function useDriverGPSStreaming({
     lastSentPositionRef.current = { lat: position.lat, lng: position.lng };
 
     try {
-      const { error } = await supabase
+      // Update driver_profiles for backwards compatibility
+      const profileUpdate = supabase
         .from('driver_profiles')
         .update({
           current_lat: position.lat,
@@ -135,10 +143,45 @@ export function useDriverGPSStreaming({
         })
         .eq('user_id', driverId);
 
-      if (error) {
-        console.error('[GPS] Failed to update location:', error);
+      // Also insert into ride_locations if we have an active ride
+      const activeRideId = currentRideIdRef.current;
+      if (activeRideId) {
+        const locationInsert = supabase
+          .from('ride_locations')
+          .insert({
+            ride_id: activeRideId,
+            driver_id: driverId,
+            lat: position.lat,
+            lng: position.lng,
+            heading: position.heading,
+            speed: position.speed,
+            accuracy: position.accuracy,
+          });
+
+        // Run both in parallel
+        const [profileResult, locationResult] = await Promise.all([
+          profileUpdate,
+          locationInsert,
+        ]);
+
+        if (profileResult.error) {
+          console.error('[GPS] Failed to update driver_profiles:', profileResult.error);
+        }
+        if (locationResult.error) {
+          console.error('[GPS] Failed to insert ride_location:', locationResult.error);
+        }
+
+        if (!profileResult.error && !locationResult.error) {
+          setState(prev => ({ ...prev, lastDbSyncTime: now, isConnected: true }));
+        }
       } else {
-        setState(prev => ({ ...prev, lastDbSyncTime: now, isConnected: true }));
+        // No active ride, just update driver_profiles
+        const { error } = await profileUpdate;
+        if (error) {
+          console.error('[GPS] Failed to update location:', error);
+        } else {
+          setState(prev => ({ ...prev, lastDbSyncTime: now, isConnected: true }));
+        }
       }
     } catch (err) {
       console.error('[GPS] Network error updating location:', err);

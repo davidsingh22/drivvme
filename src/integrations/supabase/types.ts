@@ -342,6 +342,42 @@ export type Database = {
           },
         ]
       }
+      ride_locations: {
+        Row: {
+          accuracy: number | null
+          created_at: string
+          driver_id: string
+          heading: number | null
+          id: string
+          lat: number
+          lng: number
+          ride_id: string
+          speed: number | null
+        }
+        Insert: {
+          accuracy?: number | null
+          created_at?: string
+          driver_id: string
+          heading?: number | null
+          id?: string
+          lat: number
+          lng: number
+          ride_id: string
+          speed?: number | null
+        }
+        Update: {
+          accuracy?: number | null
+          created_at?: string
+          driver_id?: string
+          heading?: number | null
+          id?: string
+          lat?: number
+          lng?: number
+          ride_id?: string
+          speed?: number | null
+        }
+        Relationships: []
+      }
       rides: {
         Row: {
           acceptance_time_seconds: number | null
