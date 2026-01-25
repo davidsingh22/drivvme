@@ -145,21 +145,43 @@ const RideBooking = () => {
       return;
     }
 
-    // Wait for roles to be loaded before deciding (max 3 seconds then assume rider)
-    if (roles.length === 0) {
-      const timeout = setTimeout(() => {
-        // If roles still empty after 3s, assume user is a rider and let them proceed
-        console.log('[RideBooking] Roles timeout, assuming rider');
-      }, 3000);
-      return () => clearTimeout(timeout);
-    }
+    // Drivers should never land on /ride (rider booking UI).
+    // If roles are slow to load on mobile, fall back to a quick backend check.
+    let cancelled = false;
 
-    // Drivers (even those also registered as riders) should use the driver dashboard
-    // This prevents drivers from accidentally seeing the rider "Finding your driver" UI
-    if (isDriver) {
-      setIsRedirecting(true);
-      navigate('/driver', { replace: true });
-    }
+    const maybeRedirectDriver = async () => {
+      // If context already knows they're a driver, redirect immediately.
+      if (isDriver) {
+        if (cancelled) return;
+        setIsRedirecting(true);
+        navigate('/driver', { replace: true });
+        return;
+      }
+
+      // If roles are present and not driver, allow rider flow.
+      if (roles.length > 0) return;
+
+      // Roles missing: do a one-shot role lookup to avoid misrouting drivers to /ride.
+      const { data: roleRows } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', user.id)
+        .limit(10);
+
+      if (cancelled) return;
+
+      const hasDriverRole = (roleRows ?? []).some((r) => r.role === 'driver');
+      if (hasDriverRole) {
+        setIsRedirecting(true);
+        navigate('/driver', { replace: true });
+      }
+    };
+
+    void maybeRedirectDriver();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user, authLoading, roles.length, isDriver, navigate]);
 
   // Restore active ride when returning to the app (especially on iOS)

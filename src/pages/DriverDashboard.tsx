@@ -767,6 +767,14 @@ const DriverDashboard = () => {
             pickup={currentRide ? { lat: currentRide.pickup_lat, lng: currentRide.pickup_lng } : null}
             dropoff={currentRide ? { lat: currentRide.dropoff_lat, lng: currentRide.dropoff_lng } : null}
             driverLocation={driverLocation}
+              routeMode={
+                currentRide
+                  ? currentRide.status === 'in_progress'
+                    ? 'driver-to-dropoff'
+                    : 'driver-to-pickup'
+                  : 'pickup-dropoff'
+              }
+              followDriver={!!currentRide}
           />
           
           {/* Online/Offline Toggle Overlay */}
