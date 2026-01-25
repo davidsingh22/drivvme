@@ -100,6 +100,8 @@ const DriverDashboard = () => {
     dbWriteRetryCount: gpsDbWriteRetryCount,
     isDbSyncing: gpsIsDbSyncing,
     authStatus: gpsAuthStatus,
+    historyWriteCount: gpsHistoryWriteCount,
+    forceWriteWithFeedback: gpsForceWriteWithFeedback,
   } = useDriverGPSStreaming({
     driverId: user?.id ?? null,
     rideId: currentRide?.id ?? null,
@@ -766,6 +768,7 @@ const DriverDashboard = () => {
             {/* GPS Status Indicator - Always visible during trip/online (DB is source-of-truth) */}
             {(isOnline || currentRide) && (
               <DriverGPSStatusIndicator
+                onForceSend={gpsForceWriteWithFeedback}
                 isStreaming={isGPSStreaming}
                 isConnected={isGPSConnected}
                 position={gpsPosition}
@@ -779,6 +782,7 @@ const DriverDashboard = () => {
                 dbWriteRetryCount={gpsDbWriteRetryCount}
                 isDbSyncing={gpsIsDbSyncing}
                 authStatus={gpsAuthStatus}
+                historyWriteCount={gpsHistoryWriteCount}
               />
             )}
             

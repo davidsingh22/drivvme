@@ -26,9 +26,9 @@ interface UseRealtimeDriverTrackingOptions {
 
 const ETA_REFRESH_INTERVAL = 10000; // 10 seconds
 const ETA_DISTANCE_THRESHOLD = 100; // 100 meters
-const NO_UPDATE_THRESHOLD = 8000; // 8 seconds
+const LIVE_THRESHOLD_MS = 8000; // 8 seconds for LIVE badge
 const RESUBSCRIBE_DELAY = 1000; // 1 second delay before resubscribe
-const POLL_INTERVAL = 5000; // 5 seconds
+const POLL_INTERVAL = 3000; // 3 seconds - aggressive polling fallback
 
 // Haversine distance in meters
 const getDistanceMeters = (
@@ -69,10 +69,11 @@ export function useRealtimeDriverTracking({
   const [eta, setEta] = useState<ETAInfo | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdateSeconds, setLastUpdateSeconds] = useState(0);
-  const [dataSource, setDataSource] = useState<'REALTIME' | 'FALLBACK' | 'NONE'>('NONE');
+  const [dataSource, setDataSource] = useState<'REALTIME' | 'POLL' | 'FALLBACK' | 'NONE'>('NONE');
   const [hasNoUpdatesError, setHasNoUpdatesError] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isLive, setIsLive] = useState(false);
+  const [waitingForDriver, setWaitingForDriver] = useState(false);
 
   const { token: mapboxToken } = useMapboxToken();
   const lastETAPositionRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -184,6 +185,7 @@ export function useRealtimeDriverTracking({
       setDataSource('REALTIME');
       setHasNoUpdatesError(false);
       setIsReconnecting(false);
+      setWaitingForDriver(false);
       lastRealtimeUpdateRef.current = Date.now();
 
       // Update ETA when driver moves
@@ -280,13 +282,17 @@ export function useRealtimeDriverTracking({
           };
           setDriverLocation(location);
           setIsConnected(true);
-          setDataSource('REALTIME');
+          setDataSource('POLL');
+          setWaitingForDriver(false);
           lastRealtimeUpdateRef.current = Date.now();
 
           if (targetLocation) {
             fetchETA(location, targetLocation, true);
           }
           return;
+        } else {
+          // No row exists yet
+          setWaitingForDriver(true);
         }
       }
 
@@ -307,6 +313,7 @@ export function useRealtimeDriverTracking({
           setDriverLocation(location);
           setIsConnected(true);
           setDataSource('FALLBACK');
+          setWaitingForDriver(false);
           lastRealtimeUpdateRef.current = Date.now();
 
           if (targetLocation) {
@@ -338,7 +345,8 @@ export function useRealtimeDriverTracking({
     };
   }, [rideId, enabled, subscribe]);
 
-  // Polling fallback: fetch latest row every 5s if realtime hasn't delivered updates recently
+  // AGGRESSIVE POLLING FALLBACK: fetch latest row every 3s
+  // Always runs regardless of realtime status - this is our safety net
   useEffect(() => {
     if (!rideId || !enabled) return;
 
@@ -346,18 +354,25 @@ export function useRealtimeDriverTracking({
       clearInterval(pollIntervalRef.current);
     }
 
-    pollIntervalRef.current = setInterval(async () => {
-      const sinceRealtimeMs = Date.now() - lastRealtimeUpdateRef.current;
-      if (sinceRealtimeMs < NO_UPDATE_THRESHOLD) return;
-
+    const pollForLocation = async () => {
       const { data: locData, error } = await supabase
         .from('ride_locations')
         .select('lat, lng, speed, accuracy, heading, created_at, updated_at')
         .eq('ride_id', rideId)
         .maybeSingle();
 
-      if (error || !locData) return;
+      if (error) {
+        console.error('[Tracking] Poll error:', error);
+        return;
+      }
+      
+      if (!locData) {
+        // No row exists yet - driver hasn't sent any GPS
+        setWaitingForDriver(true);
+        return;
+      }
 
+      setWaitingForDriver(false);
       const updatedAtMs = new Date(locData.updated_at || locData.created_at).getTime();
       const currentUpdatedAt = driverLocation?.updatedAt ?? 0;
 
@@ -372,14 +387,19 @@ export function useRealtimeDriverTracking({
           updatedAt: updatedAtMs,
         };
         setDriverLocation(location);
-        setDataSource('FALLBACK');
+        setDataSource('POLL');
         setHasNoUpdatesError(false);
-        // Do not set lastRealtimeUpdateRef here; we want to keep the "realtime stale" detection.
+        
         if (targetLocation) {
           fetchETA(location, targetLocation, true);
         }
       }
-    }, POLL_INTERVAL);
+    };
+
+    // Poll immediately on mount
+    pollForLocation();
+    
+    pollIntervalRef.current = setInterval(pollForLocation, POLL_INTERVAL);
 
     return () => {
       if (pollIntervalRef.current) {
@@ -387,7 +407,7 @@ export function useRealtimeDriverTracking({
         pollIntervalRef.current = null;
       }
     };
-  }, [rideId, enabled, driverLocation, targetLocation, fetchETA]);
+  }, [rideId, enabled, driverLocation?.updatedAt, targetLocation, fetchETA]);
 
   // Fallback subscription to driver_profiles (if no ride_locations updates)
   useEffect(() => {
@@ -413,7 +433,7 @@ export function useRealtimeDriverTracking({
           };
 
           if (updated.current_lat && updated.current_lng) {
-            // Only use fallback if no recent realtime updates
+            // Only use fallback if no recent updates from primary source
             const timeSinceRealtime = Date.now() - lastRealtimeUpdateRef.current;
             if (timeSinceRealtime > 5000) {
               const location: DriverLocation = {
@@ -425,6 +445,7 @@ export function useRealtimeDriverTracking({
               setDataSource('FALLBACK');
               setLastUpdateSeconds(0);
               setHasNoUpdatesError(false);
+              setWaitingForDriver(false);
 
               if (targetLocation) {
                 fetchETA(location, targetLocation);
@@ -455,7 +476,7 @@ export function useRealtimeDriverTracking({
     };
   }, [driverLocation, targetLocation, enabled, fetchETA]);
 
-  // Track seconds since last update + detect 10s error + auto-resubscribe
+  // Track seconds since last update + compute isLive
   useEffect(() => {
     if (!enabled) return;
 
@@ -464,17 +485,17 @@ export function useRealtimeDriverTracking({
       const seconds = Number.isFinite(ageMs) ? Math.floor(ageMs / 1000) : 999;
       setLastUpdateSeconds(seconds);
 
-      const live = !!driverLocation && ageMs < NO_UPDATE_THRESHOLD;
+      // LIVE = driver updated_at is < 8 seconds old
+      const live = !!driverLocation && ageMs < LIVE_THRESHOLD_MS;
       setIsLive(live);
       
-      // Set error and trigger resubscribe if driver updated_at is stale
-      if (!live) {
+      if (!live && driverLocation) {
         setHasNoUpdatesError(true);
         // Auto-resubscribe once when we hit the threshold
         if (!isReconnecting && channelRef.current) {
           resubscribe();
         }
-      } else {
+      } else if (live) {
         setHasNoUpdatesError(false);
       }
     }, 1000);
@@ -552,6 +573,7 @@ export function useRealtimeDriverTracking({
     hasNoUpdatesError,
     isReconnecting,
     isLive,
+    waitingForDriver,
     recenter,
     resubscribe,
   };
