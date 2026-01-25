@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Calendar, MapPin, Navigation, Clock, DollarSign, Star, Filter } from 'lucide-react';
+import { Calendar, MapPin, Navigation, Clock, DollarSign, Star, Filter, CheckCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -33,6 +33,8 @@ interface Rating {
   comment: string | null;
 }
 
+const PLATFORM_FEE = 5.00;
+
 const RideHistory = () => {
   const { t, language } = useLanguage();
   const { user, isRider, isDriver, isLoading: authLoading } = useAuth();
@@ -42,6 +44,38 @@ const RideHistory = () => {
   const [ratings, setRatings] = useState<Record<string, Rating>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'completed' | 'cancelled'>('all');
+  const [completingRideId, setCompletingRideId] = useState<string | null>(null);
+
+  // Complete ride directly from history (for drivers)
+  const completeRide = async (ride: Ride, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent card click navigation
+    if (!user || ride.driver_id !== user.id) return;
+
+    setCompletingRideId(ride.id);
+    try {
+      const { error } = await supabase
+        .from('rides')
+        .update({
+          status: 'completed',
+          dropoff_at: new Date().toISOString(),
+          actual_fare: ride.estimated_fare,
+          driver_earnings: ride.estimated_fare - PLATFORM_FEE,
+        })
+        .eq('id', ride.id);
+
+      if (error) {
+        console.error('Error completing ride:', error);
+        return;
+      }
+
+      // Update local state
+      setRides((prev) =>
+        prev.map((r) => (r.id === ride.id ? { ...r, status: 'completed' } : r))
+      );
+    } finally {
+      setCompletingRideId(null);
+    }
+  };
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -267,6 +301,22 @@ const RideHistory = () => {
                           <p className="text-sm text-primary font-medium text-center">
                             {language === 'fr' ? '👆 Appuyez pour voir sur la carte' : '👆 Tap to view on map'}
                           </p>
+                        </div>
+                      )}
+
+                      {/* Complete Ride Button for Drivers */}
+                      {isActive && ride.driver_id && user?.id && ride.driver_id === user.id && (
+                        <div className="mb-4">
+                          <Button
+                            className="w-full bg-success hover:bg-success/90 py-4 text-lg font-bold"
+                            onClick={(e) => completeRide(ride, e)}
+                            disabled={completingRideId === ride.id}
+                          >
+                            <CheckCircle className="h-5 w-5 mr-2" />
+                            {completingRideId === ride.id
+                              ? (language === 'fr' ? 'Finalisation...' : 'Completing...')
+                              : (language === 'fr' ? 'Terminer la course' : 'Complete Ride')}
+                          </Button>
                         </div>
                       )}
 
