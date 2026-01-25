@@ -143,25 +143,28 @@ export function useDriverGPSStreaming({
         })
         .eq('user_id', driverId);
 
-      // Also insert into ride_locations if we have an active ride
+      // Also UPSERT into ride_locations if we have an active ride (one row per ride)
       const activeRideId = currentRideIdRef.current;
       if (activeRideId) {
-        const locationInsert = supabase
+        const locationUpsert = supabase
           .from('ride_locations')
-          .insert({
-            ride_id: activeRideId,
-            driver_id: driverId,
-            lat: position.lat,
-            lng: position.lng,
-            heading: position.heading,
-            speed: position.speed,
-            accuracy: position.accuracy,
-          });
+          .upsert(
+            {
+              ride_id: activeRideId,
+              driver_id: driverId,
+              lat: position.lat,
+              lng: position.lng,
+              heading: position.heading,
+              speed: position.speed,
+              accuracy: position.accuracy,
+            },
+            { onConflict: 'ride_id' }
+          );
 
         // Run both in parallel
         const [profileResult, locationResult] = await Promise.all([
           profileUpdate,
-          locationInsert,
+          locationUpsert,
         ]);
 
         if (profileResult.error) {

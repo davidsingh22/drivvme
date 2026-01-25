@@ -353,6 +353,7 @@ export type Database = {
           lng: number
           ride_id: string
           speed: number | null
+          updated_at: string
         }
         Insert: {
           accuracy?: number | null
@@ -364,6 +365,7 @@ export type Database = {
           lng: number
           ride_id: string
           speed?: number | null
+          updated_at?: string
         }
         Update: {
           accuracy?: number | null
@@ -375,6 +377,7 @@ export type Database = {
           lng?: number
           ride_id?: string
           speed?: number | null
+          updated_at?: string
         }
         Relationships: []
       }
