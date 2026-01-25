@@ -22,6 +22,7 @@ import { DriverWakeLockBanner } from '@/components/DriverWakeLockBanner';
 import { DriverGPSErrorBanner } from '@/components/DriverGPSErrorBanner';
 import { DriverGPSStatusIndicator } from '@/components/DriverGPSStatusIndicator';
 import { useDriverGPSStreaming } from '@/hooks/useDriverGPSStreaming';
+import DriverActiveRidePanel from '@/components/DriverActiveRidePanel';
 
 const PLATFORM_FEE = 5.00;
 
@@ -859,6 +860,20 @@ const DriverDashboard = () => {
           </div>
 
           <div className="p-6 flex-1 overflow-y-auto">
+            {/* ========== DRIVER ACTIVE RIDE PANEL ========== */}
+            {/* Always shows Start/End Ride buttons for the assigned driver */}
+            <DriverActiveRidePanel
+              onRideCompleted={() => {
+                setCurrentRide(null);
+                setRiderInfo(null);
+                void refreshDriverProfile();
+              }}
+              onRideUpdated={(ride) => {
+                // Keep local state in sync
+                setCurrentRide(ride as RideRequest);
+              }}
+            />
+
             {/* Profile Button */}
             <Button
               variant="outline"

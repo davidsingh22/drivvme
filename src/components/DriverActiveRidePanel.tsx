@@ -1,0 +1,441 @@
+import { useState, useEffect, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { 
+  MapPin, 
+  Navigation, 
+  Clock, 
+  DollarSign, 
+  User, 
+  Phone, 
+  CheckCircle, 
+  PlayCircle, 
+  ExternalLink,
+  AlertTriangle
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useToast } from '@/hooks/use-toast';
+import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
+
+const PLATFORM_FEE = 5.00;
+
+interface ActiveRide {
+  id: string;
+  rider_id: string;
+  driver_id: string;
+  pickup_address: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_address: string;
+  dropoff_lat: number;
+  dropoff_lng: number;
+  distance_km: number;
+  estimated_duration_minutes: number;
+  estimated_fare: number;
+  status: string;
+  requested_at: string;
+  pickup_at: string | null;
+}
+
+interface RiderInfo {
+  first_name: string | null;
+  last_name: string | null;
+  phone_number: string | null;
+  avatar_url: string | null;
+}
+
+interface DriverActiveRidePanelProps {
+  onRideCompleted?: () => void;
+  onRideUpdated?: (ride: ActiveRide) => void;
+}
+
+const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveRidePanelProps) => {
+  const { user, session } = useAuth();
+  const { language } = useLanguage();
+  const { toast } = useToast();
+  
+  const [activeRide, setActiveRide] = useState<ActiveRide | null>(null);
+  const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [driverMismatch, setDriverMismatch] = useState<string | null>(null);
+
+  const driverId = session?.user?.id ?? user?.id;
+
+  // Fetch active ride for the current driver
+  const fetchActiveRide = useCallback(async () => {
+    if (!driverId) {
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('rides')
+        .select('*')
+        .eq('driver_id', driverId)
+        .in('status', ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        console.error('[DriverActiveRidePanel] Error fetching ride:', error);
+        setDriverMismatch(null);
+        setActiveRide(null);
+        return;
+      }
+
+      if (data) {
+        // Double-check driver ownership
+        if (data.driver_id !== driverId) {
+          setDriverMismatch(`Driver mismatch: ride.driver_id=${data.driver_id}, currentDriverId=${driverId}`);
+          setActiveRide(null);
+          return;
+        }
+        
+        setDriverMismatch(null);
+        setActiveRide(data);
+        onRideUpdated?.(data);
+
+        // Fetch rider info
+        const { data: riderData } = await supabase
+          .from('profiles')
+          .select('first_name, last_name, phone_number, avatar_url')
+          .eq('user_id', data.rider_id)
+          .single();
+
+        if (riderData) {
+          setRiderInfo(riderData);
+        }
+      } else {
+        setActiveRide(null);
+        setRiderInfo(null);
+        setDriverMismatch(null);
+      }
+    } catch (err) {
+      console.error('[DriverActiveRidePanel] Unexpected error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [driverId, onRideUpdated]);
+
+  // Initial fetch
+  useEffect(() => {
+    fetchActiveRide();
+  }, [fetchActiveRide]);
+
+  // Subscribe to ride updates
+  useEffect(() => {
+    if (!activeRide?.id) return;
+
+    const channel = supabase
+      .channel(`active-ride-panel-${activeRide.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rides',
+          filter: `id=eq.${activeRide.id}`,
+        },
+        (payload) => {
+          const updated = payload.new as ActiveRide;
+          
+          if (updated.status === 'completed' || updated.status === 'cancelled') {
+            setActiveRide(null);
+            setRiderInfo(null);
+            onRideCompleted?.();
+          } else {
+            setActiveRide(updated);
+            onRideUpdated?.(updated);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeRide?.id, onRideCompleted, onRideUpdated]);
+
+  // Start Ride action (transition from arrived -> in_progress)
+  const startRide = async () => {
+    if (!activeRide || !driverId) return;
+    
+    setIsUpdating(true);
+    try {
+      const { error } = await supabase
+        .from('rides')
+        .update({
+          status: 'in_progress',
+          pickup_at: new Date().toISOString(),
+        })
+        .eq('id', activeRide.id)
+        .eq('driver_id', driverId);
+
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      toast({
+        title: language === 'fr' ? 'Course démarrée!' : 'Ride started!',
+        description: language === 'fr' ? 'En route vers la destination.' : 'Heading to the destination.',
+      });
+
+      // Refetch to update local state
+      await fetchActiveRide();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // End Ride action (transition to completed)
+  const endRide = async () => {
+    if (!activeRide || !driverId) return;
+    
+    setIsUpdating(true);
+    try {
+      const driverEarnings = activeRide.estimated_fare - PLATFORM_FEE;
+      
+      const { error } = await supabase
+        .from('rides')
+        .update({
+          status: 'completed',
+          dropoff_at: new Date().toISOString(),
+          actual_fare: activeRide.estimated_fare,
+          driver_earnings: driverEarnings,
+        })
+        .eq('id', activeRide.id)
+        .eq('driver_id', driverId);
+
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      toast({
+        title: language === 'fr' ? 'Course terminée!' : 'Ride completed!',
+        description: language === 'fr' 
+          ? `Vous avez gagné ${formatCurrency(driverEarnings, language)}`
+          : `You earned ${formatCurrency(driverEarnings, language)}`,
+      });
+
+      setActiveRide(null);
+      setRiderInfo(null);
+      onRideCompleted?.();
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Open in Maps (Google Maps or Apple Maps deep link)
+  const openInMaps = (lat: number, lng: number, label: string) => {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const url = isIOS
+      ? `maps://maps.apple.com/?daddr=${lat},${lng}&q=${encodeURIComponent(label)}`
+      : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+    window.open(url, '_blank');
+  };
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'driver_assigned':
+        return <Badge className="bg-primary/20 text-primary">Assigned</Badge>;
+      case 'driver_en_route':
+        return <Badge className="bg-warning/20 text-warning">En Route</Badge>;
+      case 'arrived':
+        return <Badge className="bg-accent/20 text-accent">Arrived</Badge>;
+      case 'in_progress':
+        return <Badge className="bg-success/20 text-success">In Progress</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  const driverEarnings = activeRide ? activeRide.estimated_fare - PLATFORM_FEE : 0;
+
+  // Loading state
+  if (isLoading) {
+    return null;
+  }
+
+  // Debug mismatch (dev only)
+  if (driverMismatch && import.meta.env.DEV) {
+    return (
+      <Card className="p-4 mb-4 border-destructive bg-destructive/10">
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertTriangle className="h-5 w-5" />
+          <span className="font-mono text-sm">{driverMismatch}</span>
+        </div>
+      </Card>
+    );
+  }
+
+  // No active ride
+  if (!activeRide) {
+    return null;
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mb-6"
+    >
+      <Card className="p-4 border-2 border-primary/50 bg-gradient-to-br from-primary/5 to-transparent">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-success animate-pulse" />
+            <h2 className="font-display text-lg font-bold">
+              {language === 'fr' ? 'Course Active' : 'Active Ride'}
+            </h2>
+          </div>
+          {getStatusBadge(activeRide.status)}
+        </div>
+
+        {/* Rider Info */}
+        {riderInfo && (
+          <div className="flex items-center gap-3 mb-4 p-3 bg-muted/50 rounded-lg">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+              {riderInfo.avatar_url ? (
+                <img
+                  src={riderInfo.avatar_url}
+                  alt="Rider"
+                  className="w-10 h-10 rounded-full object-cover"
+                />
+              ) : (
+                <User className="h-5 w-5 text-primary" />
+              )}
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-sm">
+                {riderInfo.first_name} {riderInfo.last_name?.[0]}.
+              </p>
+              {riderInfo.phone_number && (
+                <a
+                  href={`tel:${riderInfo.phone_number}`}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+                >
+                  <Phone className="h-3 w-3" />
+                  {riderInfo.phone_number}
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Route Details */}
+        <div className="space-y-2 mb-4">
+          <div className="flex items-start gap-2">
+            <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">Pickup</p>
+              <p className="text-sm font-medium truncate">{activeRide.pickup_address}</p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="shrink-0"
+              onClick={() => openInMaps(activeRide.pickup_lat, activeRide.pickup_lng, 'Pickup')}
+            >
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="flex items-start gap-2">
+            <Navigation className="h-4 w-4 text-accent mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">Dropoff</p>
+              <p className="text-sm font-medium truncate">{activeRide.dropoff_address}</p>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="shrink-0"
+              onClick={() => openInMaps(activeRide.dropoff_lat, activeRide.dropoff_lng, 'Dropoff')}
+            >
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Distance + Duration + Earnings */}
+        <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
+          <span className="flex items-center gap-1">
+            <Navigation className="h-4 w-4" />
+            {formatDistance(Number(activeRide.distance_km), language)}
+          </span>
+          <span className="flex items-center gap-1">
+            <Clock className="h-4 w-4" />
+            {formatDuration(activeRide.estimated_duration_minutes, language)}
+          </span>
+          <span className="flex items-center gap-1 text-accent font-semibold">
+            <DollarSign className="h-4 w-4" />
+            {formatCurrency(driverEarnings, language)}
+          </span>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="space-y-2">
+          {/* Start Ride - only show when arrived at pickup */}
+          {activeRide.status === 'arrived' && (
+            <Button
+              className="w-full gradient-primary py-5 text-base font-bold"
+              onClick={startRide}
+              disabled={isUpdating}
+            >
+              <PlayCircle className="h-5 w-5 mr-2" />
+              {isUpdating 
+                ? (language === 'fr' ? 'Démarrage...' : 'Starting...') 
+                : (language === 'fr' ? 'Démarrer la course' : 'Start Ride')}
+            </Button>
+          )}
+
+          {/* End Ride - always visible during in_progress, also available during arrived for quick completion */}
+          {['arrived', 'in_progress'].includes(activeRide.status) && (
+            <Button
+              className="w-full bg-success hover:bg-success/90 py-5 text-base font-bold"
+              onClick={endRide}
+              disabled={isUpdating}
+            >
+              <CheckCircle className="h-5 w-5 mr-2" />
+              {isUpdating 
+                ? (language === 'fr' ? 'Finalisation...' : 'Completing...') 
+                : (language === 'fr' ? 'Terminer la course' : 'End Ride')}
+            </Button>
+          )}
+
+          {/* For earlier statuses (assigned, en_route), show a prominent End Ride button too */}
+          {['driver_assigned', 'driver_en_route'].includes(activeRide.status) && (
+            <Button
+              className="w-full bg-success hover:bg-success/90 py-5 text-base font-bold"
+              onClick={endRide}
+              disabled={isUpdating}
+            >
+              <CheckCircle className="h-5 w-5 mr-2" />
+              {isUpdating 
+                ? (language === 'fr' ? 'Finalisation...' : 'Completing...') 
+                : (language === 'fr' ? 'Terminer la course' : 'End Ride')}
+            </Button>
+          )}
+        </div>
+      </Card>
+    </motion.div>
+  );
+};
+
+export default DriverActiveRidePanel;
