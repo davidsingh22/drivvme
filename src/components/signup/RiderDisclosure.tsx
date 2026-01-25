@@ -15,7 +15,7 @@ const RiderDisclosure = ({ checked, onCheckedChange }: RiderDisclosureProps) => 
   const { language } = useLanguage();
   const [showDisclosure, setShowDisclosure] = useState(false);
 
-  const disclosureText = `Drivveme Rider Disclosure
+  const disclosureTextEn = `Drivveme Rider Disclosure
 
 Drivveme is a technology platform that connects riders with independent drivers.
 
@@ -24,6 +24,18 @@ Drivveme does not provide transportation services and does not employ drivers. A
 Drivveme does not control how drivers perform rides and is not responsible for delays, cancellations, accidents, injuries, losses, or disputes that may arise during or after a ride.
 
 By using the Drivveme platform, you acknowledge that rides are provided by independent drivers and that use of the platform is at your own risk.`;
+
+  const disclosureTextFr = `Divulgation aux passagers Drivveme
+
+Drivveme est une plateforme technologique qui met en relation des passagers avec des chauffeurs indépendants.
+
+Drivveme ne fournit pas de services de transport et n'emploie pas de chauffeurs. Tous les chauffeurs utilisant la plateforme Drivveme sont des entrepreneurs indépendants et sont seuls responsables de leurs services, de leurs véhicules, de leur conduite et du respect des lois applicables.
+
+Drivveme ne contrôle pas la manière dont les chauffeurs effectuent les courses et n'est pas responsable des retards, annulations, accidents, blessures, pertes ou litiges pouvant survenir pendant ou après une course.
+
+En utilisant la plateforme Drivveme, vous reconnaissez que les courses sont fournies par des chauffeurs indépendants et que l'utilisation de la plateforme se fait à vos propres risques.`;
+
+  const disclosureText = language === 'fr' ? disclosureTextFr : disclosureTextEn;
 
   return (
     <div className="space-y-3 pt-4 border-t border-border">
