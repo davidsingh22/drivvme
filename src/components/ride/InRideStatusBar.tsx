@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, Navigation, MapPin, AlertCircle } from 'lucide-react';
+import { Clock, Navigation, MapPin, AlertCircle, Route } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 
@@ -18,6 +18,9 @@ interface ETAInfo {
   distanceKm: number;
 }
 
+// Refresh interval in ms
+const REFRESH_INTERVAL = 10000;
+
 const InRideStatusBar = ({
   phase,
   driverLocation,
@@ -27,39 +30,56 @@ const InRideStatusBar = ({
   const { language } = useLanguage();
   const { token: mapboxToken } = useMapboxToken();
   const [eta, setEta] = useState<ETAInfo | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Determine target based on phase
   const targetLocation = phase === 'inProgress' ? dropoffLocation : pickupLocation;
 
+  const fetchETA = async (signal?: AbortSignal) => {
+    if (!driverLocation || !targetLocation || !mapboxToken) return;
+
+    try {
+      const response = await fetch(
+        `https://api.mapbox.com/directions/v5/mapbox/driving/${driverLocation.lng},${driverLocation.lat};${targetLocation.lng},${targetLocation.lat}?access_token=${mapboxToken}`,
+        { signal }
+      );
+      const data = await response.json();
+
+      if (data.routes?.[0]) {
+        setEta({
+          minutes: Math.round(data.routes[0].duration / 60),
+          distanceKm: data.routes[0].distance / 1000,
+        });
+        setLastUpdated(new Date());
+      }
+    } catch (err) {
+      if ((err as any)?.name !== 'AbortError') {
+        console.error('ETA fetch error:', err);
+      }
+    }
+  };
+
+  // Initial fetch and set up interval for live updates
   useEffect(() => {
     if (!driverLocation || !targetLocation || !mapboxToken) return;
 
     const controller = new AbortController();
 
-    const fetchETA = async () => {
-      try {
-        const response = await fetch(
-          `https://api.mapbox.com/directions/v5/mapbox/driving/${driverLocation.lng},${driverLocation.lat};${targetLocation.lng},${targetLocation.lat}?access_token=${mapboxToken}`,
-          { signal: controller.signal }
-        );
-        const data = await response.json();
+    // Initial fetch
+    fetchETA(controller.signal);
 
-        if (data.routes?.[0]) {
-          setEta({
-            minutes: Math.round(data.routes[0].duration / 60),
-            distanceKm: data.routes[0].distance / 1000,
-          });
-        }
-      } catch (err) {
-        if ((err as any)?.name !== 'AbortError') {
-          console.error('ETA fetch error:', err);
-        }
+    // Set up interval for live updates
+    intervalRef.current = setInterval(() => {
+      fetchETA();
+    }, REFRESH_INTERVAL);
+
+    return () => {
+      controller.abort();
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
       }
     };
-
-    fetchETA();
-
-    return () => controller.abort();
   }, [driverLocation?.lat, driverLocation?.lng, targetLocation?.lat, targetLocation?.lng, mapboxToken]);
 
   const getStatusConfig = () => {
@@ -108,12 +128,21 @@ const InRideStatusBar = ({
     });
   };
 
+  // Format distance
+  const formatDistance = (km: number) => {
+    if (km < 1) {
+      return `${Math.round(km * 1000)} m`;
+    }
+    return `${km.toFixed(1)} km`;
+  };
+
   return (
     <motion.div
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      className="absolute top-4 left-4 right-4 z-10"
+      className="absolute top-4 left-4 right-4 z-10 space-y-2"
     >
+      {/* Main status bar */}
       <div className={`${config.color} rounded-2xl px-4 py-3 shadow-lg backdrop-blur-sm`}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -133,9 +162,7 @@ const InRideStatusBar = ({
                 <span>{getArrivalTime()}</span>
               </div>
               <p className="text-white/60 text-xs">
-                {eta.distanceKm < 1
-                  ? `${Math.round(eta.distanceKm * 1000)} m`
-                  : `${eta.distanceKm.toFixed(1)} km`}
+                {formatDistance(eta.distanceKm)}
               </p>
             </div>
           )}
@@ -154,6 +181,49 @@ const InRideStatusBar = ({
           )}
         </div>
       </div>
+
+      {/* Live distance/time chip - only show during active movement phases */}
+      {eta && (phase === 'arriving' || phase === 'inProgress') && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="flex justify-center"
+        >
+          <div className="bg-card/95 backdrop-blur-md rounded-full px-4 py-2 shadow-lg border border-border flex items-center gap-3">
+            {/* Live indicator */}
+            <div className="flex items-center gap-1.5">
+              <motion.div
+                animate={{ opacity: [1, 0.4, 1] }}
+                transition={{ duration: 1.5, repeat: Infinity }}
+                className="w-2 h-2 rounded-full bg-destructive"
+              />
+              <span className="text-xs font-semibold text-destructive uppercase tracking-wide">
+                {language === 'fr' ? 'En direct' : 'Live'}
+              </span>
+            </div>
+
+            <div className="w-px h-4 bg-border" />
+
+            {/* Distance */}
+            <div className="flex items-center gap-1.5">
+              <Route className="h-4 w-4 text-primary" />
+              <span className="font-bold text-foreground">
+                {formatDistance(eta.distanceKm)}
+              </span>
+            </div>
+
+            <div className="w-px h-4 bg-border" />
+
+            {/* Time */}
+            <div className="flex items-center gap-1.5">
+              <Clock className="h-4 w-4 text-muted-foreground" />
+              <span className="font-bold text-foreground">
+                {eta.minutes} {language === 'fr' ? 'min' : 'min'}
+              </span>
+            </div>
+          </div>
+        </motion.div>
+      )}
     </motion.div>
   );
 };
