@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Calendar, MapPin, Navigation, Clock, DollarSign, Star, Filter, CheckCircle } from 'lucide-react';
+import { Calendar, MapPin, Navigation, Clock, DollarSign, Star, CheckCircle, PlayCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import Navbar from '@/components/Navbar';
+import { useToast } from '@/hooks/use-toast';
 
 interface Ride {
   id: string;
@@ -37,43 +38,97 @@ const PLATFORM_FEE = 5.00;
 
 const RideHistory = () => {
   const { t, language } = useLanguage();
-  const { user, isRider, isDriver, isLoading: authLoading } = useAuth();
+  const { user, session, isRider, isDriver, isLoading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
+
+  // Use session user id as fallback (more reliable on iOS resume)
+  const currentUserId = session?.user?.id ?? user?.id;
 
   const [rides, setRides] = useState<Ride[]>([]);
   const [ratings, setRatings] = useState<Record<string, Rating>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'completed' | 'cancelled'>('all');
-  const [completingRideId, setCompletingRideId] = useState<string | null>(null);
+  const [updatingRideId, setUpdatingRideId] = useState<string | null>(null);
 
-  // Complete ride directly from history (for drivers)
-  const completeRide = async (ride: Ride, e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent card click navigation
-    if (!user || ride.driver_id !== user.id) return;
+  // Start Ride action (transition from arrived -> in_progress)
+  const startRide = async (ride: Ride, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!currentUserId || ride.driver_id !== currentUserId) return;
 
-    setCompletingRideId(ride.id);
+    setUpdatingRideId(ride.id);
     try {
+      const { error } = await supabase
+        .from('rides')
+        .update({
+          status: 'in_progress',
+          pickup_at: new Date().toISOString(),
+        })
+        .eq('id', ride.id)
+        .eq('driver_id', currentUserId);
+
+      if (error) {
+        console.error('Error starting ride:', error);
+        toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        return;
+      }
+
+      toast({
+        title: language === 'fr' ? 'Course démarrée!' : 'Ride started!',
+        description: language === 'fr' ? 'En route vers la destination.' : 'Heading to destination.',
+      });
+
+      // Update local state
+      setRides((prev) =>
+        prev.map((r) => (r.id === ride.id ? { ...r, status: 'in_progress' } : r))
+      );
+    } finally {
+      setUpdatingRideId(null);
+    }
+  };
+
+  // End Ride action (transition to completed)
+  const endRide = async (ride: Ride, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!currentUserId || ride.driver_id !== currentUserId) return;
+
+    setUpdatingRideId(ride.id);
+    try {
+      const driverEarnings = ride.estimated_fare - PLATFORM_FEE;
+
       const { error } = await supabase
         .from('rides')
         .update({
           status: 'completed',
           dropoff_at: new Date().toISOString(),
           actual_fare: ride.estimated_fare,
-          driver_earnings: ride.estimated_fare - PLATFORM_FEE,
+          driver_earnings: driverEarnings,
         })
-        .eq('id', ride.id);
+        .eq('id', ride.id)
+        .eq('driver_id', currentUserId);
 
       if (error) {
-        console.error('Error completing ride:', error);
+        console.error('Error ending ride:', error);
+        toast({ title: 'Error', description: error.message, variant: 'destructive' });
         return;
       }
 
-      // Update local state
+      toast({
+        title: language === 'fr' ? 'Course terminée!' : 'Ride completed!',
+        description: language === 'fr' 
+          ? `Vous avez gagné ${formatCurrency(driverEarnings, language)}`
+          : `You earned ${formatCurrency(driverEarnings, language)}`,
+      });
+
+      // Update local state - move to completed
       setRides((prev) =>
-        prev.map((r) => (r.id === ride.id ? { ...r, status: 'completed' } : r))
+        prev.map((r) => (r.id === ride.id ? { ...r, status: 'completed', driver_earnings: driverEarnings } : r))
       );
+
+      // Switch to completed tab
+      setFilter('completed');
     } finally {
-      setCompletingRideId(null);
+      setUpdatingRideId(null);
     }
   };
 
@@ -322,23 +377,44 @@ const RideHistory = () => {
                         </div>
                       )}
 
-                      {/* Ride completed button (drivers can end an active ride) */}
-                      {isActive &&
-                        isCompletableRide(ride.status) &&
-                        ride.driver_id &&
-                        user?.id &&
-                        ride.driver_id === user.id && (
-                        <div className="mb-4">
-                          <Button
-                            className="w-full bg-success hover:bg-success/90 py-4 text-lg font-bold"
-                            onClick={(e) => completeRide(ride, e)}
-                            disabled={completingRideId === ride.id}
-                          >
-                            <CheckCircle className="h-5 w-5 mr-2" />
-                            {completingRideId === ride.id
-                              ? (language === 'fr' ? 'Finalisation...' : 'Completing...')
-                              : (language === 'fr' ? 'Course terminée' : 'Ride completed')}
-                          </Button>
+                      {/* ========== DRIVER ACTION BUTTONS ========== */}
+                      {/* Show Start Ride / End Ride for the assigned driver */}
+                      {ride.driver_id && currentUserId && ride.driver_id === currentUserId && (
+                        <div className="mb-4 space-y-2">
+                          {/* Start Ride button - show when status is 'arrived' */}
+                          {ride.status === 'arrived' && (
+                            <Button
+                              className="w-full gradient-primary py-5 text-lg font-bold shadow-lg"
+                              onClick={(e) => startRide(ride, e)}
+                              disabled={updatingRideId === ride.id}
+                            >
+                              <PlayCircle className="h-6 w-6 mr-2" />
+                              {updatingRideId === ride.id
+                                ? (language === 'fr' ? 'Démarrage...' : 'Starting...')
+                                : (language === 'fr' ? 'Démarrer la course' : 'Start Ride')}
+                            </Button>
+                          )}
+
+                          {/* End Ride button - show when status is 'in_progress' (or 'arrived' for quick end) */}
+                          {['arrived', 'in_progress'].includes(ride.status) && (
+                            <Button
+                              className="w-full bg-success hover:bg-success/90 py-5 text-lg font-bold shadow-lg"
+                              onClick={(e) => endRide(ride, e)}
+                              disabled={updatingRideId === ride.id}
+                            >
+                              <CheckCircle className="h-6 w-6 mr-2" />
+                              {updatingRideId === ride.id
+                                ? (language === 'fr' ? 'Finalisation...' : 'Completing...')
+                                : (language === 'fr' ? 'Terminer la course' : 'End Ride')}
+                            </Button>
+                          )}
+
+                          {/* Debug info (dev only) */}
+                          {import.meta.env.DEV && (
+                            <p className="text-xs text-muted-foreground font-mono text-center">
+                              status={ride.status}, ride.driver_id={ride.driver_id?.slice(0, 8)}…, me={currentUserId?.slice(0, 8)}…
+                            </p>
+                          )}
                         </div>
                       )}
 
