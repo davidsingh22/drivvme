@@ -26,6 +26,7 @@ import { useDriverLocationTracking } from '@/hooks/useDriverLocationTracking';
 import { DriverLocationStatus } from '@/components/DriverLocationStatus';
 import DriverActiveRidePanel from '@/components/DriverActiveRidePanel';
 import DriverNavigationMap from '@/components/DriverNavigationMap';
+import DriverInbox from '@/components/DriverInbox';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
 
@@ -911,15 +912,18 @@ const DriverDashboard = () => {
               </Button>
             )}
 
-            {/* Profile Button */}
-            <Button
-              variant="outline"
-              className="w-full mb-4"
-              onClick={() => setIsProfileModalOpen(true)}
-            >
-              <UserCircle className="h-5 w-5 mr-2" />
-              Edit Profile
-            </Button>
+            {/* Profile and Inbox Buttons */}
+            <div className="flex gap-2 mb-4">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setIsProfileModalOpen(true)}
+              >
+                <UserCircle className="h-5 w-5 mr-2" />
+                Edit Profile
+              </Button>
+              <DriverInbox />
+            </div>
 
             {/* Push Notifications (critical for new ride alerts when app is backgrounded) */}
             {!pushSubscribed && (
