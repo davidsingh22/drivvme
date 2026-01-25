@@ -10,8 +10,10 @@ import {
   CheckCircle, 
   PlayCircle, 
   ExternalLink,
-  AlertTriangle
+  AlertTriangle,
+  Map
 } from 'lucide-react';
+import DriverNavigationMap from '@/components/DriverNavigationMap';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -63,6 +65,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [driverMismatch, setDriverMismatch] = useState<string | null>(null);
+  const [showNavigation, setShowNavigation] = useState(false);
+  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   const driverId = session?.user?.id ?? user?.id;
 
@@ -128,6 +132,26 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   useEffect(() => {
     fetchActiveRide();
   }, [fetchActiveRide]);
+
+  // Track driver's current GPS location
+  useEffect(() => {
+    if (!activeRide) return;
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setDriverLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      (err) => {
+        console.error('[DriverActiveRidePanel] GPS error:', err);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 2000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [activeRide?.id]);
 
   // Subscribe to ride updates
   useEffect(() => {
@@ -389,6 +413,15 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           </span>
         </div>
 
+        {/* Navigation Button - prominent GPS navigation */}
+        <Button
+          className="w-full mb-3 py-5 text-base font-bold bg-primary hover:bg-primary/90"
+          onClick={() => setShowNavigation(true)}
+        >
+          <Map className="h-5 w-5 mr-2" />
+          {language === 'fr' ? 'Ouvrir Navigation GPS' : 'Open GPS Navigation'}
+        </Button>
+
         {/* Action Buttons */}
         <div className="space-y-2">
           {/* Start Ride - only show when arrived at pickup */}
@@ -434,6 +467,20 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           )}
         </div>
       </Card>
+
+      {/* Fullscreen GPS Navigation Map */}
+      {showNavigation && activeRide && (
+        <DriverNavigationMap
+          driverLocation={driverLocation}
+          destination={
+            activeRide.status === 'in_progress'
+              ? { lat: activeRide.dropoff_lat, lng: activeRide.dropoff_lng, address: activeRide.dropoff_address }
+              : { lat: activeRide.pickup_lat, lng: activeRide.pickup_lng, address: activeRide.pickup_address }
+          }
+          destinationType={activeRide.status === 'in_progress' ? 'dropoff' : 'pickup'}
+          onClose={() => setShowNavigation(false)}
+        />
+      )}
     </motion.div>
   );
 };
