@@ -28,45 +28,72 @@ export default function DriverMessagesBadge() {
   useEffect(() => {
     if (!user?.id) return;
 
-    // Check for active ride first
+    const loadFromRide = async (ride: { id: string; rider_id: string } | null) => {
+      if (!ride) {
+        setActiveRideMessage(null);
+        return;
+      }
+
+      const [{ data: profile }, { count }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('first_name, last_name')
+          .eq('user_id', ride.rider_id)
+          .maybeSingle(),
+        supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('ride_id', ride.id)
+          .eq('type', 'ride_message')
+          .eq('is_read', false),
+      ]);
+
+      setActiveRideMessage({
+        rideId: ride.id,
+        riderId: ride.rider_id,
+        riderName: profile
+          ? `${profile.first_name || ''} ${profile.last_name?.[0] || ''}.`.trim()
+          : 'Rider',
+        unreadCount: count || 0,
+        lastMessage: '',
+        lastMessageTime: '',
+      });
+    };
+
+    // Check for active ride first (and anytime we need to recover state)
     const fetchActiveRide = async () => {
       const { data: ride } = await supabase
         .from('rides')
         .select('id, rider_id')
         .eq('driver_id', user.id)
         .in('status', ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'])
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (ride) {
-        // Get rider info
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('first_name, last_name')
-          .eq('user_id', ride.rider_id)
-          .single();
-
-        // Get unread message count
-        const { count } = await supabase
-          .from('notifications')
-          .select('*', { count: 'exact', head: true })
-          .eq('user_id', user.id)
-          .eq('ride_id', ride.id)
-          .eq('type', 'ride_message')
-          .eq('is_read', false);
-
-        setActiveRideMessage({
-          rideId: ride.id,
-          riderId: ride.rider_id,
-          riderName: profile ? `${profile.first_name || ''} ${profile.last_name?.[0] || ''}.`.trim() : 'Rider',
-          unreadCount: count || 0,
-          lastMessage: '',
-          lastMessageTime: '',
-        });
-      }
+      await loadFromRide(ride ?? null);
     };
 
     fetchActiveRide();
+
+    // If the driver opens the app BEFORE a ride becomes active, we must still attach later.
+    // Subscribe to ride updates for this driver and refresh active ride state.
+    const ridesChannel = supabase
+      .channel(`driver-rides-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'rides',
+          filter: `driver_id=eq.${user.id}`,
+        },
+        () => {
+          fetchActiveRide();
+        }
+      )
+      .subscribe();
 
     // Subscribe to new messages for this driver
     const channel = supabase
@@ -85,6 +112,11 @@ export default function DriverMessagesBadge() {
             // Show popup notification
             setLatestMessage(notification.message);
             setShowNotification(true);
+
+            // If we don't yet know the active ride (e.g. app opened early), recover now.
+            if (!activeRideMessage && notification.ride_id) {
+              fetchActiveRide();
+            }
             
             // Update unread count
             setActiveRideMessage(prev => prev ? {
@@ -102,8 +134,9 @@ export default function DriverMessagesBadge() {
 
     return () => {
       supabase.removeChannel(channel);
+      supabase.removeChannel(ridesChannel);
     };
-  }, [user?.id]);
+  }, [user?.id, activeRideMessage]);
 
   const markAsRead = async () => {
     if (!user?.id || !activeRideMessage?.rideId) return;
