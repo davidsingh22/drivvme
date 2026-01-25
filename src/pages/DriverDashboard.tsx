@@ -27,6 +27,7 @@ import { DriverLocationStatus } from '@/components/DriverLocationStatus';
 import DriverActiveRidePanel from '@/components/DriverActiveRidePanel';
 import DriverNavigationMap from '@/components/DriverNavigationMap';
 import DriverInbox from '@/components/DriverInbox';
+import DriverMessagesDebugPanel from '@/components/DriverMessagesDebugPanel';
 import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
@@ -911,6 +912,10 @@ const DriverDashboard = () => {
           </div>
 
           <div className="p-6 flex-1 overflow-y-auto">
+            {/* ========== DRIVER MESSAGES DEBUG PANEL ========== */}
+            {/* Always rendered - diagnoses messaging issues on-screen */}
+            <DriverMessagesDebugPanel />
+
             {/* ========== DRIVER ACTIVE RIDE PANEL ========== */}
             {/* Always shows Start/End Ride buttons for the assigned driver */}
             <DriverActiveRidePanel
