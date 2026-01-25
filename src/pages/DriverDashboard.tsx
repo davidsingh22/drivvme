@@ -92,8 +92,12 @@ const DriverDashboard = () => {
     isStreaming: isGPSStreaming,
     isConnected: isGPSConnected,
     secondsSinceLastUpdate: gpsSecondsSinceLastUpdate,
+    secondsSinceDbSync: gpsSecondsSinceDbSync,
     retryCount: gpsRetryCount,
     retry: retryGPS,
+    lastDbWriteError: gpsLastDbWriteError,
+    dbWriteRetryCount: gpsDbWriteRetryCount,
+    isDbSyncing: gpsIsDbSyncing,
   } = useDriverGPSStreaming({
     driverId: user?.id ?? null,
     rideId: currentRide?.id ?? null,
@@ -764,9 +768,13 @@ const DriverDashboard = () => {
                 isConnected={isGPSConnected}
                 position={gpsPosition}
                 secondsSinceLastUpdate={gpsSecondsSinceLastUpdate}
+                secondsSinceDbSync={gpsSecondsSinceDbSync}
                 retryCount={gpsRetryCount}
                 onRetry={retryGPS}
                 rideId={currentRide?.id ?? null}
+                lastDbWriteError={gpsLastDbWriteError}
+                dbWriteRetryCount={gpsDbWriteRetryCount}
+                isDbSyncing={gpsIsDbSyncing}
               />
             )}
             

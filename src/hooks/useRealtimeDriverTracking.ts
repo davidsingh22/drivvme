@@ -26,6 +26,8 @@ interface UseRealtimeDriverTrackingOptions {
 
 const ETA_REFRESH_INTERVAL = 10000; // 10 seconds
 const ETA_DISTANCE_THRESHOLD = 100; // 100 meters
+const NO_UPDATE_THRESHOLD = 10000; // 10 seconds
+const RESUBSCRIBE_DELAY = 1000; // 1 second delay before resubscribe
 
 // Haversine distance in meters
 const getDistanceMeters = (
@@ -68,6 +70,7 @@ export function useRealtimeDriverTracking({
   const [lastUpdateSeconds, setLastUpdateSeconds] = useState(0);
   const [dataSource, setDataSource] = useState<'REALTIME' | 'FALLBACK' | 'NONE'>('NONE');
   const [hasNoUpdatesError, setHasNoUpdatesError] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   const { token: mapboxToken } = useMapboxToken();
   const lastETAPositionRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -75,6 +78,9 @@ export function useRealtimeDriverTracking({
   const updateTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const lastRealtimeUpdateRef = useRef<number>(0);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const resubscribeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const subscriptionCountRef = useRef<number>(0);
 
   // Fetch ETA from Mapbox Directions API
   const fetchETA = useCallback(async (
@@ -133,6 +139,102 @@ export function useRealtimeDriverTracking({
     }
   }, [mapboxToken, eta]);
 
+  // Subscribe to realtime updates
+  const subscribe = useCallback(() => {
+    if (!rideId || !enabled) return;
+
+    // Remove existing channel if any
+    if (channelRef.current) {
+      supabase.removeChannel(channelRef.current);
+      channelRef.current = null;
+    }
+
+    subscriptionCountRef.current += 1;
+    const subscriptionId = subscriptionCountRef.current;
+    console.log(`[Tracking] Subscribing to ride_locations for rideId: ${rideId} (sub #${subscriptionId})`);
+    setIsReconnecting(false);
+
+    const handleLocationPayload = (payload: any) => {
+      const updated = payload.new as {
+        lat: number;
+        lng: number;
+        speed: number | null;
+        accuracy: number | null;
+        heading: number | null;
+        created_at: string;
+        updated_at?: string;
+      };
+
+      console.log(`[Tracking] Realtime location update (sub #${subscriptionId}):`, updated);
+      
+      const location: DriverLocation = {
+        lat: updated.lat,
+        lng: updated.lng,
+        speed: updated.speed,
+        accuracy: updated.accuracy,
+        heading: updated.heading,
+        updatedAt: new Date(updated.updated_at || updated.created_at).getTime(),
+      };
+      setDriverLocation(location);
+      setIsConnected(true);
+      setDataSource('REALTIME');
+      setLastUpdateSeconds(0);
+      setHasNoUpdatesError(false);
+      setIsReconnecting(false);
+      lastRealtimeUpdateRef.current = Date.now();
+
+      // Update ETA when driver moves
+      if (targetLocation) {
+        fetchETA(location, targetLocation);
+      }
+    };
+
+    const channel = supabase
+      .channel(`ride-locations-realtime-${rideId}-${subscriptionId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'ride_locations',
+          filter: `ride_id=eq.${rideId}`,
+        },
+        handleLocationPayload
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'ride_locations',
+          filter: `ride_id=eq.${rideId}`,
+        },
+        handleLocationPayload
+      )
+      .subscribe((status) => {
+        console.log(`[Tracking] Realtime subscription status (sub #${subscriptionId}):`, status);
+        setIsConnected(status === 'SUBSCRIBED');
+      });
+
+    channelRef.current = channel;
+  }, [rideId, enabled, targetLocation, fetchETA]);
+
+  // Resubscribe function
+  const resubscribe = useCallback(() => {
+    console.log('[Tracking] Resubscribing to realtime channel...');
+    setIsReconnecting(true);
+    
+    // Clear existing timeout
+    if (resubscribeTimeoutRef.current) {
+      clearTimeout(resubscribeTimeoutRef.current);
+    }
+    
+    // Small delay before resubscribe to avoid hammering
+    resubscribeTimeoutRef.current = setTimeout(() => {
+      subscribe();
+    }, RESUBSCRIBE_DELAY);
+  }, [subscribe]);
+
   // Fetch initial driver location from ride_locations or fallback to driver_profiles
   useEffect(() => {
     if (!enabled) return;
@@ -143,7 +245,7 @@ export function useRealtimeDriverTracking({
       if (rideId) {
         const { data: locData } = await supabase
           .from('ride_locations')
-          .select('lat, lng, speed, accuracy, heading, created_at')
+          .select('lat, lng, speed, accuracy, heading, created_at, updated_at')
           .eq('ride_id', rideId)
           .order('created_at', { ascending: false })
           .limit(1)
@@ -156,7 +258,7 @@ export function useRealtimeDriverTracking({
             speed: locData.speed,
             accuracy: locData.accuracy,
             heading: locData.heading,
-            updatedAt: new Date(locData.created_at).getTime(),
+            updatedAt: new Date(locData.updated_at || locData.created_at).getTime(),
           };
           setDriverLocation(location);
           setIsConnected(true);
@@ -199,79 +301,24 @@ export function useRealtimeDriverTracking({
     fetchInitial();
   }, [rideId, driverId, enabled, targetLocation, fetchETA]);
 
-  // Subscribe to realtime ride_locations updates (INSERT + UPDATE for UPSERT)
+  // Subscribe to realtime ride_locations updates
   useEffect(() => {
     if (!rideId || !enabled) {
       return;
     }
 
-    console.log('[Tracking] Subscribing to ride_locations for rideId:', rideId);
-
-    const handleLocationPayload = (payload: any) => {
-      const updated = payload.new as {
-        lat: number;
-        lng: number;
-        speed: number | null;
-        accuracy: number | null;
-        heading: number | null;
-        created_at: string;
-        updated_at?: string;
-      };
-
-      console.log('[Tracking] Realtime location update:', updated);
-      
-      const location: DriverLocation = {
-        lat: updated.lat,
-        lng: updated.lng,
-        speed: updated.speed,
-        accuracy: updated.accuracy,
-        heading: updated.heading,
-        updatedAt: new Date(updated.updated_at || updated.created_at).getTime(),
-      };
-      setDriverLocation(location);
-      setIsConnected(true);
-      setDataSource('REALTIME');
-      setLastUpdateSeconds(0);
-      setHasNoUpdatesError(false);
-      lastRealtimeUpdateRef.current = Date.now();
-
-      // Update ETA when driver moves
-      if (targetLocation) {
-        fetchETA(location, targetLocation);
-      }
-    };
-
-    const channel = supabase
-      .channel(`ride-locations-realtime-${rideId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'ride_locations',
-          filter: `ride_id=eq.${rideId}`,
-        },
-        handleLocationPayload
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'ride_locations',
-          filter: `ride_id=eq.${rideId}`,
-        },
-        handleLocationPayload
-      )
-      .subscribe((status) => {
-        console.log('[Tracking] Realtime subscription status:', status);
-        setIsConnected(status === 'SUBSCRIBED');
-      });
+    subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      if (resubscribeTimeoutRef.current) {
+        clearTimeout(resubscribeTimeoutRef.current);
+      }
     };
-  }, [rideId, enabled, targetLocation, fetchETA]);
+  }, [rideId, enabled, subscribe]);
 
   // Fallback subscription to driver_profiles (if no ride_locations updates)
   useEffect(() => {
@@ -339,19 +386,23 @@ export function useRealtimeDriverTracking({
     };
   }, [driverLocation, targetLocation, enabled, fetchETA]);
 
-  // Track seconds since last update + detect 10s error
+  // Track seconds since last update + detect 10s error + auto-resubscribe
   useEffect(() => {
     if (!enabled || !driverLocation) return;
 
     updateTimerRef.current = setInterval(() => {
-      setLastUpdateSeconds(prev => {
-        const newVal = prev + 1;
-        // Set error if no updates for 10+ seconds
-        if (newVal >= 10) {
-          setHasNoUpdatesError(true);
+      const timeSinceUpdate = Date.now() - lastRealtimeUpdateRef.current;
+      const seconds = Math.floor(timeSinceUpdate / 1000);
+      setLastUpdateSeconds(seconds);
+      
+      // Set error and trigger resubscribe if no updates for 10+ seconds
+      if (timeSinceUpdate >= NO_UPDATE_THRESHOLD) {
+        setHasNoUpdatesError(true);
+        // Auto-resubscribe once when we hit the threshold
+        if (!isReconnecting && channelRef.current) {
+          resubscribe();
         }
-        return newVal;
-      });
+      }
     }, 1000);
 
     return () => {
@@ -359,7 +410,35 @@ export function useRealtimeDriverTracking({
         clearInterval(updateTimerRef.current);
       }
     };
-  }, [enabled, driverLocation]);
+  }, [enabled, driverLocation, isReconnecting, resubscribe]);
+
+  // Resubscribe on window 'online' event
+  useEffect(() => {
+    if (!enabled || !rideId) return;
+
+    const handleOnline = () => {
+      console.log('[Tracking] Network online - resubscribing');
+      resubscribe();
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [enabled, rideId, resubscribe]);
+
+  // Resubscribe on visibility change (tab becomes visible)
+  useEffect(() => {
+    if (!enabled || !rideId) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Tracking] Tab visible - resubscribing');
+        resubscribe();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [enabled, rideId, resubscribe]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -372,6 +451,12 @@ export function useRealtimeDriverTracking({
       }
       if (updateTimerRef.current) {
         clearInterval(updateTimerRef.current);
+      }
+      if (resubscribeTimeoutRef.current) {
+        clearTimeout(resubscribeTimeoutRef.current);
+      }
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
       }
     };
   }, []);
@@ -388,6 +473,8 @@ export function useRealtimeDriverTracking({
     lastUpdateSeconds,
     dataSource,
     hasNoUpdatesError,
+    isReconnecting,
     recenter,
+    resubscribe,
   };
 }

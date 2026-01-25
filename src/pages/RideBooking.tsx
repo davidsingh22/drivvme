@@ -90,6 +90,8 @@ const RideBooking = () => {
     lastUpdateSeconds,
     dataSource,
     hasNoUpdatesError,
+    isReconnecting,
+    resubscribe,
   } = useRealtimeDriverTracking({
     rideId: currentRide?.id ?? null,
     driverId: currentRide?.driver_id ?? null,
@@ -1005,11 +1007,23 @@ const RideBooking = () => {
         {/* Connecting to driver message - shown when no updates for 10+ seconds */}
         {hasNoUpdatesError && !showDebug && (
           <div className="absolute top-4 left-4 right-4 z-20">
-            <div className="bg-muted/90 backdrop-blur-sm rounded-lg px-4 py-3 flex items-center gap-3">
-              <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-              <span className="text-sm text-muted-foreground">
-                {language === 'fr' ? 'Connexion à la position du chauffeur…' : 'Connecting to driver location…'}
-              </span>
+            <div className="bg-muted/90 backdrop-blur-sm rounded-lg px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                <span className="text-sm text-muted-foreground">
+                  {isReconnecting 
+                    ? (language === 'fr' ? 'Reconnexion…' : 'Reconnecting…')
+                    : (language === 'fr' ? 'Connexion à la position du chauffeur…' : 'Connecting to driver location…')
+                  }
+                </span>
+              </div>
+              {/* Manual retry button */}
+              <button 
+                onClick={resubscribe}
+                className="text-xs text-primary hover:underline"
+              >
+                {language === 'fr' ? 'Réessayer' : 'Retry'}
+              </button>
             </div>
           </div>
         )}
