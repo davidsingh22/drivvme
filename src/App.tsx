@@ -17,6 +17,7 @@ import Earnings from "./pages/Earnings";
 import AdminDashboard from "./pages/AdminDashboard";
 import AdminRefunds from "./pages/AdminRefunds";
 import NotFound from "./pages/NotFound";
+import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 const queryClient = new QueryClient();
 
@@ -30,7 +31,14 @@ const AppRoutes = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/ride" element={<RideBooking />} />
-        <Route path="/driver" element={<DriverDashboard />} />
+        <Route
+          path="/driver"
+          element={
+            <RouteErrorBoundary title="Driver dashboard error">
+              <DriverDashboard />
+            </RouteErrorBoundary>
+          }
+        />
         <Route path="/history" element={<RideHistory />} />
         <Route path="/earnings" element={<Earnings />} />
         <Route path="/admin" element={<AdminDashboard />} />
