@@ -50,6 +50,42 @@ export type Database = {
         }
         Relationships: []
       }
+      driver_agreements: {
+        Row: {
+          agrees_to_terms: boolean
+          created_at: string
+          driver_id: string
+          id: string
+          ip_address: string | null
+          is_independent_contractor: boolean
+          is_responsible_for_taxes: boolean
+          signed_at: string
+          user_agent: string | null
+        }
+        Insert: {
+          agrees_to_terms?: boolean
+          created_at?: string
+          driver_id: string
+          id?: string
+          ip_address?: string | null
+          is_independent_contractor?: boolean
+          is_responsible_for_taxes?: boolean
+          signed_at?: string
+          user_agent?: string | null
+        }
+        Update: {
+          agrees_to_terms?: boolean
+          created_at?: string
+          driver_id?: string
+          id?: string
+          ip_address?: string | null
+          is_independent_contractor?: boolean
+          is_responsible_for_taxes?: boolean
+          signed_at?: string
+          user_agent?: string | null
+        }
+        Relationships: []
+      }
       driver_documents: {
         Row: {
           created_at: string
@@ -127,16 +163,22 @@ export type Database = {
       }
       driver_profiles: {
         Row: {
+          agreement_accepted: boolean | null
+          agreement_accepted_at: string | null
+          application_status: string | null
           average_rating: number | null
           created_at: string
           current_lat: number | null
           current_lng: number | null
+          driver_license_url: string | null
+          has_criminal_record: boolean | null
           id: string
           is_online: boolean
           is_verified: boolean
           license_number: string | null
           license_plate: string | null
           priority_driver_until: string | null
+          profile_picture_url: string | null
           stripe_account_id: string | null
           total_earnings: number | null
           total_rides: number | null
@@ -148,16 +190,22 @@ export type Database = {
           vehicle_year: number | null
         }
         Insert: {
+          agreement_accepted?: boolean | null
+          agreement_accepted_at?: string | null
+          application_status?: string | null
           average_rating?: number | null
           created_at?: string
           current_lat?: number | null
           current_lng?: number | null
+          driver_license_url?: string | null
+          has_criminal_record?: boolean | null
           id?: string
           is_online?: boolean
           is_verified?: boolean
           license_number?: string | null
           license_plate?: string | null
           priority_driver_until?: string | null
+          profile_picture_url?: string | null
           stripe_account_id?: string | null
           total_earnings?: number | null
           total_rides?: number | null
@@ -169,16 +217,22 @@ export type Database = {
           vehicle_year?: number | null
         }
         Update: {
+          agreement_accepted?: boolean | null
+          agreement_accepted_at?: string | null
+          application_status?: string | null
           average_rating?: number | null
           created_at?: string
           current_lat?: number | null
           current_lng?: number | null
+          driver_license_url?: string | null
+          has_criminal_record?: boolean | null
           id?: string
           is_online?: boolean
           is_verified?: boolean
           license_number?: string | null
           license_plate?: string | null
           priority_driver_until?: string | null
+          profile_picture_url?: string | null
           stripe_account_id?: string | null
           total_earnings?: number | null
           total_rides?: number | null

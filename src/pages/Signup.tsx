@@ -1,19 +1,30 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Eye, EyeOff, Car, User } from 'lucide-react';
+import { Car, User, ArrowLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import Logo from '@/components/Logo';
 import LanguageToggle from '@/components/LanguageToggle';
+import PasswordInput from '@/components/signup/PasswordInput';
+import DriverLicenseUpload from '@/components/signup/DriverLicenseUpload';
+import ProfilePictureUpload from '@/components/signup/ProfilePictureUpload';
+import CriminalRecordQuestion from '@/components/signup/CriminalRecordQuestion';
+import DriverAgreement from '@/components/signup/DriverAgreement';
+import ApplicationReviewPage from '@/components/signup/ApplicationReviewPage';
+import { useToast } from '@/hooks/use-toast';
+
+type DriverSignupStep = 'info' | 'agreement' | 'review';
 
 const Signup = () => {
   const { t } = useLanguage();
   const { signUp, isLoading } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [searchParams] = useSearchParams();
   
   const [role, setRole] = useState<'rider' | 'driver'>(
@@ -25,7 +36,6 @@ const Signup = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   
   // Driver-specific fields
@@ -33,38 +43,326 @@ const Signup = () => {
   const [vehicleModel, setVehicleModel] = useState('');
   const [vehicleColor, setVehicleColor] = useState('');
   const [licensePlate, setLicensePlate] = useState('');
+  
+  // New driver signup fields
+  const [profilePicture, setProfilePicture] = useState<File | null>(null);
+  const [driverLicense, setDriverLicense] = useState<File | null>(null);
+  const [hasCriminalRecord, setHasCriminalRecord] = useState<boolean | null>(null);
+  const [driverStep, setDriverStep] = useState<DriverSignupStep>('info');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Store created user ID for later steps
+  const [createdUserId, setCreatedUserId] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Password validation
+  const isPasswordValid = (pwd: string) => {
+    return pwd.length >= 7 && /\d/.test(pwd);
+  };
+
+  // Validate rider form
+  const validateRiderForm = () => {
+    if (!firstName.trim()) {
+      setError('First name is required');
+      return false;
+    }
+    if (!lastName.trim()) {
+      setError('Last name is required');
+      return false;
+    }
+    if (!email.trim()) {
+      setError('Email is required');
+      return false;
+    }
+    if (!phone.trim()) {
+      setError('Phone number is required');
+      return false;
+    }
+    if (!isPasswordValid(password)) {
+      setError('Password must be at least 7 characters with at least 1 number');
+      return false;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return false;
+    }
+    return true;
+  };
+
+  // Validate driver form
+  const validateDriverForm = () => {
+    if (!firstName.trim()) {
+      setError('First name is required');
+      return false;
+    }
+    if (!lastName.trim()) {
+      setError('Last name is required');
+      return false;
+    }
+    if (!email.trim()) {
+      setError('Email is required');
+      return false;
+    }
+    if (!phone.trim()) {
+      setError('Phone number is required');
+      return false;
+    }
+    if (!isPasswordValid(password)) {
+      setError('Password must be at least 7 characters with at least 1 number');
+      return false;
+    }
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
+      return false;
+    }
+    if (!vehicleMake.trim() || !vehicleModel.trim() || !vehicleColor.trim() || !licensePlate.trim()) {
+      setError('Please fill in all vehicle information');
+      return false;
+    }
+    if (!profilePicture) {
+      setError('Profile picture is required');
+      return false;
+    }
+    if (!driverLicense) {
+      setError('Driver\'s license is required');
+      return false;
+    }
+    if (hasCriminalRecord === null) {
+      setError('Please answer the criminal record question');
+      return false;
+    }
+    return true;
+  };
+
+  const handleRiderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-
-    // Driver-specific validation
-    if (role === 'driver') {
-      if (!vehicleMake.trim() || !vehicleModel.trim() || !vehicleColor.trim() || !licensePlate.trim()) {
-        setError('Please fill in all vehicle information');
-        return;
-      }
-    }
+    if (!validateRiderForm()) return;
 
     try {
-      await signUp(email, password, role, firstName, lastName, phone, 
-        role === 'driver' ? { vehicleMake, vehicleModel, vehicleColor, licensePlate } : undefined);
-      // Navigate immediately after signup - don't wait for roles to load
-      navigate(role === 'driver' ? '/driver' : '/ride', { replace: true });
+      await signUp(email, password, 'rider', firstName, lastName, phone);
+      navigate('/ride', { replace: true });
     } catch (err: any) {
       setError(err.message);
     }
   };
+
+  const handleDriverInfoSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    if (!validateDriverForm()) return;
+
+    setIsSubmitting(true);
+
+    try {
+      // Create the user account first
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+
+      if (authError) throw authError;
+      if (!authData.user) throw new Error('Failed to create account');
+
+      const userId = authData.user.id;
+      setCreatedUserId(userId);
+
+      // Update profile
+      await supabase
+        .from('profiles')
+        .update({
+          first_name: firstName,
+          last_name: lastName,
+          phone_number: phone,
+        })
+        .eq('user_id', userId);
+
+      // Add driver role
+      await supabase
+        .from('user_roles')
+        .insert({ user_id: userId, role: 'driver' });
+
+      // Upload profile picture to avatars bucket
+      const profilePicExt = profilePicture!.name.split('.').pop();
+      const profilePicPath = `${userId}/avatar.${profilePicExt}`;
+      
+      const { error: profilePicError } = await supabase.storage
+        .from('avatars')
+        .upload(profilePicPath, profilePicture!, { upsert: true });
+
+      if (profilePicError) {
+        console.error('Profile picture upload error:', profilePicError);
+      }
+
+      const { data: profilePicUrl } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(profilePicPath);
+
+      // Upload driver license
+      const licenseExt = driverLicense!.name.split('.').pop();
+      const licensePath = `${userId}/license.${licenseExt}`;
+      
+      const { error: licenseError } = await supabase.storage
+        .from('driver-licenses')
+        .upload(licensePath, driverLicense!, { upsert: true });
+
+      if (licenseError) {
+        console.error('License upload error:', licenseError);
+        throw new Error('Failed to upload driver license');
+      }
+
+      // Get signed URL for admin access (private bucket)
+      const { data: licenseUrl } = await supabase.storage
+        .from('driver-licenses')
+        .createSignedUrl(licensePath, 60 * 60 * 24 * 365); // 1 year
+
+      // Create driver profile with all info
+      await supabase
+        .from('driver_profiles')
+        .insert({ 
+          user_id: userId,
+          vehicle_make: vehicleMake,
+          vehicle_model: vehicleModel,
+          vehicle_color: vehicleColor,
+          license_plate: licensePlate,
+          profile_picture_url: profilePicUrl?.publicUrl || null,
+          driver_license_url: licensePath,
+          has_criminal_record: hasCriminalRecord,
+          application_status: 'pending',
+        });
+
+      // Update profiles with avatar url
+      await supabase
+        .from('profiles')
+        .update({ avatar_url: profilePicUrl?.publicUrl })
+        .eq('user_id', userId);
+
+      // Move to agreement step
+      setDriverStep('agreement');
+    } catch (err: any) {
+      console.error('Signup error:', err);
+      setError(err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAgreementComplete = async (agreementData: {
+    isIndependentContractor: boolean;
+    isResponsibleForTaxes: boolean;
+    agreesToTerms: boolean;
+  }) => {
+    if (!createdUserId) {
+      setError('Session error. Please try again.');
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Store the agreement
+      await supabase
+        .from('driver_agreements')
+        .insert({
+          driver_id: createdUserId,
+          is_independent_contractor: agreementData.isIndependentContractor,
+          is_responsible_for_taxes: agreementData.isResponsibleForTaxes,
+          agrees_to_terms: agreementData.agreesToTerms,
+          user_agent: navigator.userAgent,
+        });
+
+      // Update driver profile to mark agreement accepted
+      await supabase
+        .from('driver_profiles')
+        .update({
+          agreement_accepted: true,
+          agreement_accepted_at: new Date().toISOString(),
+        })
+        .eq('user_id', createdUserId);
+
+      toast({
+        title: 'Application Submitted!',
+        description: 'Your driver application has been submitted for review.',
+      });
+
+      // Move to review page
+      setDriverStep('review');
+    } catch (err: any) {
+      console.error('Agreement error:', err);
+      setError(err.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Reset driver step when switching roles
+  useEffect(() => {
+    setDriverStep('info');
+    setError('');
+  }, [role]);
+
+  // Render driver agreement step
+  if (role === 'driver' && driverStep === 'agreement') {
+    return (
+      <div className="min-h-screen gradient-hero flex flex-col">
+        <div className="flex items-center justify-between p-4">
+          <button 
+            onClick={() => setDriverStep('info')}
+            className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-5 w-5" />
+            Back
+          </button>
+          <LanguageToggle />
+        </div>
+
+        <div className="flex-1 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-2xl"
+          >
+            <div className="bg-card rounded-2xl p-8 shadow-card border border-border">
+              <DriverAgreement 
+                onComplete={handleAgreementComplete}
+                isLoading={isSubmitting}
+              />
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
+
+  // Render application review page
+  if (role === 'driver' && driverStep === 'review') {
+    return (
+      <div className="min-h-screen gradient-hero flex flex-col">
+        <div className="flex items-center justify-between p-4">
+          <Link to="/">
+            <Logo />
+          </Link>
+          <LanguageToggle />
+        </div>
+
+        <div className="flex-1 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-md"
+          >
+            <div className="bg-card rounded-2xl p-8 shadow-card border border-border">
+              <ApplicationReviewPage />
+            </div>
+          </motion.div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen gradient-hero flex flex-col">
@@ -119,10 +417,10 @@ const Signup = () => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={role === 'rider' ? handleRiderSubmit : handleDriverInfoSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="firstName">{t('auth.firstName')}</Label>
+                  <Label htmlFor="firstName">{t('auth.firstName')} *</Label>
                   <Input
                     id="firstName"
                     type="text"
@@ -133,7 +431,7 @@ const Signup = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="lastName">{t('auth.lastName')}</Label>
+                  <Label htmlFor="lastName">{t('auth.lastName')} *</Label>
                   <Input
                     id="lastName"
                     type="text"
@@ -146,7 +444,7 @@ const Signup = () => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">{t('auth.email')}</Label>
+                <Label htmlFor="email">{t('auth.email')} *</Label>
                 <Input
                   id="email"
                   type="email"
@@ -158,12 +456,13 @@ const Signup = () => {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="phone">{t('auth.phone')}</Label>
+                <Label htmlFor="phone">{t('auth.phone')} *</Label>
                 <Input
                   id="phone"
                   type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
+                  required
                   className="bg-background"
                 />
               </div>
@@ -228,36 +527,41 @@ const Signup = () => {
                       />
                     </div>
                   </div>
+
+                  <div className="pt-4 border-t border-border">
+                    <p className="text-sm font-medium text-muted-foreground mb-3">Documents & Verification</p>
+                  </div>
+
+                  <ProfilePictureUpload
+                    onFileSelect={setProfilePicture}
+                    selectedFile={profilePicture}
+                    required
+                  />
+
+                  <DriverLicenseUpload
+                    onFileSelect={setDriverLicense}
+                    selectedFile={driverLicense}
+                    label="Driver's License"
+                    required
+                  />
+
+                  <CriminalRecordQuestion
+                    value={hasCriminalRecord}
+                    onChange={setHasCriminalRecord}
+                  />
                 </>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="password">{t('auth.password')}</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    className="bg-background pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-5 w-5" />
-                    ) : (
-                      <Eye className="h-5 w-5" />
-                    )}
-                  </button>
-                </div>
-              </div>
+              <PasswordInput
+                id="password"
+                label={`${t('auth.password')} *`}
+                value={password}
+                onChange={setPassword}
+                showValidation
+              />
 
               <div className="space-y-2">
-                <Label htmlFor="confirmPassword">{t('auth.confirmPassword')}</Label>
+                <Label htmlFor="confirmPassword">{t('auth.confirmPassword')} *</Label>
                 <Input
                   id="confirmPassword"
                   type="password"
@@ -275,9 +579,16 @@ const Signup = () => {
               <Button
                 type="submit"
                 className="w-full gradient-primary shadow-button py-6"
-                disabled={isLoading}
+                disabled={isLoading || isSubmitting}
               >
-                {isLoading ? t('common.loading') : t('auth.signupBtn')}
+                {(isLoading || isSubmitting) ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {role === 'driver' ? 'Creating Account...' : t('common.loading')}
+                  </>
+                ) : (
+                  role === 'driver' ? 'Continue to Agreement' : t('auth.signupBtn')
+                )}
               </Button>
             </form>
 
