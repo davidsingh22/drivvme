@@ -445,6 +445,7 @@ const RideBooking = () => {
   // Track rider's live location during active ride phases
   useEffect(() => {
     const shouldTrackRider = 
+      step === 'matched' ||
       step === 'arriving' || 
       step === 'arrived' || 
       step === 'inProgress';
@@ -455,11 +456,31 @@ const RideBooking = () => {
         navigator.geolocation.clearWatch(riderLocationWatchId.current);
         riderLocationWatchId.current = null;
       }
-      setRiderLiveLocation(null);
+      // Don't clear riderLiveLocation - keep last known position
       return;
     }
 
-    // Start watching rider's position
+    // If we already have a watch, don't create another
+    if (riderLocationWatchId.current !== null) return;
+
+    // First, try to get an immediate position reading
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setRiderLiveLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        });
+      },
+      () => {
+        // Fallback to pickup location if geolocation fails
+        if (pickup) {
+          setRiderLiveLocation({ lat: pickup.lat, lng: pickup.lng });
+        }
+      },
+      { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+    );
+
+    // Start watching rider's position with more lenient settings
     riderLocationWatchId.current = navigator.geolocation.watchPosition(
       (position) => {
         setRiderLiveLocation({
@@ -469,11 +490,15 @@ const RideBooking = () => {
       },
       (error) => {
         console.log('[RideBooking] Rider location watch error:', error.message);
+        // On error, fallback to pickup location if no location yet
+        if (!riderLiveLocation && pickup) {
+          setRiderLiveLocation({ lat: pickup.lat, lng: pickup.lng });
+        }
       },
       { 
-        enableHighAccuracy: true, 
-        timeout: 10000, 
-        maximumAge: 5000 
+        enableHighAccuracy: false, 
+        timeout: 30000, 
+        maximumAge: 30000 
       }
     );
 
@@ -483,7 +508,7 @@ const RideBooking = () => {
         riderLocationWatchId.current = null;
       }
     };
-  }, [step]);
+  }, [step, pickup]);
 
   const fetchDriverInfo = async (driverId: string) => {
     const { data: profile } = await supabase
@@ -828,7 +853,11 @@ const RideBooking = () => {
             pickup={pickup}
             dropoff={dropoff}
             driverLocation={driverLocation}
-            riderLocation={riderLiveLocation}
+            riderLocation={
+              (step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress') 
+                ? riderLiveLocation 
+                : null
+            }
             routeMode={
               step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' :
               step === 'inProgress' ? 'driver-to-dropoff' :

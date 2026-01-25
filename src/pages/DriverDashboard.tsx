@@ -255,9 +255,23 @@ const DriverDashboard = () => {
     }
   }, [driverProfile]);
 
-  // Get driver location
+  // Get driver location and update in database
   useEffect(() => {
-    if (!isOnline || !session) return;
+    if (!isOnline || !session || !user) return;
+
+    const updateLocationInDb = async (location: { lat: number; lng: number }) => {
+      const { error } = await supabase
+        .from('driver_profiles')
+        .update({
+          current_lat: location.lat,
+          current_lng: location.lng,
+        })
+        .eq('user_id', user.id);
+      
+      if (error) {
+        console.error('[DriverDashboard] Failed to update location:', error);
+      }
+    };
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -267,23 +281,15 @@ const DriverDashboard = () => {
         };
         setDriverLocation(location);
         
-        // Update location in database
-        if (user) {
-          supabase
-            .from('driver_profiles')
-            .update({
-              current_lat: location.lat,
-              current_lng: location.lng,
-            })
-            .eq('user_id', user.id);
-        }
+        // Update location in database (fire and forget, but properly execute)
+        void updateLocationInDb(location);
       },
-      (error) => console.error('Location error:', error),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
+      (error) => console.error('[DriverDashboard] Location error:', error),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [isOnline, user, session, currentRide, toast]);
+  }, [isOnline, user, session]);
 
   // Fetch available rides when online
   useEffect(() => {
