@@ -22,6 +22,7 @@ import LiveDriversMap from "@/pages/admin/LiveDriversMap";
 import DriverLive from "./pages/DriverLive";
 import NotFound from "./pages/NotFound";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
+import DriverFloatingGPSButton from "@/components/DriverFloatingGPSButton";
 
 const queryClient = new QueryClient();
 
@@ -78,6 +79,7 @@ const AppRoutes = () => {
   return (
     <>
       <RouteRestorer />
+      <DriverFloatingGPSButton />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
