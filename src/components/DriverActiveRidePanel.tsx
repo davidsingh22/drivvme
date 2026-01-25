@@ -516,6 +516,21 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
 
         {/* Action Buttons */}
         <div className="space-y-2">
+          {/* Messages - REQUIRED: visible inside Active Ride card above End Ride */}
+          <Button
+            variant="outline"
+            className="w-full py-5 text-base font-bold relative"
+            onClick={() => navigate(`/driver/messages?rideId=${activeRide.id}`)}
+          >
+            <MessageSquare className="h-5 w-5 mr-2" />
+            {language === 'fr' ? 'Messages' : 'Messages'}
+            {unreadMessages > 0 && (
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 h-6 min-w-6 px-2 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-bold">
+                {unreadMessages > 9 ? '9+' : unreadMessages}
+              </span>
+            )}
+          </Button>
+
           {/* Start Ride - only show when arrived at pickup */}
           {activeRide.status === 'arrived' && (
             <Button
