@@ -27,6 +27,7 @@ import { DriverLocationStatus } from '@/components/DriverLocationStatus';
 import DriverActiveRidePanel from '@/components/DriverActiveRidePanel';
 import DriverNavigationMap from '@/components/DriverNavigationMap';
 import DriverInbox from '@/components/DriverInbox';
+import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
 
@@ -915,6 +916,10 @@ const DriverDashboard = () => {
                 setCurrentRide(ride as RideRequest);
               }}
             />
+
+            {/* ========== RIDE MESSAGES PANEL ========== */}
+            {/* Always rendered - shows messaging UI or explanation why not available */}
+            <RideMessagesPanel />
 
             {/* GPS Navigation Button - Prominent when there's an active ride */}
             {currentRide && ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(currentRide.status) && (
