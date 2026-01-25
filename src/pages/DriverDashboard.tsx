@@ -17,6 +17,7 @@ import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
 import { useAlertSound } from '@/hooks/useAlertSound';
 import { DriverNewRideAlert } from '@/components/DriverNewRideAlert';
+import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 
 const PLATFORM_FEE = 5.00;
 
@@ -1136,6 +1137,9 @@ const DriverDashboard = () => {
         open={isProfileModalOpen} 
         onOpenChange={setIsProfileModalOpen} 
       />
+
+      {/* PWA Install Prompt for Drivers */}
+      <PWAInstallPrompt />
     </div>
   );
 };
