@@ -139,6 +139,7 @@ export default function InAppMessaging({
             title,
             message: newMessage.trim(),
             type: 'ride_message',
+            is_read: false,
           },
           {
             user_id: user.id,
