@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Wifi, WifiOff, Clock, Gauge, RefreshCw, Database, AlertTriangle, Check, Loader2 } from 'lucide-react';
+import { Wifi, WifiOff, Clock, Gauge, RefreshCw, Database, AlertTriangle, Check, Loader2, Send, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { GPSPosition } from '@/hooks/useDriverGPSStreaming';
@@ -13,12 +13,14 @@ interface DriverGPSStatusIndicatorProps {
   secondsSinceLastGpsFix: number | null;
   retryCount: number;
   onRetry: () => void;
+  onForceSend: () => void;
   rideId: string | null;
-  // New DB write status props
+  // DB write status props
   lastDbWriteError: string | null;
   dbWriteRetryCount: number;
   isDbSyncing: boolean;
   authStatus: 'ok' | 'signed_out';
+  historyWriteCount?: number;
 }
 
 export function DriverGPSStatusIndicator({
@@ -30,11 +32,13 @@ export function DriverGPSStatusIndicator({
   secondsSinceLastGpsFix,
   retryCount,
   onRetry,
+  onForceSend,
   rideId,
   lastDbWriteError,
   dbWriteRetryCount,
   isDbSyncing,
   authStatus,
+  historyWriteCount = 0,
 }: DriverGPSStatusIndicatorProps) {
   const { t } = useLanguage();
 
@@ -42,7 +46,7 @@ export function DriverGPSStatusIndicator({
   const getGpsStatus = (): 'ok' | 'warning' | 'error' => {
     if (!isStreaming) return 'error';
     if (!isConnected) return 'error';
-    if (secondsSinceLastUpdate > 10) return 'warning';
+    if (secondsSinceLastGpsFix !== null && secondsSinceLastGpsFix > 10) return 'warning';
     return 'ok';
   };
 
@@ -60,19 +64,19 @@ export function DriverGPSStatusIndicator({
 
   const getStatusColor = (status: 'ok' | 'warning' | 'error' | 'syncing') => {
     switch (status) {
-      case 'ok': return 'text-success';
-      case 'warning': return 'text-warning';
-      case 'error': return 'text-destructive';
-      case 'syncing': return 'text-primary';
+      case 'ok': return 'text-green-600';
+      case 'warning': return 'text-yellow-600';
+      case 'error': return 'text-red-600';
+      case 'syncing': return 'text-blue-600';
     }
   };
 
   const getStatusBgColor = (status: 'ok' | 'warning' | 'error' | 'syncing') => {
     switch (status) {
-      case 'ok': return 'bg-success/20 border-success/30';
-      case 'warning': return 'bg-warning/20 border-warning/30';
-      case 'error': return 'bg-destructive/20 border-destructive/30';
-      case 'syncing': return 'bg-primary/20 border-primary/30';
+      case 'ok': return 'bg-green-500/20 border-green-500/30';
+      case 'warning': return 'bg-yellow-500/20 border-yellow-500/30';
+      case 'error': return 'bg-red-500/20 border-red-500/30';
+      case 'syncing': return 'bg-blue-500/20 border-blue-500/30';
     }
   };
 
@@ -96,8 +100,16 @@ export function DriverGPSStatusIndicator({
       className="mx-4 mb-3"
     >
       <div className={`rounded-xl border p-3 ${getStatusBgColor(overallStatus)}`}>
+        {/* RideId Display */}
+        {rideId && (
+          <div className="mb-2 text-xs text-muted-foreground flex items-center gap-1.5">
+            <MapPin className="w-3 h-3" />
+            <span className="font-mono truncate">RideId: {rideId}</span>
+          </div>
+        )}
+
         {/* Main Status Row */}
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           {/* GPS Status Chip */}
           <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${getStatusBgColor(gpsStatus)} ${getStatusColor(gpsStatus)}`}>
             {gpsStatus === 'ok' ? (
@@ -119,8 +131,6 @@ export function DriverGPSStatusIndicator({
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : dbStatus === 'ok' ? (
               <Check className="w-3.5 h-3.5" />
-            ) : dbStatus === 'warning' ? (
-              <AlertTriangle className="w-3.5 h-3.5" />
             ) : (
               <AlertTriangle className="w-3.5 h-3.5" />
             )}
@@ -137,10 +147,10 @@ export function DriverGPSStatusIndicator({
           {/* Last Sent Time - Big and Prominent */}
           <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-background/80 border ${
             secondsSinceDbSync !== null && secondsSinceDbSync <= 5 
-              ? 'border-success/50' 
+              ? 'border-green-500/50' 
               : secondsSinceDbSync !== null && secondsSinceDbSync <= 10
-              ? 'border-warning/50'
-              : 'border-destructive/50'
+              ? 'border-yellow-500/50'
+              : 'border-red-500/50'
           }`}>
             <Clock className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-bold">
@@ -156,19 +166,42 @@ export function DriverGPSStatusIndicator({
         </div>
 
         {/* Heartbeat details */}
-        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+        <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
           <div className="flex items-center justify-between rounded-md bg-background/50 border border-border/50 px-2 py-1">
-            <span>Last DB write</span>
-            <span className="font-mono text-foreground">
+            <span>DB write</span>
+            <span className={`font-mono ${secondsSinceDbSync !== null && secondsSinceDbSync <= 5 ? 'text-green-600' : secondsSinceDbSync !== null && secondsSinceDbSync <= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
               {secondsSinceDbSync === null ? '--' : `${secondsSinceDbSync}s`}
             </span>
           </div>
           <div className="flex items-center justify-between rounded-md bg-background/50 border border-border/50 px-2 py-1">
-            <span>Last GPS fix</span>
-            <span className="font-mono text-foreground">
+            <span>GPS fix</span>
+            <span className={`font-mono ${secondsSinceLastGpsFix !== null && secondsSinceLastGpsFix <= 5 ? 'text-green-600' : secondsSinceLastGpsFix !== null && secondsSinceLastGpsFix <= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
               {secondsSinceLastGpsFix === null ? '--' : `${secondsSinceLastGpsFix}s`}
             </span>
           </div>
+          <div className="flex items-center justify-between rounded-md bg-background/50 border border-border/50 px-2 py-1">
+            <span>Writes</span>
+            <span className="font-mono text-foreground">
+              {historyWriteCount}
+            </span>
+          </div>
+        </div>
+
+        {/* SEND LOCATION NOW Button - Always visible */}
+        <div className="mt-3">
+          <Button
+            onClick={onForceSend}
+            disabled={isDbSyncing || !position}
+            className="w-full bg-primary hover:bg-primary/90"
+            size="sm"
+          >
+            {isDbSyncing ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <Send className="w-4 h-4 mr-2" />
+            )}
+            SEND LOCATION NOW
+          </Button>
         </div>
 
         {/* Speed & Position Row */}
@@ -181,6 +214,9 @@ export function DriverGPSStatusIndicator({
               </div>
               <div className="text-muted-foreground">
                 ±{Math.round(position.accuracy)}m
+              </div>
+              <div className="text-muted-foreground font-mono text-[10px]">
+                {position.lat.toFixed(5)}, {position.lng.toFixed(5)}
               </div>
             </div>
 
@@ -206,16 +242,30 @@ export function DriverGPSStatusIndicator({
             animate={{ opacity: 1, height: 'auto' }}
             className="mt-2 pt-2 border-t border-border/30"
           >
-            <div className="flex items-start gap-2 text-xs text-destructive">
+            <div className="flex items-start gap-2 text-xs text-red-600">
               <Database className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
               <div>
                 <span className="font-medium">DB write failed: </span>
                 <span className="text-muted-foreground">{lastDbWriteError}</span>
                 {dbWriteRetryCount > 0 && (
-                  <span className="ml-1 text-warning">(retry #{dbWriteRetryCount})</span>
+                  <span className="ml-1 text-yellow-600">(retry #{dbWriteRetryCount})</span>
                 )}
               </div>
             </div>
+          </motion.div>
+        )}
+
+        {/* Auth signed out warning */}
+        {authStatus === 'signed_out' && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="mt-2 pt-2 border-t border-border/30"
+          >
+            <p className="text-xs text-red-600 flex items-center gap-1.5 font-medium">
+              <AlertTriangle className="w-4 h-4" />
+              Signed out – cannot send GPS
+            </p>
           </motion.div>
         )}
 
@@ -226,10 +276,10 @@ export function DriverGPSStatusIndicator({
             animate={{ opacity: 1, height: 'auto' }}
             className="mt-2 pt-2 border-t border-border/30"
           >
-            <p className="text-xs text-destructive flex items-center gap-1.5">
+            <p className="text-xs text-red-600 flex items-center gap-1.5">
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-destructive"></span>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
               </span>
               ⚠️ No active ride - location NOT being saved
             </p>
@@ -237,16 +287,16 @@ export function DriverGPSStatusIndicator({
         )}
 
         {/* Warning message if stale */}
-        {secondsSinceDbSync !== null && secondsSinceDbSync > 10 && !lastDbWriteError && (
+        {secondsSinceDbSync !== null && secondsSinceDbSync > 10 && !lastDbWriteError && authStatus === 'ok' && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
             className="mt-2 pt-2 border-t border-border/30"
           >
-            <p className="text-xs text-warning flex items-center gap-1.5">
+            <p className="text-xs text-yellow-600 flex items-center gap-1.5">
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-warning"></span>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-500 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-yellow-500"></span>
               </span>
               {t('riderMayNotSee') || "Rider may not see your current position"}
             </p>

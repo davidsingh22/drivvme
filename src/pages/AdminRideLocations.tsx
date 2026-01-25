@@ -19,21 +19,37 @@ interface LocationRow {
   updated_at: string;
 }
 
+interface HistoryRow {
+  id: string;
+  ride_id: string;
+  driver_id: string;
+  lat: number;
+  lng: number;
+  speed: number | null;
+  accuracy: number | null;
+  heading: number | null;
+  created_at: string;
+}
+
 type Status = 'none' | 'live' | 'stale';
 
 const AdminRideLocations = () => {
   const [rideId, setRideId] = useState('');
   const [activeRideId, setActiveRideId] = useState<string | null>(null);
   const [locationRow, setLocationRow] = useState<LocationRow | null>(null);
+  const [historyRows, setHistoryRows] = useState<HistoryRow[]>([]);
   const [secondsSince, setSecondsSince] = useState<number | null>(null);
   const [status, setStatus] = useState<Status>('none');
   const [updateCount, setUpdateCount] = useState(0);
+  const [historyCount, setHistoryCount] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const historyPollRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Fetch initial row when rideId is set
+  // Fetch initial row + history when rideId is set
   useEffect(() => {
     if (!activeRideId) {
       setLocationRow(null);
+      setHistoryRows([]);
       setStatus('none');
       return;
     }
@@ -62,7 +78,31 @@ const AdminRideLocations = () => {
       }
     };
 
+    const fetchHistory = async () => {
+      const { data, error } = await supabase
+        .from('ride_location_history')
+        .select('*')
+        .eq('ride_id', activeRideId)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (!error && data) {
+        setHistoryRows(data as HistoryRow[]);
+        setHistoryCount(data.length);
+      }
+    };
+
     fetchRow();
+    fetchHistory();
+
+    // Poll history every 3s
+    historyPollRef.current = setInterval(fetchHistory, 3000);
+
+    return () => {
+      if (historyPollRef.current) {
+        clearInterval(historyPollRef.current);
+      }
+    };
   }, [activeRideId]);
 
   // Subscribe to realtime updates (INSERT + UPDATE)
@@ -150,6 +190,7 @@ const AdminRideLocations = () => {
     if (rideId.trim()) {
       setActiveRideId(rideId.trim());
       setUpdateCount(0);
+      setHistoryCount(0);
     }
   };
 
@@ -182,7 +223,7 @@ const AdminRideLocations = () => {
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
-      <div className="container mx-auto px-4 pt-20 pb-8 max-w-3xl">
+      <div className="container mx-auto px-4 pt-20 pb-8 max-w-4xl">
         <h1 className="text-2xl font-bold mb-6">Admin: Ride Locations (Realtime Debug)</h1>
 
         {/* Ride ID Input */}
@@ -208,13 +249,14 @@ const AdminRideLocations = () => {
           <>
             {/* Status Banner */}
             <div className={`${statusConfig.bg} rounded-lg p-4 mb-6`}>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between flex-wrap gap-2">
                 <span className="text-white font-bold text-lg">
                   {statusConfig.text}
                 </span>
-                <span className="text-white/80 text-sm">
-                  Updates received: {updateCount}
-                </span>
+                <div className="flex gap-4 text-white/80 text-sm">
+                  <span>Realtime updates: {updateCount}</span>
+                  <span>History rows: {historyRows.length}</span>
+                </div>
               </div>
             </div>
 
@@ -231,33 +273,69 @@ const AdminRideLocations = () => {
               </p>
             </Card>
 
-            {/* Location Data Table */}
-            <Card className="overflow-hidden">
-              <div className="p-4 border-b border-border bg-muted/50">
-                <h2 className="font-semibold">Latest ride_locations row</h2>
-                <p className="text-xs text-muted-foreground font-mono">
-                  ride_id: {activeRideId}
-                </p>
-              </div>
+            <div className="grid gap-6 lg:grid-cols-2">
+              {/* Location Data Table */}
+              <Card className="overflow-hidden">
+                <div className="p-4 border-b border-border bg-muted/50">
+                  <h2 className="font-semibold">Latest ride_locations row</h2>
+                  <p className="text-xs text-muted-foreground font-mono">
+                    ride_id: {activeRideId}
+                  </p>
+                </div>
 
-              {locationRow ? (
-                <div className="divide-y divide-border">
-                  <Row label="ride_id" value={locationRow.ride_id} mono />
-                  <Row label="driver_id" value={locationRow.driver_id} mono />
-                  <Row label="lat" value={locationRow.lat.toFixed(6)} />
-                  <Row label="lng" value={locationRow.lng.toFixed(6)} />
-                  <Row label="speed" value={locationRow.speed?.toFixed(2) ?? 'null'} />
-                  <Row label="accuracy" value={locationRow.accuracy?.toFixed(1) ?? 'null'} />
-                  <Row label="heading" value={locationRow.heading?.toFixed(1) ?? 'null'} />
-                  <Row label="created_at" value={locationRow.created_at} />
-                  <Row label="updated_at" value={locationRow.updated_at} highlight />
+                {locationRow ? (
+                  <div className="divide-y divide-border">
+                    <Row label="ride_id" value={locationRow.ride_id} mono />
+                    <Row label="driver_id" value={locationRow.driver_id} mono />
+                    <Row label="lat" value={locationRow.lat.toFixed(6)} />
+                    <Row label="lng" value={locationRow.lng.toFixed(6)} />
+                    <Row label="speed" value={locationRow.speed?.toFixed(2) ?? 'null'} />
+                    <Row label="accuracy" value={locationRow.accuracy?.toFixed(1) ?? 'null'} />
+                    <Row label="heading" value={locationRow.heading?.toFixed(1) ?? 'null'} />
+                    <Row label="created_at" value={locationRow.created_at} />
+                    <Row label="updated_at" value={locationRow.updated_at} highlight />
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-muted-foreground">
+                    No rows found for this ride_id
+                  </div>
+                )}
+              </Card>
+
+              {/* History Table */}
+              <Card className="overflow-hidden">
+                <div className="p-4 border-b border-border bg-muted/50">
+                  <h2 className="font-semibold">Last 5 ride_location_history</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Append-only inserts (refreshes every 3s)
+                  </p>
                 </div>
-              ) : (
-                <div className="p-8 text-center text-muted-foreground">
-                  No rows found for this ride_id
-                </div>
-              )}
-            </Card>
+
+                {historyRows.length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {historyRows.map((row, idx) => (
+                      <div key={row.id} className={`px-4 py-2 ${idx === 0 ? 'bg-green-500/10' : ''}`}>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-mono text-muted-foreground">
+                            {new Date(row.created_at).toLocaleTimeString()}
+                          </span>
+                          <span className="font-mono">
+                            {row.lat.toFixed(5)}, {row.lng.toFixed(5)}
+                          </span>
+                          <span className="text-muted-foreground">
+                            {row.speed !== null ? `${(row.speed * 3.6).toFixed(0)} km/h` : '--'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center text-muted-foreground">
+                    No history rows found
+                  </div>
+                )}
+              </Card>
+            </div>
           </>
         )}
 

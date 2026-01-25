@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 export interface GPSPosition {
   lat: number;
@@ -19,11 +20,13 @@ interface GPSStreamingState {
   lastDbSyncTime: number | null;
   retryCount: number;
   secondsSinceLastUpdate: number;
-  // New: DB write status
+  // DB write status
   lastDbWriteError: string | null;
   dbWriteRetryCount: number;
   isDbSyncing: boolean;
   authStatus: 'ok' | 'signed_out';
+  // New: history write count for debugging
+  historyWriteCount: number;
 }
 
 interface UseDriverGPSStreamingOptions {
@@ -42,7 +45,7 @@ const RETRY_DELAY_MS = 2000;
 const DB_RETRY_FAST_DELAY_MS = 2000;
 const DB_RETRY_SLOW_DELAY_MS = 5000;
 const DB_RETRY_FAST_ATTEMPTS = 5;
-const HEARTBEAT_INTERVAL_MS = 3000;
+const HEARTBEAT_INTERVAL_MS = 3000; // Hard heartbeat every 3s
 
 // Haversine distance in meters
 const getDistanceMeters = (
@@ -80,6 +83,7 @@ export function useDriverGPSStreaming({
     dbWriteRetryCount: 0,
     isDbSyncing: false,
     authStatus: 'ok',
+    historyWriteCount: 0,
   });
 
   const watchIdRef = useRef<number | null>(null);
@@ -92,6 +96,7 @@ export function useDriverGPSStreaming({
   const pendingWriteRef = useRef<GPSPosition | null>(null);
   const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastGpsFixAtRef = useRef<number | null>(null);
+  const lastKnownPositionRef = useRef<GPSPosition | null>(null);
 
   // Keep rideId ref updated
   useEffect(() => {
@@ -117,7 +122,7 @@ export function useDriverGPSStreaming({
     };
   }, [state.isStreaming]);
 
-  // Write location to DB with retry logic
+  // Write location to DB with retry logic - DUAL WRITE: latest + history
   const writeToDb = useCallback(async (position: GPSPosition, retryAttempt = 0): Promise<boolean> => {
     if (!driverId) return false;
 
@@ -128,7 +133,13 @@ export function useDriverGPSStreaming({
     try {
       // Ensure we have a valid session before writing
       const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData.session;
+      let session = sessionData.session;
+
+      if (!session) {
+        // Try to refresh
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        session = refreshData.session;
+      }
 
       if (!session) {
         setState(prev => ({
@@ -141,11 +152,11 @@ export function useDriverGPSStreaming({
         return false;
       }
 
-      // Refresh session if it's about to expire (best-effort)
+      // Refresh session if it's about to expire
       const expiresAt = session.expires_at; // seconds
       if (typeof expiresAt === 'number') {
         const secondsLeft = expiresAt - Math.floor(Date.now() / 1000);
-        if (secondsLeft < 30) {
+        if (secondsLeft < 60) {
           await supabase.auth.refreshSession();
         }
       }
@@ -163,8 +174,9 @@ export function useDriverGPSStreaming({
         })
         .eq('user_id', driverId);
 
-      // Also UPSERT into ride_locations if we have an active ride (one row per ride)
+      // If we have an active ride, do dual write
       if (activeRideId) {
+        // UPSERT into ride_locations (single latest row per ride)
         const locationUpsert = supabase
           .from('ride_locations')
           .upsert(
@@ -176,15 +188,29 @@ export function useDriverGPSStreaming({
               heading: position.heading,
               speed: position.speed,
               accuracy: position.accuracy,
-              updated_at: now, // Force updated_at to change
+              updated_at: now, // Force updated_at to change EVERY time
             },
             { onConflict: 'ride_id' }
           );
 
-        // Run both in parallel
-        const [profileResult, locationResult] = await Promise.all([
+        // INSERT into ride_location_history (append-only for debugging)
+        const historyInsert = supabase
+          .from('ride_location_history')
+          .insert({
+            ride_id: activeRideId,
+            driver_id: driverId,
+            lat: position.lat,
+            lng: position.lng,
+            heading: position.heading,
+            speed: position.speed,
+            accuracy: position.accuracy,
+          });
+
+        // Run all in parallel
+        const [profileResult, locationResult, historyResult] = await Promise.all([
           profileUpdate,
           locationUpsert,
+          historyInsert,
         ]);
 
         if (profileResult.error) {
@@ -193,6 +219,10 @@ export function useDriverGPSStreaming({
         if (locationResult.error) {
           console.error('[GPS] Failed to upsert ride_location:', locationResult.error);
           throw new Error(locationResult.error.message);
+        }
+        if (historyResult.error) {
+          // History insert failure is non-critical, just log
+          console.warn('[GPS] Failed to insert ride_location_history:', historyResult.error);
         }
 
         // Success
@@ -204,6 +234,7 @@ export function useDriverGPSStreaming({
           dbWriteRetryCount: 0,
           isDbSyncing: false,
           authStatus: 'ok',
+          historyWriteCount: prev.historyWriteCount + (historyResult.error ? 0 : 1),
         }));
         pendingWriteRef.current = null;
         return true;
@@ -252,6 +283,28 @@ export function useDriverGPSStreaming({
       return false;
     }
   }, [driverId]);
+
+  // Force immediate write with toast feedback (for manual "SEND NOW" button)
+  const forceWriteWithFeedback = useCallback(async () => {
+    const pos = lastKnownPositionRef.current || state.position;
+    if (!pos) {
+      toast.error('No GPS position available');
+      return;
+    }
+
+    // Cancel any pending retry
+    if (dbRetryTimeoutRef.current) {
+      clearTimeout(dbRetryTimeoutRef.current);
+      dbRetryTimeoutRef.current = null;
+    }
+
+    const success = await writeToDb(pos, 0);
+    if (success) {
+      toast.success('Location sent!');
+    } else {
+      toast.error('Failed to send location');
+    }
+  }, [state.position, writeToDb]);
 
   // Update location in database with smart throttling
   const updateLocationInDb = useCallback(async (position: GPSPosition, force = false) => {
@@ -331,6 +384,7 @@ export function useDriverGPSStreaming({
 
         const now = Date.now();
         lastGpsFixAtRef.current = now;
+        lastKnownPositionRef.current = gpsPosition;
         setState(prev => ({
           ...prev,
           position: gpsPosition,
@@ -376,6 +430,7 @@ export function useDriverGPSStreaming({
                 };
                 const now = Date.now();
                 lastGpsFixAtRef.current = now;
+                lastKnownPositionRef.current = gpsPosition;
                 setState(prev => ({
                   ...prev,
                   position: gpsPosition,
@@ -405,7 +460,8 @@ export function useDriverGPSStreaming({
     );
   }, [updateLocationInDb, state.retryCount]);
 
-  // Heartbeat: force a DB upsert every 3s while trip active, even if GPS hasn't moved
+  // HARD HEARTBEAT: force a DB upsert every 3s while trip active
+  // Uses lastKnownPosition even if GPS hasn't fired; updated_at ALWAYS changes
   useEffect(() => {
     if (!isOnTrip || !driverId) return;
 
@@ -416,9 +472,13 @@ export function useDriverGPSStreaming({
     heartbeatIntervalRef.current = setInterval(() => {
       const activeRideId = currentRideIdRef.current;
       if (!activeRideId) return;
-      if (!state.position) return;
-      // Force write even if we haven't moved; updated_at will always change
-      void writeToDb(state.position, state.dbWriteRetryCount);
+      
+      // Use last known position, even if stale
+      const pos = lastKnownPositionRef.current || state.position;
+      if (!pos) return;
+      
+      // Force write - updated_at will always change
+      void writeToDb(pos, 0);
     }, HEARTBEAT_INTERVAL_MS);
 
     return () => {
@@ -427,7 +487,7 @@ export function useDriverGPSStreaming({
         heartbeatIntervalRef.current = null;
       }
     };
-  }, [isOnTrip, driverId, state.position, state.dbWriteRetryCount, writeToDb]);
+  }, [isOnTrip, driverId, state.position, writeToDb]);
 
   // Stop GPS streaming
   const stopStreaming = useCallback(() => {
@@ -521,5 +581,6 @@ export function useDriverGPSStreaming({
     stopStreaming,
     startStreaming,
     forceUpdate,
+    forceWriteWithFeedback,
   };
 }

@@ -15,7 +15,7 @@ interface RideDebugBarProps {
   rideStatus: string | null;
   driverLocation: DriverLocationData | null;
   lastUpdateSeconds: number;
-  dataSource: 'REALTIME' | 'FALLBACK' | 'NONE';
+  dataSource: 'REALTIME' | 'POLL' | 'FALLBACK' | 'NONE';
   isConnected: boolean;
   hasError: boolean;
 }
