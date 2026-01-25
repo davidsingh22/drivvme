@@ -2,11 +2,12 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 
-interface DriverLocation {
+export interface DriverLocation {
   lat: number;
   lng: number;
   heading?: number | null;
   speed?: number | null;
+  accuracy?: number | null;
   updatedAt: number;
 }
 
@@ -17,6 +18,7 @@ interface ETAInfo {
 }
 
 interface UseRealtimeDriverTrackingOptions {
+  rideId: string | null;
   driverId: string | null;
   targetLocation: { lat: number; lng: number } | null;
   enabled: boolean;
@@ -55,6 +57,7 @@ const calculateFallbackETA = (
 };
 
 export function useRealtimeDriverTracking({
+  rideId,
   driverId,
   targetLocation,
   enabled,
@@ -63,12 +66,15 @@ export function useRealtimeDriverTracking({
   const [eta, setEta] = useState<ETAInfo | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdateSeconds, setLastUpdateSeconds] = useState(0);
+  const [dataSource, setDataSource] = useState<'REALTIME' | 'FALLBACK' | 'NONE'>('NONE');
+  const [hasNoUpdatesError, setHasNoUpdatesError] = useState(false);
 
   const { token: mapboxToken } = useMapboxToken();
   const lastETAPositionRef = useRef<{ lat: number; lng: number } | null>(null);
   const etaIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const updateTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastRealtimeUpdateRef = useRef<number>(0);
 
   // Fetch ETA from Mapbox Directions API
   const fetchETA = useCallback(async (
@@ -127,46 +133,141 @@ export function useRealtimeDriverTracking({
     }
   }, [mapboxToken, eta]);
 
-  // Fetch initial driver location
+  // Fetch initial driver location from ride_locations or fallback to driver_profiles
   useEffect(() => {
-    if (!driverId || !enabled) return;
+    if (!enabled) return;
+    if (!rideId && !driverId) return;
 
     const fetchInitial = async () => {
-      const { data } = await supabase
-        .from('driver_profiles')
-        .select('current_lat, current_lng, updated_at')
-        .eq('user_id', driverId)
-        .single();
+      // Try ride_locations first (preferred - keyed by rideId)
+      if (rideId) {
+        const { data: locData } = await supabase
+          .from('ride_locations')
+          .select('lat, lng, speed, accuracy, heading, created_at')
+          .eq('ride_id', rideId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      if (data?.current_lat && data?.current_lng) {
-        const location: DriverLocation = {
-          lat: data.current_lat,
-          lng: data.current_lng,
-          updatedAt: new Date(data.updated_at).getTime(),
-        };
-        setDriverLocation(location);
-        setIsConnected(true);
+        if (locData) {
+          const location: DriverLocation = {
+            lat: locData.lat,
+            lng: locData.lng,
+            speed: locData.speed,
+            accuracy: locData.accuracy,
+            heading: locData.heading,
+            updatedAt: new Date(locData.created_at).getTime(),
+          };
+          setDriverLocation(location);
+          setIsConnected(true);
+          setDataSource('REALTIME');
+          lastRealtimeUpdateRef.current = Date.now();
 
-        // Fetch initial ETA
-        if (targetLocation) {
-          fetchETA(location, targetLocation, true);
+          if (targetLocation) {
+            fetchETA(location, targetLocation, true);
+          }
+          return;
+        }
+      }
+
+      // Fallback to driver_profiles
+      if (driverId) {
+        const { data } = await supabase
+          .from('driver_profiles')
+          .select('current_lat, current_lng, updated_at')
+          .eq('user_id', driverId)
+          .single();
+
+        if (data?.current_lat && data?.current_lng) {
+          const location: DriverLocation = {
+            lat: data.current_lat,
+            lng: data.current_lng,
+            updatedAt: new Date(data.updated_at).getTime(),
+          };
+          setDriverLocation(location);
+          setIsConnected(true);
+          setDataSource('FALLBACK');
+          lastRealtimeUpdateRef.current = Date.now();
+
+          if (targetLocation) {
+            fetchETA(location, targetLocation, true);
+          }
         }
       }
     };
 
     fetchInitial();
-  }, [driverId, enabled, targetLocation, fetchETA]);
+  }, [rideId, driverId, enabled, targetLocation, fetchETA]);
 
-  // Subscribe to realtime driver location updates
+  // Subscribe to realtime ride_locations updates (preferred)
+  useEffect(() => {
+    if (!rideId || !enabled) {
+      return;
+    }
+
+    console.log('[Tracking] Subscribing to ride_locations for rideId:', rideId);
+
+    const channel = supabase
+      .channel(`ride-locations-realtime-${rideId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'ride_locations',
+          filter: `ride_id=eq.${rideId}`,
+        },
+        (payload) => {
+          const updated = payload.new as {
+            lat: number;
+            lng: number;
+            speed: number | null;
+            accuracy: number | null;
+            heading: number | null;
+            created_at: string;
+          };
+
+          console.log('[Tracking] Realtime location update:', updated);
+          
+          const location: DriverLocation = {
+            lat: updated.lat,
+            lng: updated.lng,
+            speed: updated.speed,
+            accuracy: updated.accuracy,
+            heading: updated.heading,
+            updatedAt: new Date(updated.created_at).getTime(),
+          };
+          setDriverLocation(location);
+          setIsConnected(true);
+          setDataSource('REALTIME');
+          setLastUpdateSeconds(0);
+          setHasNoUpdatesError(false);
+          lastRealtimeUpdateRef.current = Date.now();
+
+          // Update ETA when driver moves
+          if (targetLocation) {
+            fetchETA(location, targetLocation);
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('[Tracking] Realtime subscription status:', status);
+        setIsConnected(status === 'SUBSCRIBED');
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [rideId, enabled, targetLocation, fetchETA]);
+
+  // Fallback subscription to driver_profiles (if no ride_locations updates)
   useEffect(() => {
     if (!driverId || !enabled) {
-      setDriverLocation(null);
-      setIsConnected(false);
       return;
     }
 
     const channel = supabase
-      .channel(`driver-tracking-${driverId}`)
+      .channel(`driver-tracking-fallback-${driverId}`)
       .on(
         'postgres_changes',
         {
@@ -181,27 +282,29 @@ export function useRealtimeDriverTracking({
             current_lng: number | null;
             updated_at: string;
           };
-          
-          if (updated.current_lat && updated.current_lng) {
-            const location: DriverLocation = {
-              lat: updated.current_lat,
-              lng: updated.current_lng,
-              updatedAt: new Date(updated.updated_at).getTime(),
-            };
-            setDriverLocation(location);
-            setIsConnected(true);
-            setLastUpdateSeconds(0);
 
-            // Update ETA when driver moves
-            if (targetLocation) {
-              fetchETA(location, targetLocation);
+          if (updated.current_lat && updated.current_lng) {
+            // Only use fallback if no recent realtime updates
+            const timeSinceRealtime = Date.now() - lastRealtimeUpdateRef.current;
+            if (timeSinceRealtime > 5000) {
+              const location: DriverLocation = {
+                lat: updated.current_lat,
+                lng: updated.current_lng,
+                updatedAt: new Date(updated.updated_at).getTime(),
+              };
+              setDriverLocation(location);
+              setDataSource('FALLBACK');
+              setLastUpdateSeconds(0);
+              setHasNoUpdatesError(false);
+
+              if (targetLocation) {
+                fetchETA(location, targetLocation);
+              }
             }
           }
         }
       )
-      .subscribe((status) => {
-        setIsConnected(status === 'SUBSCRIBED');
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
@@ -223,12 +326,19 @@ export function useRealtimeDriverTracking({
     };
   }, [driverLocation, targetLocation, enabled, fetchETA]);
 
-  // Track seconds since last update
+  // Track seconds since last update + detect 10s error
   useEffect(() => {
     if (!enabled || !driverLocation) return;
 
     updateTimerRef.current = setInterval(() => {
-      setLastUpdateSeconds(prev => prev + 1);
+      setLastUpdateSeconds(prev => {
+        const newVal = prev + 1;
+        // Set error if no updates for 10+ seconds
+        if (newVal >= 10) {
+          setHasNoUpdatesError(true);
+        }
+        return newVal;
+      });
     }, 1000);
 
     return () => {
@@ -255,8 +365,6 @@ export function useRealtimeDriverTracking({
 
   // Manual recenter function
   const recenter = useCallback(() => {
-    // This will be handled by the map component
-    // Return current driver location for the map to use
     return driverLocation;
   }, [driverLocation]);
 
@@ -265,6 +373,8 @@ export function useRealtimeDriverTracking({
     eta,
     isConnected,
     lastUpdateSeconds,
+    dataSource,
+    hasNoUpdatesError,
     recenter,
   };
 }

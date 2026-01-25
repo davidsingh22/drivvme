@@ -25,6 +25,8 @@ import SafetySheet from '@/components/ride/SafetySheet';
 import TripCompletionScreen from '@/components/ride/TripCompletionScreen';
 import { MapRecenterButton } from '@/components/MapRecenterButton';
 import { useRealtimeDriverTracking } from '@/hooks/useRealtimeDriverTracking';
+import { RideDebugBar } from '@/components/RideDebugBar';
+import { RideLocationHistory } from '@/components/RideLocationHistory';
 
 type RideStep = 'input' | 'estimate' | 'payment' | 'searching' | 'matched' | 'arriving' | 'arrived' | 'inProgress' | 'completed';
 
@@ -85,7 +87,10 @@ const RideBooking = () => {
     driverLocation: realtimeDriverLocation,
     eta: realtimeETA,
     lastUpdateSeconds,
+    dataSource,
+    hasNoUpdatesError,
   } = useRealtimeDriverTracking({
+    rideId: currentRide?.id ?? null,
     driverId: currentRide?.driver_id ?? null,
     targetLocation: targetLocation,
     enabled: isActiveRidePhase && !!currentRide?.driver_id,
@@ -959,6 +964,34 @@ const RideBooking = () => {
           }
           followDriver={step === 'inProgress'}
         />
+
+        {/* Debug Bar Overlay (visible for diagnostics) */}
+        <div className="absolute top-4 left-4 right-4 z-20 max-w-md">
+          <RideDebugBar
+            rideId={currentRide?.id ?? null}
+            rideStatus={currentRide?.status ?? null}
+            driverLocation={realtimeDriverLocation ? {
+              lat: realtimeDriverLocation.lat,
+              lng: realtimeDriverLocation.lng,
+              speed: realtimeDriverLocation.speed,
+              accuracy: realtimeDriverLocation.accuracy,
+              heading: realtimeDriverLocation.heading,
+              updatedAt: realtimeDriverLocation.updatedAt,
+            } : null}
+            lastUpdateSeconds={lastUpdateSeconds}
+            dataSource={dataSource}
+            isConnected={!!realtimeDriverLocation}
+            hasError={hasNoUpdatesError}
+          />
+          
+          {/* Location History Table */}
+          <div className="mt-2">
+            <RideLocationHistory
+              rideId={currentRide?.id ?? null}
+              enabled={isActiveRidePhase}
+            />
+          </div>
+        </div>
 
         {/* Status Bar Overlay */}
         <InRideStatusBar
