@@ -6,8 +6,7 @@ import {
   Clock, 
   DollarSign, 
   User, 
-  Phone, 
-  MessageSquare,
+  Phone,
   CheckCircle, 
   PlayCircle, 
   ExternalLink,
@@ -15,7 +14,7 @@ import {
   Map
 } from 'lucide-react';
 import DriverNavigationMap from '@/components/DriverNavigationMap';
-import InAppMessaging from '@/components/InAppMessaging';
+import DriverRideMessaging from '@/components/DriverRideMessaging';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -68,7 +67,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const [isUpdating, setIsUpdating] = useState(false);
   const [driverMismatch, setDriverMismatch] = useState<string | null>(null);
   const [showNavigation, setShowNavigation] = useState(false);
-  const [showChat, setShowChat] = useState(false);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   const driverId = session?.user?.id ?? user?.id;
@@ -378,14 +376,12 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
             >
               <Phone className="h-4 w-4" />
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1"
-              onClick={() => setShowChat(true)}
-            >
-              <MessageSquare className="h-4 w-4" />
-            </Button>
+            <DriverRideMessaging
+              rideId={activeRide.id}
+              rideStatus={activeRide.status}
+              riderId={activeRide.rider_id}
+              riderName={`${riderInfo.first_name || 'Rider'} ${riderInfo.last_name?.[0] || ''}.`.trim()}
+            />
           </div>
         )}
 
@@ -508,18 +504,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         />
       )}
 
-      {/* In-app messaging with rider */}
-      <AnimatePresence>
-        {showChat && activeRide && riderInfo && (
-          <InAppMessaging
-            rideId={activeRide.id}
-            recipientId={activeRide.rider_id}
-            recipientName={`${riderInfo.first_name || 'Rider'} ${riderInfo.last_name?.[0] || ''}.`.trim()}
-            senderRole="driver"
-            onClose={() => setShowChat(false)}
-          />
-        )}
-      </AnimatePresence>
     </motion.div>
   );
 };

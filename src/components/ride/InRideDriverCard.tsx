@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
-  Phone, MessageSquare, Star, Shield, ChevronUp, ChevronDown, 
-  MapPin, Navigation, DollarSign, Clock, Route, Share2, 
+  Phone, Star, Shield, ChevronUp, ChevronDown, 
+  DollarSign, Clock, Route, Share2, 
   CreditCard, CheckCircle2 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -10,9 +10,7 @@ import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
-import InAppMessaging from '@/components/InAppMessaging';
+import RideMessaging from '@/components/RideMessaging';
 
 interface DriverInfo {
   first_name: string;
@@ -35,6 +33,7 @@ interface InRideDriverCardProps {
   distanceKm: number;
   durationMinutes: number;
   rideId: string;
+  rideStatus: string;
   phase: 'matched' | 'arriving' | 'arrived' | 'inProgress';
   minutesAway: number | null;
   onShareTrip: () => void;
@@ -50,16 +49,15 @@ const InRideDriverCard = ({
   distanceKm,
   durationMinutes,
   rideId,
+  rideStatus,
   phase,
   minutesAway,
   onShareTrip,
   onSafetyPress,
 }: InRideDriverCardProps) => {
   const { language } = useLanguage();
-  const { user } = useAuth();
   const { toast } = useToast();
   const [isExpanded, setIsExpanded] = useState(false);
-  const [showChat, setShowChat] = useState(false);
   const [isCallingDriver, setIsCallingDriver] = useState(false);
 
   // Call driver - shows driver name only (phone number hidden)
@@ -88,10 +86,6 @@ const InRideDriverCard = ({
     }, 500);
   };
 
-  // Send in-app message
-  const handleSendMessage = async () => {
-    setShowChat(true);
-  };
 
   return (
     <>
@@ -174,15 +168,13 @@ const InRideDriverCard = ({
                 {/* Show driver name instead of "Call" to hide number */}
                 {language === 'fr' ? `Appeler ${driverInfo.first_name}` : `Call ${driverInfo.first_name}`}
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 gap-2"
-                onClick={handleSendMessage}
-              >
-                <MessageSquare className="h-4 w-4" />
-                {language === 'fr' ? 'Message' : 'Message'}
-              </Button>
+              <RideMessaging
+                rideId={rideId}
+                rideStatus={rideStatus}
+                driverId={driverId}
+                driverName={driverInfo.first_name}
+                className="flex-1"
+              />
               <Button
                 variant="outline"
                 size="sm"
@@ -303,19 +295,6 @@ const InRideDriverCard = ({
         </AnimatePresence>
       </Card>
     </motion.div>
-
-    {/* In-app messaging */}
-    <AnimatePresence>
-      {showChat && (
-        <InAppMessaging
-          rideId={rideId}
-          recipientId={driverId}
-          recipientName={driverInfo.first_name}
-          senderRole="rider"
-          onClose={() => setShowChat(false)}
-        />
-      )}
-    </AnimatePresence>
     </>
   );
 };

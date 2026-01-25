@@ -456,6 +456,33 @@ export type Database = {
         }
         Relationships: []
       }
+      ride_messages: {
+        Row: {
+          created_at: string
+          id: string
+          message: string
+          ride_id: string
+          sender_id: string
+          sender_role: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          message: string
+          ride_id: string
+          sender_id: string
+          sender_role: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          message?: string
+          ride_id?: string
+          sender_id?: string
+          sender_role?: string
+        }
+        Relationships: []
+      }
       rides: {
         Row: {
           acceptance_time_seconds: number | null
@@ -683,6 +710,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_access_ride_messages: {
+        Args: { p_ride_id: string; p_user_id: string }
+        Returns: boolean
+      }
+      can_send_ride_message: {
+        Args: { p_ride_id: string; p_user_id: string }
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["user_role"]
