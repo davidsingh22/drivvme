@@ -515,6 +515,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
             rideId={activeRide.id}
             recipientId={activeRide.rider_id}
             recipientName={`${riderInfo.first_name || 'Rider'} ${riderInfo.last_name?.[0] || ''}.`.trim()}
+            senderRole="driver"
             onClose={() => setShowChat(false)}
           />
         )}

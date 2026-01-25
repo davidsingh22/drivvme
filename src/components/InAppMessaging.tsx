@@ -20,6 +20,7 @@ interface InAppMessagingProps {
   rideId: string;
   recipientId: string;
   recipientName: string;
+  senderRole: 'driver' | 'rider';
   onClose: () => void;
 }
 
@@ -27,6 +28,7 @@ export default function InAppMessaging({
   rideId, 
   recipientId, 
   recipientName,
+  senderRole,
   onClose 
 }: InAppMessagingProps) {
   const { user } = useAuth();
@@ -57,7 +59,9 @@ export default function InAppMessaging({
       if (data) {
         setMessages(data.map(n => ({
           id: n.id,
-          sender_id: n.title === 'from_driver' ? recipientId : user.id,
+          sender_id: n.title === 'from_driver' 
+            ? (senderRole === 'driver' ? user.id : recipientId)
+            : (senderRole === 'rider' ? user.id : recipientId),
           message: n.message,
           created_at: n.created_at,
         })));
@@ -82,7 +86,9 @@ export default function InAppMessaging({
           if (notification.type === 'ride_message') {
             setMessages(prev => [...prev, {
               id: notification.id,
-              sender_id: notification.title === 'from_driver' ? recipientId : user?.id || '',
+              sender_id: notification.title === 'from_driver'
+                ? (senderRole === 'driver' ? user?.id || '' : recipientId)
+                : (senderRole === 'rider' ? user?.id || '' : recipientId),
               message: notification.message,
               created_at: notification.created_at,
             }]);
@@ -107,7 +113,7 @@ export default function InAppMessaging({
         .insert({
           user_id: recipientId,
           ride_id: rideId,
-          title: 'from_driver', // Indicates sender type
+          title: senderRole === 'driver' ? 'from_driver' : 'from_rider',
           message: newMessage.trim(),
           type: 'ride_message',
         });
