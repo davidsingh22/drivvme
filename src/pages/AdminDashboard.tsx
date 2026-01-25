@@ -189,6 +189,7 @@ const AdminDashboard = () => {
     driver_email?: string;
   }>>([]);
   const [processingWithdraw, setProcessingWithdraw] = useState<string | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
   const isAdmin = roles.includes('admin' as any);
 
@@ -324,6 +325,54 @@ const AdminDashboard = () => {
       setProcessingWithdraw(null);
     }
   };
+
+  const deleteUser = async (userId: string) => {
+    if (!confirm('Are you sure you want to delete this user? This will remove their profile, roles, and related data.')) {
+      return;
+    }
+
+    setDeletingUserId(userId);
+    try {
+      // Delete user roles first
+      await supabase
+        .from('user_roles')
+        .delete()
+        .eq('user_id', userId);
+
+      // Delete rider_locations
+      await supabase
+        .from('rider_locations')
+        .delete()
+        .eq('user_id', userId);
+
+      // Delete push_subscriptions
+      await supabase
+        .from('push_subscriptions')
+        .delete()
+        .eq('user_id', userId);
+
+      // Delete profile
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      toast({ title: 'User deleted successfully' });
+      fetchUsers();
+    } catch (error: any) {
+      console.error('Error deleting user:', error);
+      toast({
+        title: 'Failed to delete user',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingUserId(null);
+    }
+  };
+
   const deleteCustomLocation = async (id: string) => {
     setIsDeletingLocation(id);
     try {
@@ -918,6 +967,7 @@ const AdminDashboard = () => {
                       <TableHead>Phone</TableHead>
                       <TableHead>Roles</TableHead>
                       <TableHead>Joined</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -951,11 +1001,25 @@ const AdminDashboard = () => {
                         <TableCell className="whitespace-nowrap">
                           {format(new Date(user.created_at), 'MMM d, yyyy')}
                         </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => deleteUser(user.user_id)}
+                            disabled={deletingUserId === user.user_id}
+                          >
+                            {deletingUserId === user.user_id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                     {filteredUsers.length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                           <Users className="w-8 h-8 mx-auto mb-2" />
                           No users found
                         </TableCell>
