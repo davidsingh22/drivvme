@@ -31,7 +31,10 @@ import {
   Eye,
   Bell,
   Send,
-  Trash2
+  Trash2,
+  Wallet,
+  Mail,
+  Phone
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
@@ -170,6 +173,22 @@ const AdminDashboard = () => {
   }>>([]);
   const [isDeletingLocation, setIsDeletingLocation] = useState<string | null>(null);
 
+  // Withdraw requests state
+  const [withdrawRequests, setWithdrawRequests] = useState<Array<{
+    id: string;
+    driver_id: string;
+    amount: number;
+    contact_method: string;
+    contact_value: string;
+    status: string;
+    admin_notes: string | null;
+    created_at: string;
+    processed_at: string | null;
+    driver_name?: string;
+    driver_email?: string;
+  }>>([]);
+  const [processingWithdraw, setProcessingWithdraw] = useState<string | null>(null);
+
   const isAdmin = roles.includes('admin' as any);
 
   useEffect(() => {
@@ -190,7 +209,36 @@ const AdminDashboard = () => {
       fetchData();
       fetchDriverSubscriptions();
       fetchCustomLocations();
+      fetchWithdrawRequests();
     }
+  }, [user, isAdmin]);
+
+  // Subscribe to new withdraw requests in realtime
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+
+    const channel = supabase
+      .channel('withdraw-requests-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'withdraw_requests',
+        },
+        (payload) => {
+          toast({
+            title: '💰 New Withdraw Request!',
+            description: `Driver requested $${payload.new.amount.toFixed(2)}`,
+          });
+          fetchWithdrawRequests();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user, isAdmin]);
 
   const fetchCustomLocations = async () => {
@@ -207,6 +255,74 @@ const AdminDashboard = () => {
     }
   };
 
+  const fetchWithdrawRequests = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('withdraw_requests')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Fetch driver profiles for names
+      if (data && data.length > 0) {
+        const driverIds = [...new Set(data.map(w => w.driver_id))];
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('user_id, first_name, last_name, email')
+          .in('user_id', driverIds);
+
+        const profilesMap: Record<string, any> = {};
+        profiles?.forEach(p => {
+          profilesMap[p.user_id] = p;
+        });
+
+        const requestsWithNames = data.map(w => ({
+          ...w,
+          driver_name: profilesMap[w.driver_id]
+            ? `${profilesMap[w.driver_id].first_name || ''} ${profilesMap[w.driver_id].last_name || ''}`.trim() || 'Unknown'
+            : 'Unknown',
+          driver_email: profilesMap[w.driver_id]?.email || 'N/A',
+        }));
+
+        setWithdrawRequests(requestsWithNames);
+      } else {
+        setWithdrawRequests([]);
+      }
+    } catch (error) {
+      console.error('Error fetching withdraw requests:', error);
+    }
+  };
+
+  const updateWithdrawStatus = async (id: string, status: string) => {
+    setProcessingWithdraw(id);
+    try {
+      const { error } = await supabase
+        .from('withdraw_requests')
+        .update({ 
+          status, 
+          processed_at: new Date().toISOString(),
+          processed_by: user?.id 
+        })
+        .eq('id', id);
+
+      if (error) throw error;
+
+      toast({
+        title: status === 'completed' ? '✅ Marked as Completed' : `Status updated to ${status}`,
+      });
+      fetchWithdrawRequests();
+    } catch (error: any) {
+      console.error('Error updating withdraw:', error);
+      toast({
+        title: 'Failed to update',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingWithdraw(null);
+    }
+  };
   const deleteCustomLocation = async (id: string) => {
     setIsDeletingLocation(id);
     try {
@@ -750,6 +866,15 @@ const AdminDashboard = () => {
               <TabsTrigger value="locations" className="gap-2">
                 <MapPin className="w-4 h-4" />
                 Locations
+              </TabsTrigger>
+              <TabsTrigger value="withdrawals" className="gap-2">
+                <Wallet className="w-4 h-4" />
+                Withdrawals
+                {withdrawRequests.filter(w => w.status === 'pending').length > 0 && (
+                  <Badge className="ml-1 bg-destructive text-destructive-foreground">
+                    {withdrawRequests.filter(w => w.status === 'pending').length}
+                  </Badge>
+                )}
               </TabsTrigger>
             </TabsList>
             
@@ -1428,6 +1553,89 @@ const AdminDashboard = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Withdrawals Tab Content - Add after existing tabs */}
+      {activeTab === 'withdrawals' && (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Wallet className="w-5 h-5" />
+              Withdraw Requests
+            </CardTitle>
+            <CardDescription>
+              Manage driver payout requests via e-transfer
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Driver</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {withdrawRequests.map((req) => (
+                  <TableRow key={req.id}>
+                    <TableCell className="whitespace-nowrap">
+                      {format(new Date(req.created_at), 'MMM d, HH:mm')}
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium">{req.driver_name}</p>
+                        <p className="text-sm text-muted-foreground">{req.driver_email}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-bold text-lg">${req.amount.toFixed(2)}</TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        {req.contact_method === 'email' ? <Mail className="w-4 h-4" /> : <Phone className="w-4 h-4" />}
+                        <span className="text-sm">{req.contact_value}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={
+                        req.status === 'pending' ? 'bg-warning text-warning-foreground' :
+                        req.status === 'completed' ? 'bg-success text-success-foreground' :
+                        req.status === 'processing' ? 'bg-primary text-primary-foreground' :
+                        'bg-destructive text-destructive-foreground'
+                      }>
+                        {req.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {req.status === 'pending' && (
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => updateWithdrawStatus(req.id, 'completed')}
+                            disabled={processingWithdraw === req.id}
+                          >
+                            {processingWithdraw === req.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                            Done
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {withdrawRequests.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                      <Wallet className="w-8 h-8 mx-auto mb-2" />
+                      No withdraw requests yet
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };
