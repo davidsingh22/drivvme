@@ -100,29 +100,40 @@ const DriverDashboard = () => {
   };
 
   const alertRide = useMemo(() => {
-    if (!newRideAlertRideId) return null;
-    const ride = availableRides.find((r) => r.id === newRideAlertRideId);
-    if (!ride) return null;
-    
-    // Calculate pickup ETA based on driver location
-    let pickupEtaMinutes: number | undefined;
-    if (driverLocation && ride.pickup_lat && ride.pickup_lng) {
-      const distanceKm = calculateDistanceKm(
-        driverLocation.lat, driverLocation.lng,
-        ride.pickup_lat, ride.pickup_lng
-      );
-      pickupEtaMinutes = Math.ceil((distanceKm / 30) * 60); // 30km/h average
+    try {
+      if (!newRideAlertRideId) return null;
+      const ride = availableRides.find((r) => r.id === newRideAlertRideId);
+      if (!ride) return null;
+      
+      // Defensive: validate ride has required fields
+      if (!ride.pickup_address || !ride.dropoff_address) {
+        console.warn('[DriverDashboard] Ride missing address fields:', ride.id);
+        return null;
+      }
+      
+      // Calculate pickup ETA based on driver location
+      let pickupEtaMinutes: number | undefined;
+      if (driverLocation && typeof ride.pickup_lat === 'number' && typeof ride.pickup_lng === 'number') {
+        const distanceKm = calculateDistanceKm(
+          driverLocation.lat, driverLocation.lng,
+          ride.pickup_lat, ride.pickup_lng
+        );
+        pickupEtaMinutes = Math.ceil((distanceKm / 30) * 60); // 30km/h average
+      }
+      
+      return {
+        id: ride.id,
+        pickup_address: ride.pickup_address || 'Unknown pickup',
+        dropoff_address: ride.dropoff_address || 'Unknown destination',
+        estimated_fare: typeof ride.estimated_fare === 'number' ? ride.estimated_fare : undefined,
+        pickup_eta_minutes: pickupEtaMinutes,
+        minimum_earnings: typeof ride.estimated_fare === 'number' ? ride.estimated_fare - PLATFORM_FEE : undefined,
+        is_priority: false, // Can be set based on surge or rider preference
+      };
+    } catch (err) {
+      console.error('[DriverDashboard] Error computing alertRide:', err);
+      return null;
     }
-    
-    return {
-      id: ride.id,
-      pickup_address: ride.pickup_address,
-      dropoff_address: ride.dropoff_address,
-      estimated_fare: ride.estimated_fare,
-      pickup_eta_minutes: pickupEtaMinutes,
-      minimum_earnings: ride.estimated_fare ? ride.estimated_fare - PLATFORM_FEE : undefined,
-      is_priority: false, // Can be set based on surge or rider preference
-    };
   }, [availableRides, newRideAlertRideId, driverLocation]);
 
   const [redirectGraceOver, setRedirectGraceOver] = useState(false);
@@ -290,20 +301,32 @@ const DriverDashboard = () => {
         .order('requested_at', { ascending: true });
 
       if (!error && data) {
-        // Detect newly-added rides (to trigger big in-app alert + sound).
-        const nextIds = new Set(data.map((r) => r.id));
-        const prevIds = prevRideIdsRef.current;
+        try {
+          // Detect newly-added rides (to trigger big in-app alert + sound).
+          // Defensive: filter out any malformed rides to prevent crashes
+          const validRides = data.filter((r) => 
+            r && 
+            typeof r.id === 'string' && 
+            typeof r.pickup_lat === 'number' && 
+            typeof r.pickup_lng === 'number'
+          );
 
-        const newlyAdded = data.find((r) => !prevIds.has(r.id));
-        prevRideIdsRef.current = nextIds;
+          const nextIds = new Set(validRides.map((r) => r.id));
+          const prevIds = prevRideIdsRef.current;
 
-        setAvailableRides(data);
+          const newlyAdded = validRides.find((r) => !prevIds.has(r.id));
+          prevRideIdsRef.current = nextIds;
 
-        if (newlyAdded && !currentRide) {
-          setNewRideAlertRideId(newlyAdded.id);
-          setNewRideAlertOpen(true);
-          alertStartTimeRef.current = Date.now();
-          void playAlertSound();
+          setAvailableRides(validRides);
+
+          if (newlyAdded && !currentRide) {
+            setNewRideAlertRideId(newlyAdded.id);
+            setNewRideAlertOpen(true);
+            alertStartTimeRef.current = Date.now();
+            void playAlertSound();
+          }
+        } catch (err) {
+          console.error('[DriverDashboard] Error processing rides:', err);
         }
       }
     };
@@ -322,19 +345,23 @@ const DriverDashboard = () => {
           filter: 'status=eq.searching',
         },
         (payload) => {
-          // Reliable in-app fallback alert (works even when system push is flaky on mobile browsers)
-          if (!currentRide && payload.eventType === 'INSERT') {
-            toast({
-              title: 'New ride request',
-              description: 'A rider is looking for a driver now.',
-            });
+          try {
+            // Reliable in-app fallback alert (works even when system push is flaky on mobile browsers)
+            if (!currentRide && payload.eventType === 'INSERT') {
+              toast({
+                title: 'New ride request',
+                description: 'A rider is looking for a driver now.',
+              });
 
-            if ('vibrate' in navigator) {
-              // best-effort
-              (navigator as any).vibrate?.([200, 100, 200]);
+              if ('vibrate' in navigator) {
+                // best-effort
+                (navigator as any).vibrate?.([200, 100, 200]);
+              }
             }
+            fetchRides();
+          } catch (err) {
+            console.error('[DriverDashboard] Realtime handler error:', err);
           }
-          fetchRides();
         }
       )
       .subscribe();
