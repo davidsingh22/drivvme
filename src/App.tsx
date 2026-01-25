@@ -23,6 +23,7 @@ import DriverLive from "./pages/DriverLive";
 import NotFound from "./pages/NotFound";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import DriverFloatingGPSButton from "@/components/DriverFloatingGPSButton";
+import DriverMessagesBadge from "@/components/DriverMessagesBadge";
 
 const queryClient = new QueryClient();
 
@@ -80,6 +81,7 @@ const AppRoutes = () => {
     <>
       <RouteRestorer />
       <DriverFloatingGPSButton />
+      <DriverMessagesBadge />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />

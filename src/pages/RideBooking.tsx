@@ -1089,6 +1089,7 @@ const RideBooking = () => {
         {driverInfo ? (
           <InRideDriverCard
             driverInfo={driverInfo}
+            driverId={currentRide?.driver_id || ''}
             pickupAddress={pickup?.address || currentRide?.pickup_address || ''}
             dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''}
             estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0}

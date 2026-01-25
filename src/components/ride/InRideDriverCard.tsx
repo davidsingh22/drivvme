@@ -8,7 +8,11 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
+import InAppMessaging from '@/components/InAppMessaging';
 
 interface DriverInfo {
   first_name: string;
@@ -24,6 +28,7 @@ interface DriverInfo {
 
 interface InRideDriverCardProps {
   driverInfo: DriverInfo;
+  driverId: string;
   pickupAddress: string;
   dropoffAddress: string;
   estimatedFare: number;
@@ -38,6 +43,7 @@ interface InRideDriverCardProps {
 
 const InRideDriverCard = ({
   driverInfo,
+  driverId,
   pickupAddress,
   dropoffAddress,
   estimatedFare,
@@ -50,118 +56,150 @@ const InRideDriverCard = ({
   onSafetyPress,
 }: InRideDriverCardProps) => {
   const { language } = useLanguage();
+  const { user } = useAuth();
+  const { toast } = useToast();
   const [isExpanded, setIsExpanded] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [isCallingDriver, setIsCallingDriver] = useState(false);
+
+  // Call driver - shows driver name only (phone number hidden)
+  const handleCallDriver = async () => {
+    if (!driverInfo.phone_number) {
+      toast({
+        title: language === 'fr' ? 'Indisponible' : 'Unavailable',
+        description: language === 'fr' 
+          ? 'Le numéro du chauffeur n\'est pas disponible'
+          : 'Driver phone number is not available',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    setIsCallingDriver(true);
+    // Show driver name in confirmation, then initiate call (number hidden)
+    toast({
+      title: language === 'fr' ? `Appel de ${driverInfo.first_name}...` : `Calling ${driverInfo.first_name}...`,
+    });
+    
+    // Brief delay for UX, then initiate call
+    setTimeout(() => {
+      window.location.href = `tel:${driverInfo.phone_number}`;
+      setIsCallingDriver(false);
+    }, 500);
+  };
+
+  // Send in-app message
+  const handleSendMessage = async () => {
+    setShowChat(true);
+  };
 
   return (
-    <motion.div
-      initial={{ y: 100, opacity: 0 }}
-      animate={{ y: 0, opacity: 1 }}
-      className="absolute bottom-0 left-0 right-0 z-10"
-    >
-      <Card className="rounded-t-3xl rounded-b-none border-b-0 shadow-2xl">
-        {/* Drag handle */}
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="w-full flex justify-center py-2"
-        >
-          <div className="w-10 h-1 bg-muted-foreground/30 rounded-full" />
-        </button>
+    <>
+      <motion.div
+        initial={{ y: 100, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="absolute bottom-0 left-0 right-0 z-10"
+      >
+        <Card className="rounded-t-3xl rounded-b-none border-b-0 shadow-2xl">
+          {/* Drag handle */}
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="w-full flex justify-center py-2"
+          >
+            <div className="w-10 h-1 bg-muted-foreground/30 rounded-full" />
+          </button>
 
-        {/* Main driver info */}
-        <div className="px-5 pb-4">
-          <div className="flex items-center gap-4">
-            {/* Driver avatar */}
-            <div className="relative">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
-                {driverInfo.avatar_url ? (
-                  <img
-                    src={driverInfo.avatar_url}
-                    alt={driverInfo.first_name}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-2xl font-bold text-primary">
-                    {driverInfo.first_name?.[0] || 'D'}
-                  </span>
-                )}
-              </div>
-              {/* Verified badge */}
-              <div className="absolute -bottom-1 -right-1 bg-success rounded-full p-1">
-                <CheckCircle2 className="h-3 w-3 text-white" />
-              </div>
-            </div>
-
-            {/* Driver details */}
-            <div className="flex-1">
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-lg">{driverInfo.first_name}</h3>
-                <div className="flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded-full">
-                  <Star className="h-3 w-3 text-warning fill-warning" />
-                  <span className="text-sm font-medium">
-                    {Number(driverInfo.average_rating).toFixed(1)}
-                  </span>
+          {/* Main driver info */}
+          <div className="px-5 pb-4">
+            <div className="flex items-center gap-4">
+              {/* Driver avatar */}
+              <div className="relative">
+                <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center overflow-hidden">
+                  {driverInfo.avatar_url ? (
+                    <img
+                      src={driverInfo.avatar_url}
+                      alt={driverInfo.first_name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-2xl font-bold text-primary">
+                      {driverInfo.first_name?.[0] || 'D'}
+                    </span>
+                  )}
+                </div>
+                {/* Verified badge */}
+                <div className="absolute -bottom-1 -right-1 bg-success rounded-full p-1">
+                  <CheckCircle2 className="h-3 w-3 text-white" />
                 </div>
               </div>
-              <p className="text-muted-foreground text-sm">
-                {driverInfo.vehicle_color} {driverInfo.vehicle_make} {driverInfo.vehicle_model}
-              </p>
-              <p className="font-mono font-bold text-lg tracking-wider">
-                {driverInfo.license_plate}
-              </p>
+
+              {/* Driver details */}
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-lg">{driverInfo.first_name}</h3>
+                  <div className="flex items-center gap-0.5 bg-muted px-2 py-0.5 rounded-full">
+                    <Star className="h-3 w-3 text-warning fill-warning" />
+                    <span className="text-sm font-medium">
+                      {Number(driverInfo.average_rating).toFixed(1)}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-muted-foreground text-sm">
+                  {driverInfo.vehicle_color} {driverInfo.vehicle_make} {driverInfo.vehicle_model}
+                </p>
+                <p className="font-mono font-bold text-lg tracking-wider">
+                  {driverInfo.license_plate}
+                </p>
+              </div>
+
+              {/* Minutes away badge */}
+              {minutesAway !== null && phase !== 'arrived' && phase !== 'inProgress' && (
+                <div className="text-center px-3 py-2 bg-primary/10 rounded-xl">
+                  <p className="text-2xl font-bold text-primary">{minutesAway}</p>
+                  <p className="text-xs text-muted-foreground">min</p>
+                </div>
+              )}
             </div>
 
-            {/* Minutes away badge */}
-            {minutesAway !== null && phase !== 'arrived' && phase !== 'inProgress' && (
-              <div className="text-center px-3 py-2 bg-primary/10 rounded-xl">
-                <p className="text-2xl font-bold text-primary">{minutesAway}</p>
-                <p className="text-xs text-muted-foreground">min</p>
-              </div>
-            )}
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 mt-4">
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="flex-1 gap-2"
-              disabled={!driverInfo.phone_number}
-            >
-              <a href={driverInfo.phone_number ? `tel:${driverInfo.phone_number}` : undefined}>
+            {/* Action buttons - Call shows name only, Message opens in-app chat */}
+            <div className="flex items-center gap-2 mt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 gap-2"
+                onClick={handleCallDriver}
+                disabled={!driverInfo.phone_number || isCallingDriver}
+              >
                 <Phone className="h-4 w-4" />
-                {language === 'fr' ? 'Appeler' : 'Call'}
-              </a>
-            </Button>
-            <Button
-              asChild
-              variant="outline"
-              size="sm"
-              className="flex-1 gap-2"
-              disabled={!driverInfo.phone_number}
-            >
-              <a href={driverInfo.phone_number ? `sms:${driverInfo.phone_number}` : undefined}>
+                {/* Show driver name instead of "Call" to hide number */}
+                {language === 'fr' ? `Appeler ${driverInfo.first_name}` : `Call ${driverInfo.first_name}`}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 gap-2"
+                onClick={handleSendMessage}
+              >
                 <MessageSquare className="h-4 w-4" />
                 {language === 'fr' ? 'Message' : 'Message'}
-              </a>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={onShareTrip}
-            >
-              <Share2 className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 border-destructive/50 text-destructive hover:bg-destructive/10"
-              onClick={onSafetyPress}
-            >
-              <Shield className="h-4 w-4" />
-            </Button>
-          </div>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={onShareTrip}
+              >
+                <Share2 className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 border-destructive/50 text-destructive hover:bg-destructive/10"
+                onClick={onSafetyPress}
+              >
+                <Shield className="h-4 w-4" />
+              </Button>
+            </div>
 
           {/* Expand/collapse button */}
           <button
@@ -265,6 +303,19 @@ const InRideDriverCard = ({
         </AnimatePresence>
       </Card>
     </motion.div>
+
+    {/* In-app messaging */}
+    <AnimatePresence>
+      {showChat && (
+        <InAppMessaging
+          rideId={rideId}
+          recipientId={driverId}
+          recipientName={driverInfo.first_name}
+          onClose={() => setShowChat(false)}
+        />
+      )}
+    </AnimatePresence>
+    </>
   );
 };
 
