@@ -25,7 +25,7 @@ interface TripCompletionScreenProps {
   onComplete: () => void;
 }
 
-const tipOptions = [0, 2, 5, 10];
+const tipOptions = [0, 1, 2, 3, 5, 7, 10];
 
 const TripCompletionScreen = ({
   rideId,
@@ -117,7 +117,7 @@ const TripCompletionScreen = ({
           {language === 'fr' ? 'Trajet terminé!' : 'Trip completed!'}
         </h2>
         <p className="text-muted-foreground">
-          {language === 'fr' ? 'Merci d\'avoir choisi Drivvme' : 'Thanks for riding with Drivvme'}
+          {language === 'fr' ? 'Merci d\'avoir choisi Drivveme' : 'Thanks for riding with Drivveme'}
         </p>
       </div>
 
@@ -222,7 +222,7 @@ const TripCompletionScreen = ({
         <h3 className="font-semibold mb-4">
           {language === 'fr' ? 'Ajouter un pourboire?' : 'Add a tip?'}
         </h3>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
           {tipOptions.map((tip) => (
             <motion.button
               key={tip}

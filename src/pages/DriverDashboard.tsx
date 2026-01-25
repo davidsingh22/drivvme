@@ -977,25 +977,61 @@ const DriverDashboard = () => {
               {isOnline ? 'Go Offline' : 'Go Online'}
             </Button>
 
-            {/* Today's Stats */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <Card className="p-4 bg-muted/50">
-                <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                  <DollarSign className="h-4 w-4" />
-                  <span className="text-sm">{t('driver.earnings')}</span>
+            {/* My Earnings Section */}
+            <Card className="p-4 mb-6 gradient-card border-primary/20">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-primary" />
+                  <h3 className="font-display font-semibold">{language === 'fr' ? 'Mes Gains' : 'My Earnings'}</h3>
                 </div>
-                <p className="text-2xl font-bold text-accent">
-                  {formatCurrency(todayEarnings, language)}
+                <Button variant="ghost" size="sm" onClick={() => navigate('/earnings')}>
+                  {language === 'fr' ? 'Voir tout' : 'View All'}
+                </Button>
+              </div>
+              
+              {/* Today's Summary */}
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="bg-background/50 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground mb-1">{language === 'fr' ? 'Gains aujourd\'hui' : 'Today\'s Earnings'}</p>
+                  <p className="text-2xl font-bold text-accent">{formatCurrency(todayEarnings, language)}</p>
+                </div>
+                <div className="bg-background/50 rounded-lg p-3">
+                  <p className="text-xs text-muted-foreground mb-1">{language === 'fr' ? 'Courses aujourd\'hui' : 'Today\'s Rides'}</p>
+                  <p className="text-2xl font-bold">{todayRides}</p>
+                </div>
+              </div>
+
+              {/* Platform Fee Info */}
+              <div className="bg-background/50 rounded-lg p-3 mb-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{language === 'fr' ? 'Frais plateforme par course' : 'Platform Fee per Ride'}</span>
+                  <span className="font-medium text-destructive">-{formatCurrency(PLATFORM_FEE, language)}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {language === 'fr' 
+                    ? 'Déduit automatiquement de chaque course complétée' 
+                    : 'Automatically deducted from each completed ride'}
                 </p>
-              </Card>
-              <Card className="p-4 bg-muted/50">
-                <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                  <Navigation className="h-4 w-4" />
-                  <span className="text-sm">{t('driver.totalRides')}</span>
+              </div>
+
+              {/* Lifetime Stats */}
+              {driverProfile && (
+                <div className="grid grid-cols-3 gap-2 text-center pt-3 border-t border-border/50">
+                  <div>
+                    <p className="text-lg font-bold">{driverProfile.total_rides || 0}</p>
+                    <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Total courses' : 'Total Rides'}</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-accent">{formatCurrency(Number(driverProfile.total_earnings) || 0, language)}</p>
+                    <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Disponible' : 'Available'}</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-bold text-warning">{Number(driverProfile.average_rating || 5).toFixed(1)} ⭐</p>
+                    <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Note' : 'Rating'}</p>
+                  </div>
                 </div>
-                <p className="text-2xl font-bold">{todayRides}</p>
-              </Card>
-            </div>
+              )}
+            </Card>
 
             {/* Current Active Ride - Always shown at top when exists */}
             <AnimatePresence>
