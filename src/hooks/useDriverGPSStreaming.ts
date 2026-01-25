@@ -23,6 +23,7 @@ interface GPSStreamingState {
   lastDbWriteError: string | null;
   dbWriteRetryCount: number;
   isDbSyncing: boolean;
+  authStatus: 'ok' | 'signed_out';
 }
 
 interface UseDriverGPSStreamingOptions {
@@ -37,8 +38,11 @@ const DEFAULT_UPDATE_INTERVAL = 2500; // 2.5 seconds
 const DEFAULT_MIN_DISTANCE = 15; // 15 meters
 const MAX_RETRY_COUNT = 10;
 const RETRY_DELAY_MS = 2000;
-const MAX_DB_RETRY_COUNT = 5;
-const DB_RETRY_BASE_DELAY_MS = 1000;
+// DB retry strategy: retry every 2s up to 5 attempts, then every 5s forever
+const DB_RETRY_FAST_DELAY_MS = 2000;
+const DB_RETRY_SLOW_DELAY_MS = 5000;
+const DB_RETRY_FAST_ATTEMPTS = 5;
+const HEARTBEAT_INTERVAL_MS = 3000;
 
 // Haversine distance in meters
 const getDistanceMeters = (
@@ -75,6 +79,7 @@ export function useDriverGPSStreaming({
     lastDbWriteError: null,
     dbWriteRetryCount: 0,
     isDbSyncing: false,
+    authStatus: 'ok',
   });
 
   const watchIdRef = useRef<number | null>(null);
@@ -85,6 +90,8 @@ export function useDriverGPSStreaming({
   const currentRideIdRef = useRef<string | null>(null);
   const dbRetryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingWriteRef = useRef<GPSPosition | null>(null);
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastGpsFixAtRef = useRef<number | null>(null);
 
   // Keep rideId ref updated
   useEffect(() => {
@@ -119,6 +126,30 @@ export function useDriverGPSStreaming({
     setState(prev => ({ ...prev, isDbSyncing: true }));
 
     try {
+      // Ensure we have a valid session before writing
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData.session;
+
+      if (!session) {
+        setState(prev => ({
+          ...prev,
+          isDbSyncing: false,
+          authStatus: 'signed_out',
+          lastDbWriteError: 'Signed out – cannot send GPS',
+          dbWriteRetryCount: retryAttempt + 1,
+        }));
+        return false;
+      }
+
+      // Refresh session if it's about to expire (best-effort)
+      const expiresAt = session.expires_at; // seconds
+      if (typeof expiresAt === 'number') {
+        const secondsLeft = expiresAt - Math.floor(Date.now() / 1000);
+        if (secondsLeft < 30) {
+          await supabase.auth.refreshSession();
+        }
+      }
+
       // Always set updated_at = now() to force a change
       const now = new Date().toISOString();
 
@@ -172,6 +203,7 @@ export function useDriverGPSStreaming({
           lastDbWriteError: null,
           dbWriteRetryCount: 0,
           isDbSyncing: false,
+          authStatus: 'ok',
         }));
         pendingWriteRef.current = null;
         return true;
@@ -189,6 +221,7 @@ export function useDriverGPSStreaming({
           lastDbWriteError: null,
           dbWriteRetryCount: 0,
           isDbSyncing: false,
+          authStatus: 'ok',
         }));
         return true;
       }
@@ -203,18 +236,19 @@ export function useDriverGPSStreaming({
         dbWriteRetryCount: retryAttempt + 1,
       }));
 
-      // Retry with exponential backoff
-      if (retryAttempt < MAX_DB_RETRY_COUNT) {
-        const delay = DB_RETRY_BASE_DELAY_MS * Math.pow(2, retryAttempt);
-        console.log(`[GPS] Retrying DB write in ${delay}ms (attempt ${retryAttempt + 1})`);
-        
-        pendingWriteRef.current = position;
-        dbRetryTimeoutRef.current = setTimeout(() => {
-          if (pendingWriteRef.current) {
-            writeToDb(pendingWriteRef.current, retryAttempt + 1);
-          }
-        }, delay);
-      }
+      // Retry forever: 2s up to 5 attempts, then 5s
+      const delay = retryAttempt < DB_RETRY_FAST_ATTEMPTS
+        ? DB_RETRY_FAST_DELAY_MS
+        : DB_RETRY_SLOW_DELAY_MS;
+      console.log(`[GPS] Retrying DB write in ${delay}ms (attempt ${retryAttempt + 1})`);
+
+      pendingWriteRef.current = position;
+      dbRetryTimeoutRef.current = setTimeout(() => {
+        if (pendingWriteRef.current) {
+          writeToDb(pendingWriteRef.current, retryAttempt + 1);
+        }
+      }, delay);
+
       return false;
     }
   }, [driverId]);
@@ -296,6 +330,7 @@ export function useDriverGPSStreaming({
         };
 
         const now = Date.now();
+        lastGpsFixAtRef.current = now;
         setState(prev => ({
           ...prev,
           position: gpsPosition,
@@ -328,7 +363,37 @@ export function useDriverGPSStreaming({
         if (error.code !== 1 && state.retryCount < MAX_RETRY_COUNT) {
           retryTimeoutRef.current = setTimeout(() => {
             setState(prev => ({ ...prev, retryCount: prev.retryCount + 1 }));
-            startStreaming();
+            // On error, try a one-shot getCurrentPosition, then restart watchPosition
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                const gpsPosition: GPSPosition = {
+                  lat: pos.coords.latitude,
+                  lng: pos.coords.longitude,
+                  heading: pos.coords.heading,
+                  speed: pos.coords.speed,
+                  accuracy: pos.coords.accuracy,
+                  timestamp: pos.timestamp,
+                };
+                const now = Date.now();
+                lastGpsFixAtRef.current = now;
+                setState(prev => ({
+                  ...prev,
+                  position: gpsPosition,
+                  lastUpdateTime: now,
+                  secondsSinceLastUpdate: 0,
+                }));
+                void updateLocationInDb(gpsPosition, true);
+                startStreaming();
+              },
+              () => {
+                startStreaming();
+              },
+              {
+                enableHighAccuracy: true,
+                timeout: 15000,
+                maximumAge: 0,
+              }
+            );
           }, RETRY_DELAY_MS);
         }
       },
@@ -339,6 +404,30 @@ export function useDriverGPSStreaming({
       }
     );
   }, [updateLocationInDb, state.retryCount]);
+
+  // Heartbeat: force a DB upsert every 3s while trip active, even if GPS hasn't moved
+  useEffect(() => {
+    if (!isOnTrip || !driverId) return;
+
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+    }
+
+    heartbeatIntervalRef.current = setInterval(() => {
+      const activeRideId = currentRideIdRef.current;
+      if (!activeRideId) return;
+      if (!state.position) return;
+      // Force write even if we haven't moved; updated_at will always change
+      void writeToDb(state.position, state.dbWriteRetryCount);
+    }, HEARTBEAT_INTERVAL_MS);
+
+    return () => {
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
+    };
+  }, [isOnTrip, driverId, state.position, state.dbWriteRetryCount, writeToDb]);
 
   // Stop GPS streaming
   const stopStreaming = useCallback(() => {
@@ -354,12 +443,17 @@ export function useDriverGPSStreaming({
       clearTimeout(dbRetryTimeoutRef.current);
       dbRetryTimeoutRef.current = null;
     }
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
     setState(prev => ({
       ...prev,
       isStreaming: false,
       isConnected: false,
       lastDbWriteError: null,
       dbWriteRetryCount: 0,
+      authStatus: prev.authStatus,
     }));
   }, []);
 
@@ -404,6 +498,9 @@ export function useDriverGPSStreaming({
       if (dbRetryTimeoutRef.current) {
         clearTimeout(dbRetryTimeoutRef.current);
       }
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+      }
     };
   }, []);
 
@@ -412,9 +509,14 @@ export function useDriverGPSStreaming({
     ? Math.floor((Date.now() - state.lastDbSyncTime) / 1000)
     : null;
 
+  const secondsSinceLastGpsFix = lastGpsFixAtRef.current
+    ? Math.floor((Date.now() - lastGpsFixAtRef.current) / 1000)
+    : null;
+
   return {
     ...state,
     secondsSinceDbSync,
+    secondsSinceLastGpsFix,
     retry,
     stopStreaming,
     startStreaming,

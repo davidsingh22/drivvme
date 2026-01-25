@@ -10,6 +10,7 @@ interface DriverGPSStatusIndicatorProps {
   position: GPSPosition | null;
   secondsSinceLastUpdate: number;
   secondsSinceDbSync: number | null;
+  secondsSinceLastGpsFix: number | null;
   retryCount: number;
   onRetry: () => void;
   rideId: string | null;
@@ -17,6 +18,7 @@ interface DriverGPSStatusIndicatorProps {
   lastDbWriteError: string | null;
   dbWriteRetryCount: number;
   isDbSyncing: boolean;
+  authStatus: 'ok' | 'signed_out';
 }
 
 export function DriverGPSStatusIndicator({
@@ -25,12 +27,14 @@ export function DriverGPSStatusIndicator({
   position,
   secondsSinceLastUpdate,
   secondsSinceDbSync,
+  secondsSinceLastGpsFix,
   retryCount,
   onRetry,
   rideId,
   lastDbWriteError,
   dbWriteRetryCount,
   isDbSyncing,
+  authStatus,
 }: DriverGPSStatusIndicatorProps) {
   const { t } = useLanguage();
 
@@ -43,6 +47,7 @@ export function DriverGPSStatusIndicator({
   };
 
   const getDbStatus = (): 'ok' | 'warning' | 'error' | 'syncing' => {
+    if (authStatus === 'signed_out') return 'error';
     if (isDbSyncing) return 'syncing';
     if (lastDbWriteError) return 'error';
     if (secondsSinceDbSync !== null && secondsSinceDbSync > 10) return 'warning';
@@ -147,6 +152,22 @@ export function DriverGPSStatusIndicator({
               }
             </span>
             <span className="text-xs text-muted-foreground">ago</span>
+          </div>
+        </div>
+
+        {/* Heartbeat details */}
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+          <div className="flex items-center justify-between rounded-md bg-background/50 border border-border/50 px-2 py-1">
+            <span>Last DB write</span>
+            <span className="font-mono text-foreground">
+              {secondsSinceDbSync === null ? '--' : `${secondsSinceDbSync}s`}
+            </span>
+          </div>
+          <div className="flex items-center justify-between rounded-md bg-background/50 border border-border/50 px-2 py-1">
+            <span>Last GPS fix</span>
+            <span className="font-mono text-foreground">
+              {secondsSinceLastGpsFix === null ? '--' : `${secondsSinceLastGpsFix}s`}
+            </span>
           </div>
         </div>
 
