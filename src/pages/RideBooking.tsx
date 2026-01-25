@@ -1096,6 +1096,7 @@ const RideBooking = () => {
             distanceKm={distanceKm || currentRide?.distance_km || 0}
             durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0}
             rideId={currentRide?.id || ''}
+            rideStatus={currentRide?.status || ''}
             phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'}
             minutesAway={minutesAway}
             onShareTrip={handleShareTrip}
