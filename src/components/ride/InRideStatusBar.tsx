@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, Navigation, MapPin, AlertCircle, Route } from 'lucide-react';
+import { Clock, Navigation, MapPin, AlertCircle, Route, Wifi, WifiOff } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 
@@ -11,78 +11,174 @@ interface InRideStatusBarProps {
   driverLocation: { lat: number; lng: number } | null;
   pickupLocation: { lat: number; lng: number } | null;
   dropoffLocation: { lat: number; lng: number } | null;
+  lastUpdateSeconds?: number;
 }
 
 interface ETAInfo {
   minutes: number;
   distanceKm: number;
+  isFallback: boolean;
 }
 
 // Refresh interval in ms
 const REFRESH_INTERVAL = 10000;
+const DISTANCE_THRESHOLD = 100; // 100 meters
+
+// Haversine distance in meters
+const getDistanceMeters = (
+  lat1: number, lng1: number,
+  lat2: number, lng2: number
+): number => {
+  const R = 6371000;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+// Fallback ETA calculation
+const calculateFallbackETA = (
+  driverLat: number, driverLng: number,
+  targetLat: number, targetLng: number
+): ETAInfo => {
+  const distanceM = getDistanceMeters(driverLat, driverLng, targetLat, targetLng);
+  const distanceKm = distanceM / 1000;
+  // Assume 30 km/h average in city
+  const avgSpeedKmh = 30;
+  const minutes = Math.max(1, Math.round((distanceKm / avgSpeedKmh) * 60));
+  return { minutes, distanceKm, isFallback: true };
+};
 
 const InRideStatusBar = ({
   phase,
   driverLocation,
   pickupLocation,
   dropoffLocation,
+  lastUpdateSeconds = 0,
 }: InRideStatusBarProps) => {
   const { language } = useLanguage();
   const { token: mapboxToken } = useMapboxToken();
   const [eta, setEta] = useState<ETAInfo | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const lastFetchPositionRef = useRef<{ lat: number; lng: number } | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Determine target based on phase
   const targetLocation = phase === 'inProgress' ? dropoffLocation : pickupLocation;
 
-  const fetchETA = async (signal?: AbortSignal) => {
-    if (!driverLocation || !targetLocation || !mapboxToken) return;
+  const fetchETA = useCallback(async (force = false) => {
+    if (!driverLocation || !targetLocation) return;
+
+    // Check if we need to update based on distance
+    if (!force && lastFetchPositionRef.current && eta) {
+      const distance = getDistanceMeters(
+        lastFetchPositionRef.current.lat,
+        lastFetchPositionRef.current.lng,
+        driverLocation.lat,
+        driverLocation.lng
+      );
+      if (distance < DISTANCE_THRESHOLD) {
+        return; // Not moved enough
+      }
+    }
+
+    // If no token, use fallback
+    if (!mapboxToken) {
+      setEta(calculateFallbackETA(
+        driverLocation.lat, driverLocation.lng,
+        targetLocation.lat, targetLocation.lng
+      ));
+      lastFetchPositionRef.current = { lat: driverLocation.lat, lng: driverLocation.lng };
+      return;
+    }
+
+    // Abort previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
 
     try {
       const response = await fetch(
         `https://api.mapbox.com/directions/v5/mapbox/driving/${driverLocation.lng},${driverLocation.lat};${targetLocation.lng},${targetLocation.lat}?access_token=${mapboxToken}`,
-        { signal }
+        { signal: abortControllerRef.current.signal }
       );
       const data = await response.json();
 
       if (data.routes?.[0]) {
+        lastFetchPositionRef.current = { lat: driverLocation.lat, lng: driverLocation.lng };
         setEta({
-          minutes: Math.round(data.routes[0].duration / 60),
+          minutes: Math.max(1, Math.round(data.routes[0].duration / 60)),
           distanceKm: data.routes[0].distance / 1000,
+          isFallback: false,
         });
         setLastUpdated(new Date());
+      } else {
+        // No routes, use fallback
+        setEta(calculateFallbackETA(
+          driverLocation.lat, driverLocation.lng,
+          targetLocation.lat, targetLocation.lng
+        ));
       }
     } catch (err) {
       if ((err as any)?.name !== 'AbortError') {
-        console.error('ETA fetch error:', err);
+        console.error('ETA fetch error, using fallback:', err);
+        // Use fallback on error
+        setEta(calculateFallbackETA(
+          driverLocation.lat, driverLocation.lng,
+          targetLocation.lat, targetLocation.lng
+        ));
       }
     }
-  };
+  }, [driverLocation, targetLocation, mapboxToken, eta]);
+
+  // Calculate initial fallback immediately when we have locations
+  useEffect(() => {
+    if (driverLocation && targetLocation && !eta) {
+      setEta(calculateFallbackETA(
+        driverLocation.lat, driverLocation.lng,
+        targetLocation.lat, targetLocation.lng
+      ));
+    }
+  }, [driverLocation, targetLocation, eta]);
 
   // Initial fetch and set up interval for live updates
   useEffect(() => {
-    if (!driverLocation || !targetLocation || !mapboxToken) return;
+    if (!driverLocation || !targetLocation) return;
 
-    const controller = new AbortController();
-
-    // Initial fetch
-    fetchETA(controller.signal);
+    // Initial fetch (with actual API)
+    fetchETA(true);
 
     // Set up interval for live updates
     intervalRef.current = setInterval(() => {
-      fetchETA();
+      fetchETA(true);
     }, REFRESH_INTERVAL);
 
     return () => {
-      controller.abort();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
       }
     };
-  }, [driverLocation?.lat, driverLocation?.lng, targetLocation?.lat, targetLocation?.lng, mapboxToken]);
+  }, [driverLocation?.lat, driverLocation?.lng, targetLocation?.lat, targetLocation?.lng, fetchETA]);
+
+  // Update ETA when driver moves significantly
+  useEffect(() => {
+    if (driverLocation && targetLocation) {
+      fetchETA(false);
+    }
+  }, [driverLocation?.lat, driverLocation?.lng, fetchETA]);
 
   const getStatusConfig = () => {
+    const etaMinutes = eta?.minutes ?? 1;
+    
     switch (phase) {
       case 'matched':
         return {
@@ -93,7 +189,7 @@ const InRideStatusBar = ({
         };
       case 'arriving':
         return {
-          title: eta ? `${eta.minutes} min` : '--',
+          title: `${etaMinutes} min`,
           subtitle: language === 'fr' ? 'Le chauffeur arrive' : 'Driver arriving',
           icon: MapPin,
           color: 'bg-primary',
@@ -107,7 +203,7 @@ const InRideStatusBar = ({
         };
       case 'inProgress':
         return {
-          title: eta ? `${eta.minutes} min` : '--',
+          title: `${etaMinutes} min`,
           subtitle: language === 'fr' ? 'Vers destination' : 'To destination',
           icon: Navigation,
           color: 'bg-accent',
@@ -120,8 +216,8 @@ const InRideStatusBar = ({
 
   // Format ETA as arrival time
   const getArrivalTime = () => {
-    if (!eta) return null;
-    const arrivalTime = new Date(Date.now() + eta.minutes * 60 * 1000);
+    const minutes = eta?.minutes ?? 1;
+    const arrivalTime = new Date(Date.now() + minutes * 60 * 1000);
     return arrivalTime.toLocaleTimeString(language === 'fr' ? 'fr-CA' : 'en-CA', {
       hour: 'numeric',
       minute: '2-digit',
@@ -135,6 +231,9 @@ const InRideStatusBar = ({
     }
     return `${km.toFixed(1)} km`;
   };
+
+  // Connection status
+  const isStale = lastUpdateSeconds > 10;
 
   return (
     <motion.div
@@ -163,6 +262,7 @@ const InRideStatusBar = ({
               </div>
               <p className="text-white/60 text-xs">
                 {formatDistance(eta.distanceKm)}
+                {eta.isFallback && ' ~'}
               </p>
             </div>
           )}
@@ -195,10 +295,13 @@ const InRideStatusBar = ({
               <motion.div
                 animate={{ opacity: [1, 0.4, 1] }}
                 transition={{ duration: 1.5, repeat: Infinity }}
-                className="w-2 h-2 rounded-full bg-destructive"
+                className={`w-2 h-2 rounded-full ${isStale ? 'bg-warning' : 'bg-destructive'}`}
               />
-              <span className="text-xs font-semibold text-destructive uppercase tracking-wide">
-                {language === 'fr' ? 'En direct' : 'Live'}
+              <span className={`text-xs font-semibold uppercase tracking-wide ${isStale ? 'text-warning' : 'text-destructive'}`}>
+                {isStale 
+                  ? (language === 'fr' ? 'Connexion...' : 'Connecting...')
+                  : (language === 'fr' ? 'En direct' : 'Live')
+                }
               </span>
             </div>
 
@@ -221,6 +324,14 @@ const InRideStatusBar = ({
                 {eta.minutes} {language === 'fr' ? 'min' : 'min'}
               </span>
             </div>
+
+            {/* Connection indicator */}
+            {isStale && (
+              <>
+                <div className="w-px h-4 bg-border" />
+                <WifiOff className="h-3.5 w-3.5 text-warning" />
+              </>
+            )}
           </div>
         </motion.div>
       )}
