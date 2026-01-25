@@ -25,6 +25,7 @@ import SafetySheet from '@/components/ride/SafetySheet';
 import TripCompletionScreen from '@/components/ride/TripCompletionScreen';
 import { MapRecenterButton } from '@/components/MapRecenterButton';
 import { useRealtimeDriverTracking } from '@/hooks/useRealtimeDriverTracking';
+import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({ default: m.RideDebugBar })));
 const RideLocationHistory = React.lazy(() => import('@/components/RideLocationHistory').then(m => ({ default: m.RideLocationHistory })));
@@ -105,6 +106,9 @@ const RideBooking = () => {
     : driverLocation;
 
   const { token: mapboxToken } = useMapboxToken();
+
+  // Track rider location for admin visibility
+  useRiderLocationTracking(true);
 
   // Tiered driver notification escalation
   const escalationOptions = currentRide && step === 'searching' && pickup && dropoff && fareEstimate ? {

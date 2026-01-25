@@ -489,6 +489,42 @@ export type Database = {
         }
         Relationships: []
       }
+      rider_locations: {
+        Row: {
+          accuracy: number | null
+          created_at: string
+          id: string
+          is_online: boolean
+          last_seen_at: string
+          lat: number
+          lng: number
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          accuracy?: number | null
+          created_at?: string
+          id?: string
+          is_online?: boolean
+          last_seen_at?: string
+          lat: number
+          lng: number
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          accuracy?: number | null
+          created_at?: string
+          id?: string
+          is_online?: boolean
+          last_seen_at?: string
+          lat?: number
+          lng?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       rides: {
         Row: {
           acceptance_time_seconds: number | null
