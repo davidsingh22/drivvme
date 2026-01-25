@@ -513,20 +513,44 @@ const RideBooking = () => {
   }, [step, pickup]);
 
   const fetchDriverInfo = async (driverId: string) => {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('first_name, last_name, phone_number, avatar_url')
-      .eq('user_id', driverId)
-      .single();
+    console.log('[RideBooking] Fetching driver info for:', driverId);
+    
+    const [profileResult, driverProfileResult] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('first_name, last_name, phone_number, avatar_url')
+        .eq('user_id', driverId)
+        .single(),
+      supabase
+        .from('driver_profiles')
+        .select('vehicle_make, vehicle_model, vehicle_color, license_plate, average_rating')
+        .eq('user_id', driverId)
+        .single()
+    ]);
 
-    const { data: driverProfile } = await supabase
-      .from('driver_profiles')
-      .select('vehicle_make, vehicle_model, vehicle_color, license_plate, average_rating')
-      .eq('user_id', driverId)
-      .single();
+    const { data: profile, error: profileError } = profileResult;
+    const { data: driverProfile, error: driverProfileError } = driverProfileResult;
 
-    if (profile && driverProfile) {
-      setDriverInfo({ ...profile, ...driverProfile });
+    if (profileError) {
+      console.error('[RideBooking] Error fetching driver profile:', profileError);
+    }
+    if (driverProfileError) {
+      console.error('[RideBooking] Error fetching driver vehicle info:', driverProfileError);
+    }
+
+    // Use partial data if available, with fallbacks
+    if (profile || driverProfile) {
+      setDriverInfo({
+        first_name: profile?.first_name || 'Driver',
+        last_name: profile?.last_name || '',
+        phone_number: profile?.phone_number || null,
+        avatar_url: profile?.avatar_url || null,
+        vehicle_make: driverProfile?.vehicle_make || 'Vehicle',
+        vehicle_model: driverProfile?.vehicle_model || '',
+        vehicle_color: driverProfile?.vehicle_color || '',
+        license_plate: driverProfile?.license_plate || '---',
+        average_rating: driverProfile?.average_rating || 5.0,
+      });
     }
   };
 
@@ -903,6 +927,16 @@ const RideBooking = () => {
   };
 
   // FULLSCREEN ACTIVE RIDE EXPERIENCE
+  // Show loading state while fetching driver info for active rides
+  if (isActiveRidePhase && currentRide?.driver_id && !driverInfo) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center gap-4">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <p className="text-muted-foreground">{language === 'fr' ? 'Chargement du trajet...' : 'Loading trip details...'}</p>
+      </div>
+    );
+  }
+
   if (isActiveRidePhase && driverInfo) {
     return (
       <div className="h-screen w-screen relative overflow-hidden">
@@ -1292,32 +1326,97 @@ const RideBooking = () => {
                 </motion.div>
               )}
 
-              {/* Searching Step */}
+{/* Searching Step */}
               {step === 'searching' && (
                 <motion.div
                   key="searching"
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
-                  className="flex flex-col items-center justify-center h-full space-y-6"
+                  className="space-y-6"
                 >
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
-                    className="w-20 h-20 rounded-full border-4 border-primary border-t-transparent"
-                  />
-                  <h2 className="font-display text-2xl font-bold text-center">
-                    {t('booking.searching')}
-                  </h2>
-                  <p className="text-muted-foreground text-center">
-                    Looking for nearby drivers...
-                  </p>
+                  {/* Searching animation */}
+                  <div className="flex flex-col items-center space-y-4 py-6">
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
+                      className="w-16 h-16 rounded-full border-4 border-primary border-t-transparent"
+                    />
+                    <h2 className="font-display text-xl font-bold text-center">
+                      {t('booking.searching')}
+                    </h2>
+                    <p className="text-muted-foreground text-center text-sm">
+                      {language === 'fr' ? 'Recherche de chauffeurs à proximité...' : 'Looking for nearby drivers...'}
+                    </p>
+                  </div>
+
+                  {/* Trip details card */}
+                  <Card className="p-4 space-y-4">
+                    <h3 className="font-semibold text-sm text-muted-foreground">
+                      {language === 'fr' ? 'Détails du trajet' : 'Trip Details'}
+                    </h3>
+                    
+                    {/* Route */}
+                    <div className="space-y-3">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1.5">
+                          <div className="w-3 h-3 rounded-full bg-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-muted-foreground">
+                            {language === 'fr' ? 'Départ' : 'Pickup'}
+                          </p>
+                          <p className="text-sm font-medium truncate">{pickup?.address || currentRide?.pickup_address}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1.5">
+                          <div className="w-3 h-3 rounded-full bg-accent" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-muted-foreground">
+                            {language === 'fr' ? 'Destination' : 'Destination'}
+                          </p>
+                          <p className="text-sm font-medium truncate">{dropoff?.address || currentRide?.dropoff_address}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Trip stats */}
+                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
+                      <div className="text-center">
+                        <p className="font-bold text-lg text-primary">
+                          {formatCurrency(fareEstimate?.total || currentRide?.estimated_fare || 0, language)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {language === 'fr' ? 'Tarif' : 'Fare'}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="font-bold text-lg">
+                          {formatDistance(distanceKm || currentRide?.distance_km || 0, language)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {language === 'fr' ? 'Distance' : 'Distance'}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="font-bold text-lg">
+                          {formatDuration(durationMinutes || currentRide?.estimated_duration_minutes || 0, language)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {language === 'fr' ? 'Durée' : 'Duration'}
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+
                   <Button
                     variant="outline"
                     onClick={handleCancelRide}
-                    className="mt-4"
+                    className="w-full text-destructive border-destructive/50 hover:bg-destructive/10"
                   >
-                    {t('common.cancel')}
+                    {t('common.cancel')} {language === 'fr' ? 'la course' : 'Ride'}
                   </Button>
                 </motion.div>
               )}
