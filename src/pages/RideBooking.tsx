@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, Star, Phone, MessageSquare, CreditCard, Bell } from 'lucide-react';
+import LiveRideProgress from '@/components/LiveRideProgress';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -1191,13 +1192,13 @@ const RideBooking = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
-                  className="space-y-6"
+                  className="space-y-4"
                 >
                   <div className="text-center">
                     <motion.div
                       initial={{ scale: 0 }}
                       animate={{ scale: 1 }}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-success/10 text-success mb-4"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-success/10 text-success mb-2"
                     >
                       <Car className="h-5 w-5" />
                       <span className="font-medium">
@@ -1208,6 +1209,24 @@ const RideBooking = () => {
                       </span>
                     </motion.div>
                   </div>
+
+                  {/* Live Ride Progress - ETA, Distance, Remaining */}
+                  {(step === 'arriving' || step === 'arrived' || step === 'inProgress') && (
+                    <LiveRideProgress
+                      driverLocation={driverLocation}
+                      targetLocation={
+                        step === 'inProgress' 
+                          ? dropoff 
+                          : pickup
+                      }
+                      targetLabel={
+                        step === 'inProgress'
+                          ? dropoff?.address || ''
+                          : pickup?.address || ''
+                      }
+                      phase={step as 'arriving' | 'arrived' | 'inProgress'}
+                    />
+                  )}
 
                   {/* Driver Card */}
                   <Card className="p-6">
