@@ -34,7 +34,8 @@ import {
   Trash2,
   Wallet,
   Mail,
-  Phone
+  Phone,
+  Radio
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
@@ -769,10 +770,16 @@ const AdminDashboard = () => {
             <h1 className="text-3xl font-bold text-foreground">Admin Dashboard</h1>
             <p className="text-muted-foreground">Manage users, payments, and refunds</p>
           </div>
-          <Button onClick={() => navigate('/admin/refunds')} className="gap-2">
-            <RefreshCw className="w-4 h-4" />
-            Issue Refund
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={() => navigate('/admin/drivers-live')} variant="outline" className="gap-2">
+              <Radio className="w-4 h-4" />
+              Live Drivers
+            </Button>
+            <Button onClick={() => navigate('/admin/refunds')} className="gap-2">
+              <RefreshCw className="w-4 h-4" />
+              Issue Refund
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}

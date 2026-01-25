@@ -22,6 +22,7 @@ import { DriverWakeLockBanner } from '@/components/DriverWakeLockBanner';
 import { DriverGPSErrorBanner } from '@/components/DriverGPSErrorBanner';
 import { DriverGPSStatusIndicator } from '@/components/DriverGPSStatusIndicator';
 import { useDriverGPSStreaming } from '@/hooks/useDriverGPSStreaming';
+import { useDriverLocationTracking } from '@/hooks/useDriverLocationTracking';
 import DriverActiveRidePanel from '@/components/DriverActiveRidePanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
@@ -109,6 +110,14 @@ const DriverDashboard = () => {
     isOnTrip: isOnline || !!currentRide,
     updateIntervalMs: 2500, // Stream every 2.5 seconds
     minDistanceMeters: 15, // Or when moved 15+ meters
+  });
+
+  // Admin live map location tracking (separate from ride GPS)
+  useDriverLocationTracking({
+    userId: user?.id,
+    driverId: driverProfile?.id,
+    isOnline,
+    updateIntervalMs: 3000,
   });
 
   // Sync GPS position to local state for map
