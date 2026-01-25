@@ -104,6 +104,17 @@ export default function InAppMessaging({
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !user?.id || !rideId) return;
+
+    if (!recipientId) {
+      toast({
+        title: language === 'fr' ? 'Erreur' : 'Error',
+        description: language === 'fr'
+          ? "Destinataire manquant (recipientId)"
+          : 'Missing recipient (recipientId)',
+        variant: 'destructive',
+      });
+      return;
+    }
     
     setIsSending(true);
     try {
@@ -121,11 +132,19 @@ export default function InAppMessaging({
       if (error) throw error;
 
       setNewMessage('');
-    } catch (err) {
+    } catch (err: any) {
+      const msg =
+        err?.message ||
+        err?.error_description ||
+        err?.details ||
+        (typeof err === 'string' ? err : JSON.stringify(err));
+
       console.error('Error sending message:', err);
       toast({
         title: language === 'fr' ? 'Erreur' : 'Error',
-        description: language === 'fr' ? "Impossible d'envoyer le message" : 'Failed to send message',
+        description: language === 'fr'
+          ? `Impossible d'envoyer le message: ${msg}`
+          : `Failed to send message: ${msg}`,
         variant: 'destructive',
       });
     } finally {
