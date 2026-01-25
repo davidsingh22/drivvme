@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Menu, X, User, LogOut, Shield } from 'lucide-react';
+import { Menu, X, User, LogOut, Shield, MessageSquare } from 'lucide-react';
 import { useState } from 'react';
 import Logo from './Logo';
 import LanguageToggle from './LanguageToggle';
@@ -22,7 +22,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { user, profile, isRider, isDriver, isAdmin, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -207,6 +207,14 @@ const Navbar = () => {
                         onClick={() => setIsOpen(false)}
                       >
                         {t('nav.availableRides')}
+                      </Link>
+                      <Link
+                        to="/driver/messages"
+                        className="px-4 py-2 text-muted-foreground hover:text-foreground flex items-center gap-2"
+                        onClick={() => setIsOpen(false)}
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                        {language === 'fr' ? 'Messages' : 'Messages'}
                       </Link>
                       <Link
                         to="/earnings"
