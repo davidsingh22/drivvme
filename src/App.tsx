@@ -25,6 +25,7 @@ import DriverLive from "./pages/DriverLive";
 import NotFound from "./pages/NotFound";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import DriverFloatingGPSButton from "@/components/DriverFloatingGPSButton";
+import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 
 const queryClient = new QueryClient();
 
@@ -76,12 +77,19 @@ const RideRoute = () => {
   return <RideBooking />;
 };
 
+// Global rider location tracker - runs for all authenticated non-driver users
+const RiderLocationTracker = () => {
+  useRiderLocationTracking(true);
+  return null;
+};
+
 // Wrapped inside BrowserRouter AND AuthProvider to ensure context is available.
 const AppRoutes = () => {
   return (
     <>
       <RouteRestorer />
       <DriverFloatingGPSButton />
+      <RiderLocationTracker />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
