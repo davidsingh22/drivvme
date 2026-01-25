@@ -23,6 +23,7 @@ import { DriverGPSErrorBanner } from '@/components/DriverGPSErrorBanner';
 import { DriverGPSStatusIndicator } from '@/components/DriverGPSStatusIndicator';
 import { useDriverGPSStreaming } from '@/hooks/useDriverGPSStreaming';
 import { useDriverLocationTracking } from '@/hooks/useDriverLocationTracking';
+import { DriverLocationStatus } from '@/components/DriverLocationStatus';
 import DriverActiveRidePanel from '@/components/DriverActiveRidePanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
@@ -113,7 +114,12 @@ const DriverDashboard = () => {
   });
 
   // Admin live map location tracking (separate from ride GPS)
-  useDriverLocationTracking({
+  const {
+    isTracking: locationIsTracking,
+    lastUpdate: locationLastUpdate,
+    locationError,
+    permissionStatus: locationPermission,
+  } = useDriverLocationTracking({
     userId: user?.id,
     driverId: driverProfile?.id,
     isOnline,
@@ -992,6 +998,19 @@ const DriverDashboard = () => {
               <Power className={`h-6 w-6 mr-3 ${isOnline ? '' : 'animate-pulse'}`} />
               {isOnline ? 'Go Offline' : 'Go Online'}
             </Button>
+
+            {/* Location Sharing Status */}
+            {isOnline && (
+              <div className="flex justify-center mb-6">
+                <DriverLocationStatus
+                  isTracking={locationIsTracking}
+                  lastUpdate={locationLastUpdate}
+                  locationError={locationError}
+                  permissionStatus={locationPermission}
+                  isOnline={isOnline}
+                />
+              </div>
+            )}
 
             {/* My Earnings Section */}
             <Card className="p-4 mb-6 gradient-card border-primary/20">

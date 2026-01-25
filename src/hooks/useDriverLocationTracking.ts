@@ -17,9 +17,33 @@ export function useDriverLocationTracking({
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [permissionStatus, setPermissionStatus] = useState<'unknown' | 'granted' | 'denied' | 'prompt'>('unknown');
+
+  // Check geolocation permission on mount
+  useEffect(() => {
+    if ('permissions' in navigator) {
+      navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+        console.log('[DriverLocationTracking] Permission status:', result.state);
+        setPermissionStatus(result.state as 'granted' | 'denied' | 'prompt');
+        
+        result.onchange = () => {
+          console.log('[DriverLocationTracking] Permission changed:', result.state);
+          setPermissionStatus(result.state as 'granted' | 'denied' | 'prompt');
+        };
+      }).catch((err) => {
+        console.warn('[DriverLocationTracking] Permission query failed:', err);
+      });
+    }
+  }, []);
 
   const updateOnce = useCallback(async (online: boolean) => {
-    if (!userId || !driverId) return;
+    if (!userId || !driverId) {
+      console.warn('[DriverLocationTracking] Missing userId or driverId', { userId, driverId });
+      return;
+    }
+
+    console.log('[DriverLocationTracking] Getting position...', { userId, driverId, online });
 
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
@@ -27,6 +51,9 @@ export function useDriverLocationTracking({
         const lng = pos.coords.longitude;
         const heading = pos.coords.heading;
         const speedKph = pos.coords.speed != null ? pos.coords.speed * 3.6 : null;
+
+        console.log('[DriverLocationTracking] Got position:', { lat, lng, heading, speedKph });
+        setLocationError(null);
 
         try {
           await upsertDriverLocation({
@@ -38,20 +65,37 @@ export function useDriverLocationTracking({
             speedKph,
             isOnline: online,
           });
+          console.log('[DriverLocationTracking] Upsert successful');
           setLastUpdate(new Date());
         } catch (err) {
           console.error('[DriverLocationTracking] Upsert error:', err);
+          setLocationError('Failed to save location');
         }
       },
-      (error) => console.error('[DriverLocationTracking] Geolocation error:', error),
+      (error) => {
+        console.error('[DriverLocationTracking] Geolocation error:', error.code, error.message);
+        setLocationError(error.message);
+        
+        if (error.code === 1) {
+          setPermissionStatus('denied');
+        }
+      },
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
     );
   }, [userId, driverId]);
 
   const startSharing = useCallback(async () => {
-    if (!userId || !driverId || timerRef.current) return;
+    if (!userId || !driverId) {
+      console.warn('[DriverLocationTracking] Cannot start - missing ids', { userId, driverId });
+      return;
+    }
+    
+    if (timerRef.current) {
+      console.log('[DriverLocationTracking] Already tracking, skipping start');
+      return;
+    }
 
-    console.log('[DriverLocationTracking] Starting location sharing...');
+    console.log('[DriverLocationTracking] Starting location sharing...', { userId, driverId });
     
     // First update immediately
     await updateOnce(true);
@@ -59,6 +103,7 @@ export function useDriverLocationTracking({
     // Then set interval
     timerRef.current = setInterval(() => updateOnce(true), updateIntervalMs);
     setIsTracking(true);
+    console.log('[DriverLocationTracking] Tracking started, interval:', updateIntervalMs);
   }, [userId, driverId, updateOnce, updateIntervalMs]);
 
   const stopSharing = useCallback(async () => {
@@ -72,26 +117,31 @@ export function useDriverLocationTracking({
     if (driverId) {
       try {
         await setDriverOffline(driverId);
+        console.log('[DriverLocationTracking] Set offline successful');
       } catch (err) {
         console.error('[DriverLocationTracking] Error setting offline:', err);
       }
     }
 
     setIsTracking(false);
+    setLocationError(null);
   }, [driverId]);
 
   // Start/stop based on online status
   useEffect(() => {
-    if (isOnline && userId && driverId) {
+    console.log('[DriverLocationTracking] Effect triggered:', { isOnline, userId, driverId, isTracking });
+    
+    if (isOnline && userId && driverId && !isTracking) {
       startSharing();
     } else if (!isOnline && isTracking) {
       stopSharing();
     }
-  }, [isOnline, userId, driverId, startSharing, stopSharing, isTracking]);
+  }, [isOnline, userId, driverId, isTracking, startSharing, stopSharing]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      console.log('[DriverLocationTracking] Cleanup on unmount');
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
@@ -102,6 +152,8 @@ export function useDriverLocationTracking({
   return {
     isTracking,
     lastUpdate,
+    locationError,
+    permissionStatus,
     stopSharing
   };
 }
