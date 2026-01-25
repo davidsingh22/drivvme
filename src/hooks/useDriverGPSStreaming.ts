@@ -19,6 +19,10 @@ interface GPSStreamingState {
   lastDbSyncTime: number | null;
   retryCount: number;
   secondsSinceLastUpdate: number;
+  // New: DB write status
+  lastDbWriteError: string | null;
+  dbWriteRetryCount: number;
+  isDbSyncing: boolean;
 }
 
 interface UseDriverGPSStreamingOptions {
@@ -33,6 +37,8 @@ const DEFAULT_UPDATE_INTERVAL = 2500; // 2.5 seconds
 const DEFAULT_MIN_DISTANCE = 15; // 15 meters
 const MAX_RETRY_COUNT = 10;
 const RETRY_DELAY_MS = 2000;
+const MAX_DB_RETRY_COUNT = 5;
+const DB_RETRY_BASE_DELAY_MS = 1000;
 
 // Haversine distance in meters
 const getDistanceMeters = (
@@ -66,6 +72,9 @@ export function useDriverGPSStreaming({
     lastDbSyncTime: null,
     retryCount: 0,
     secondsSinceLastUpdate: 0,
+    lastDbWriteError: null,
+    dbWriteRetryCount: 0,
+    isDbSyncing: false,
   });
 
   const watchIdRef = useRef<number | null>(null);
@@ -74,6 +83,8 @@ export function useDriverGPSStreaming({
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const updateTimerRef = useRef<NodeJS.Timeout | null>(null);
   const currentRideIdRef = useRef<string | null>(null);
+  const dbRetryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingWriteRef = useRef<GPSPosition | null>(null);
 
   // Keep rideId ref updated
   useEffect(() => {
@@ -99,8 +110,116 @@ export function useDriverGPSStreaming({
     };
   }, [state.isStreaming]);
 
+  // Write location to DB with retry logic
+  const writeToDb = useCallback(async (position: GPSPosition, retryAttempt = 0): Promise<boolean> => {
+    if (!driverId) return false;
+
+    const activeRideId = currentRideIdRef.current;
+    
+    setState(prev => ({ ...prev, isDbSyncing: true }));
+
+    try {
+      // Always set updated_at = now() to force a change
+      const now = new Date().toISOString();
+
+      // Update driver_profiles for backwards compatibility
+      const profileUpdate = supabase
+        .from('driver_profiles')
+        .update({
+          current_lat: position.lat,
+          current_lng: position.lng,
+          updated_at: now,
+        })
+        .eq('user_id', driverId);
+
+      // Also UPSERT into ride_locations if we have an active ride (one row per ride)
+      if (activeRideId) {
+        const locationUpsert = supabase
+          .from('ride_locations')
+          .upsert(
+            {
+              ride_id: activeRideId,
+              driver_id: driverId,
+              lat: position.lat,
+              lng: position.lng,
+              heading: position.heading,
+              speed: position.speed,
+              accuracy: position.accuracy,
+              updated_at: now, // Force updated_at to change
+            },
+            { onConflict: 'ride_id' }
+          );
+
+        // Run both in parallel
+        const [profileResult, locationResult] = await Promise.all([
+          profileUpdate,
+          locationUpsert,
+        ]);
+
+        if (profileResult.error) {
+          console.error('[GPS] Failed to update driver_profiles:', profileResult.error);
+        }
+        if (locationResult.error) {
+          console.error('[GPS] Failed to upsert ride_location:', locationResult.error);
+          throw new Error(locationResult.error.message);
+        }
+
+        // Success
+        setState(prev => ({
+          ...prev,
+          lastDbSyncTime: Date.now(),
+          isConnected: true,
+          lastDbWriteError: null,
+          dbWriteRetryCount: 0,
+          isDbSyncing: false,
+        }));
+        pendingWriteRef.current = null;
+        return true;
+      } else {
+        // No active ride, just update driver_profiles
+        const { error } = await profileUpdate;
+        if (error) {
+          console.error('[GPS] Failed to update location:', error);
+          throw new Error(error.message);
+        }
+        setState(prev => ({
+          ...prev,
+          lastDbSyncTime: Date.now(),
+          isConnected: true,
+          lastDbWriteError: null,
+          dbWriteRetryCount: 0,
+          isDbSyncing: false,
+        }));
+        return true;
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Network error';
+      console.error('[GPS] DB write error:', errorMessage);
+
+      setState(prev => ({
+        ...prev,
+        isDbSyncing: false,
+        lastDbWriteError: errorMessage,
+        dbWriteRetryCount: retryAttempt + 1,
+      }));
+
+      // Retry with exponential backoff
+      if (retryAttempt < MAX_DB_RETRY_COUNT) {
+        const delay = DB_RETRY_BASE_DELAY_MS * Math.pow(2, retryAttempt);
+        console.log(`[GPS] Retrying DB write in ${delay}ms (attempt ${retryAttempt + 1})`);
+        
+        pendingWriteRef.current = position;
+        dbRetryTimeoutRef.current = setTimeout(() => {
+          if (pendingWriteRef.current) {
+            writeToDb(pendingWriteRef.current, retryAttempt + 1);
+          }
+        }, delay);
+      }
+      return false;
+    }
+  }, [driverId]);
+
   // Update location in database with smart throttling
-  // Writes to BOTH driver_profiles (for backwards compat) AND ride_locations (for realtime tracking)
   const updateLocationInDb = useCallback(async (position: GPSPosition, force = false) => {
     if (!driverId) return;
 
@@ -132,65 +251,14 @@ export function useDriverGPSStreaming({
     lastDbUpdateRef.current = now;
     lastSentPositionRef.current = { lat: position.lat, lng: position.lng };
 
-    try {
-      // Update driver_profiles for backwards compatibility
-      const profileUpdate = supabase
-        .from('driver_profiles')
-        .update({
-          current_lat: position.lat,
-          current_lng: position.lng,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', driverId);
-
-      // Also UPSERT into ride_locations if we have an active ride (one row per ride)
-      const activeRideId = currentRideIdRef.current;
-      if (activeRideId) {
-        const locationUpsert = supabase
-          .from('ride_locations')
-          .upsert(
-            {
-              ride_id: activeRideId,
-              driver_id: driverId,
-              lat: position.lat,
-              lng: position.lng,
-              heading: position.heading,
-              speed: position.speed,
-              accuracy: position.accuracy,
-            },
-            { onConflict: 'ride_id' }
-          );
-
-        // Run both in parallel
-        const [profileResult, locationResult] = await Promise.all([
-          profileUpdate,
-          locationUpsert,
-        ]);
-
-        if (profileResult.error) {
-          console.error('[GPS] Failed to update driver_profiles:', profileResult.error);
-        }
-        if (locationResult.error) {
-          console.error('[GPS] Failed to insert ride_location:', locationResult.error);
-        }
-
-        if (!profileResult.error && !locationResult.error) {
-          setState(prev => ({ ...prev, lastDbSyncTime: now, isConnected: true }));
-        }
-      } else {
-        // No active ride, just update driver_profiles
-        const { error } = await profileUpdate;
-        if (error) {
-          console.error('[GPS] Failed to update location:', error);
-        } else {
-          setState(prev => ({ ...prev, lastDbSyncTime: now, isConnected: true }));
-        }
-      }
-    } catch (err) {
-      console.error('[GPS] Network error updating location:', err);
-      setState(prev => ({ ...prev, isConnected: false }));
+    // Cancel any pending retry
+    if (dbRetryTimeoutRef.current) {
+      clearTimeout(dbRetryTimeoutRef.current);
+      dbRetryTimeoutRef.current = null;
     }
-  }, [driverId, updateIntervalMs, minDistanceMeters]);
+
+    await writeToDb(position, 0);
+  }, [driverId, updateIntervalMs, minDistanceMeters, writeToDb]);
 
   // Start GPS streaming
   const startStreaming = useCallback(() => {
@@ -282,12 +350,22 @@ export function useDriverGPSStreaming({
       clearTimeout(retryTimeoutRef.current);
       retryTimeoutRef.current = null;
     }
-    setState(prev => ({ ...prev, isStreaming: false, isConnected: false }));
+    if (dbRetryTimeoutRef.current) {
+      clearTimeout(dbRetryTimeoutRef.current);
+      dbRetryTimeoutRef.current = null;
+    }
+    setState(prev => ({
+      ...prev,
+      isStreaming: false,
+      isConnected: false,
+      lastDbWriteError: null,
+      dbWriteRetryCount: 0,
+    }));
   }, []);
 
   // Manual retry function
   const retry = useCallback(() => {
-    setState(prev => ({ ...prev, error: null, retryCount: 0 }));
+    setState(prev => ({ ...prev, error: null, retryCount: 0, lastDbWriteError: null, dbWriteRetryCount: 0 }));
     startStreaming();
   }, [startStreaming]);
 
@@ -323,11 +401,20 @@ export function useDriverGPSStreaming({
       if (updateTimerRef.current) {
         clearInterval(updateTimerRef.current);
       }
+      if (dbRetryTimeoutRef.current) {
+        clearTimeout(dbRetryTimeoutRef.current);
+      }
     };
   }, []);
 
+  // Calculate seconds since last DB sync
+  const secondsSinceDbSync = state.lastDbSyncTime 
+    ? Math.floor((Date.now() - state.lastDbSyncTime) / 1000)
+    : null;
+
   return {
     ...state,
+    secondsSinceDbSync,
     retry,
     stopStreaming,
     startStreaming,
