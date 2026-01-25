@@ -320,24 +320,25 @@ export default function AdminDriversLive() {
                 onClose={() => setSelected(null)}
                 closeOnClick={false}
                 maxWidth="320px"
+                className="driver-popup"
               >
-                <div className="p-3 min-w-[280px] text-sm space-y-3">
+                <div className="p-4 min-w-[280px] text-sm space-y-3 bg-black/95 rounded-lg border border-primary/30">
                   {/* Header */}
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                      <Car className="h-5 w-5 text-primary" />
+                    <div className="w-12 h-12 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center">
+                      <Car className="h-6 w-6 text-primary" />
                     </div>
                     <div className="flex-1">
-                      <div className="font-bold text-foreground text-base">
+                      <div className="font-bold text-primary text-lg">
                         {selected.display_name ?? `Driver ${selected.driver_id.slice(0, 8)}`}
                       </div>
                       <div className="flex items-center gap-1.5">
                         <span
-                          className={`w-2 h-2 rounded-full ${
-                            selected.is_online ? "bg-green-500" : "bg-muted"
+                          className={`w-2.5 h-2.5 rounded-full ${
+                            selected.is_online ? "bg-lime-400 shadow-[0_0_8px_rgba(163,230,53,0.6)]" : "bg-muted"
                           }`}
                         />
-                        <span className="text-muted-foreground text-xs">
+                        <span className="text-primary/70 text-xs font-medium">
                           {selected.is_online ? "Online" : "Offline"}
                         </span>
                       </div>
@@ -345,20 +346,20 @@ export default function AdminDriversLive() {
                   </div>
 
                   {/* Current Location */}
-                  <div className="bg-muted/50 rounded-lg p-2.5">
+                  <div className="bg-primary/10 border border-primary/20 rounded-lg p-3">
                     <div className="flex items-start gap-2">
                       <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
                       <div className="flex-1">
-                        <div className="text-xs font-medium text-muted-foreground mb-0.5">Current Location</div>
+                        <div className="text-xs font-semibold text-primary/60 mb-1 uppercase tracking-wide">Current Location</div>
                         {addressLoading ? (
-                          <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <div className="flex items-center gap-1.5 text-primary/50">
                             <Loader2 className="h-3 w-3 animate-spin" />
                             <span className="text-xs">Loading address...</span>
                           </div>
                         ) : selectedAddress ? (
-                          <div className="text-foreground text-sm leading-snug">{selectedAddress}</div>
+                          <div className="text-primary text-sm leading-snug">{selectedAddress}</div>
                         ) : (
-                          <div className="text-muted-foreground text-xs font-mono">
+                          <div className="text-primary/60 text-xs font-mono">
                             {selected.lat.toFixed(5)}, {selected.lng.toFixed(5)}
                           </div>
                         )}
@@ -368,16 +369,16 @@ export default function AdminDriversLive() {
 
                   {/* Contact Info */}
                   {(selected.phone_number || selected.email) && (
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
                       {selected.phone_number && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Phone className="h-3.5 w-3.5" />
+                        <div className="flex items-center gap-2 text-primary/80">
+                          <Phone className="h-4 w-4 text-primary" />
                           <span>{selected.phone_number}</span>
                         </div>
                       )}
                       {selected.email && (
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <Mail className="h-3.5 w-3.5" />
+                        <div className="flex items-center gap-2 text-primary/80">
+                          <Mail className="h-4 w-4 text-primary" />
                           <span className="truncate">{selected.email}</span>
                         </div>
                       )}
@@ -386,16 +387,16 @@ export default function AdminDriversLive() {
 
                   {/* Vehicle Info */}
                   {(selected.vehicle_make || selected.license_plate) && (
-                    <div className="border-t border-border pt-2.5">
-                      <div className="text-xs font-medium text-muted-foreground mb-1">Vehicle</div>
+                    <div className="border-t border-primary/20 pt-3">
+                      <div className="text-xs font-semibold text-primary/60 mb-1.5 uppercase tracking-wide">Vehicle</div>
                       <div className="flex items-center justify-between">
-                        <span className="text-foreground">
+                        <span className="text-primary">
                           {[selected.vehicle_color, selected.vehicle_make, selected.vehicle_model]
                             .filter(Boolean)
                             .join(" ") || "Unknown"}
                         </span>
                         {selected.license_plate && (
-                          <span className="bg-muted px-2 py-0.5 rounded text-xs font-mono font-medium">
+                          <span className="bg-primary/20 border border-primary/30 px-2.5 py-1 rounded text-xs font-mono font-bold text-primary">
                             {selected.license_plate}
                           </span>
                         )}
@@ -404,9 +405,9 @@ export default function AdminDriversLive() {
                   )}
 
                   {/* Stats */}
-                  <div className="border-t border-border pt-2.5 flex items-center justify-between text-xs text-muted-foreground">
-                    <span>Speed: {selected.speed_kph ? `${selected.speed_kph.toFixed(1)} km/h` : "—"}</span>
-                    <span>Updated: {new Date(selected.updated_at).toLocaleTimeString()}</span>
+                  <div className="border-t border-primary/20 pt-3 flex items-center justify-between text-xs text-primary/60">
+                    <span>Speed: <span className="text-lime-400 font-medium">{selected.speed_kph ? `${selected.speed_kph.toFixed(1)} km/h` : "—"}</span></span>
+                    <span>Updated: <span className="text-primary/80">{new Date(selected.updated_at).toLocaleTimeString()}</span></span>
                   </div>
                 </div>
               </Popup>
