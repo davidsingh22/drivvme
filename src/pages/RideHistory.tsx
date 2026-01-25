@@ -137,8 +137,14 @@ const RideHistory = () => {
 
   const handleRideClick = (ride: Ride) => {
     if (isActiveRide(ride.status)) {
-      // Navigate to ride booking page - it will auto-restore the active ride
-      navigate('/ride');
+      // Navigate to the correct live map based on who is viewing.
+      // Drivers should never be sent to the rider booking UI.
+      if (ride.driver_id && user?.id && ride.driver_id === user.id) {
+        navigate('/driver');
+      } else {
+        // Rider flow - RideBooking will auto-restore the active ride
+        navigate('/ride');
+      }
     }
   };
 
