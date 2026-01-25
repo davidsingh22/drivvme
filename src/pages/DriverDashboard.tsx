@@ -19,6 +19,8 @@ import { useAlertSound } from '@/hooks/useAlertSound';
 import { DriverNewRideAlert } from '@/components/DriverNewRideAlert';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { DriverWakeLockBanner } from '@/components/DriverWakeLockBanner';
+import { DriverGPSErrorBanner } from '@/components/DriverGPSErrorBanner';
+import { useDriverGPSStreaming } from '@/hooks/useDriverGPSStreaming';
 
 const PLATFORM_FEE = 5.00;
 
@@ -76,14 +78,30 @@ const DriverDashboard = () => {
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
   const [todayEarnings, setTodayEarnings] = useState(0);
   const [todayRides, setTodayRides] = useState(0);
-  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
   const prevRideIdsRef = useRef<Set<string>>(new Set());
-  const driverLocationWatchIdRef = useRef<number | null>(null);
-  const { play: playAlertSound, stop: stopAlertSound, unlock: unlockAlertSound } = useAlertSound({ 
+  
+  // GPS Streaming for live driver location
+  const {
+    position: gpsPosition,
+    error: gpsError,
+    isStreaming: isGPSStreaming,
+    retryCount: gpsRetryCount,
+    retry: retryGPS,
+  } = useDriverGPSStreaming({
+    driverId: user?.id ?? null,
+    rideId: currentRide?.id ?? null,
+    isOnTrip: isOnline || !!currentRide,
+    updateIntervalMs: 3000, // Update every 3 seconds
+  });
+
+  // Sync GPS position to local state for map
+  const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
+  
+  const { play: playAlertSound, stop: stopAlertSound, unlock: unlockAlertSound } = useAlertSound({
     volume: 0.25, 
     loop: true, 
     loopInterval: 2500 
@@ -258,61 +276,8 @@ const DriverDashboard = () => {
     }
   }, [driverProfile]);
 
-  // Get driver location and update in database
-  // IMPORTANT: keep sending GPS even if driver is "offline" while they have an active ride.
-  useEffect(() => {
-    if (!session || !user) return;
-    if (!('geolocation' in navigator)) return;
-
-    const shouldTrack = isOnline || !!currentRide;
-
-    // Stop tracking when not needed
-    if (!shouldTrack) {
-      if (driverLocationWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(driverLocationWatchIdRef.current);
-        driverLocationWatchIdRef.current = null;
-      }
-      return;
-    }
-
-    // Avoid duplicate watches
-    if (driverLocationWatchIdRef.current !== null) return;
-
-    const updateLocationInDb = async (location: { lat: number; lng: number }) => {
-      const { error } = await supabase
-        .from('driver_profiles')
-        .update({
-          current_lat: location.lat,
-          current_lng: location.lng,
-        })
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.error('[DriverDashboard] Failed to update location:', error);
-      }
-    };
-
-    driverLocationWatchIdRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        const location = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
-        setDriverLocation(location);
-        void updateLocationInDb(location);
-      },
-      (error) => console.error('[DriverDashboard] Location error:', error),
-      // Slightly more forgiving to reduce iOS timeout failures
-      { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 }
-    );
-
-    return () => {
-      if (driverLocationWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(driverLocationWatchIdRef.current);
-        driverLocationWatchIdRef.current = null;
-      }
-    };
-  }, [isOnline, currentRide?.id, session, user]);
+  // GPS location is now handled by useDriverGPSStreaming hook
+  // The hook automatically tracks when isOnline or currentRide changes
 
   // Fetch available rides when online
   useEffect(() => {
@@ -787,6 +752,13 @@ const DriverDashboard = () => {
           {/* Wake Lock Banner - Keep screen awake while driving */}
           <div className="pt-4">
             <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
+            
+            {/* GPS Error Banner - Show when location fails */}
+            <DriverGPSErrorBanner 
+              error={gpsError} 
+              retryCount={gpsRetryCount} 
+              onRetry={retryGPS} 
+            />
           </div>
 
           <div className="p-6 flex-1 overflow-y-auto">
