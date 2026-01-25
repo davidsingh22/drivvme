@@ -233,7 +233,8 @@ const InRideStatusBar = ({
   };
 
   // Connection status
-  const isStale = lastUpdateSeconds > 10;
+  // "Live" when last driver updated_at < 8 seconds old
+  const isStale = lastUpdateSeconds > 8;
 
   return (
     <motion.div
@@ -295,9 +296,9 @@ const InRideStatusBar = ({
               <motion.div
                 animate={{ opacity: [1, 0.4, 1] }}
                 transition={{ duration: 1.5, repeat: Infinity }}
-                className={`w-2 h-2 rounded-full ${isStale ? 'bg-warning' : 'bg-destructive'}`}
+                className={`w-2 h-2 rounded-full ${isStale ? 'bg-warning' : 'bg-success'}`}
               />
-              <span className={`text-xs font-semibold uppercase tracking-wide ${isStale ? 'text-warning' : 'text-destructive'}`}>
+              <span className={`text-xs font-semibold uppercase tracking-wide ${isStale ? 'text-warning' : 'text-success'}`}>
                 {isStale 
                   ? (language === 'fr' ? 'Connexion...' : 'Connecting...')
                   : (language === 'fr' ? 'En direct' : 'Live')

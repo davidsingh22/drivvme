@@ -93,11 +93,13 @@ const DriverDashboard = () => {
     isConnected: isGPSConnected,
     secondsSinceLastUpdate: gpsSecondsSinceLastUpdate,
     secondsSinceDbSync: gpsSecondsSinceDbSync,
+    secondsSinceLastGpsFix: gpsSecondsSinceLastGpsFix,
     retryCount: gpsRetryCount,
     retry: retryGPS,
     lastDbWriteError: gpsLastDbWriteError,
     dbWriteRetryCount: gpsDbWriteRetryCount,
     isDbSyncing: gpsIsDbSyncing,
+    authStatus: gpsAuthStatus,
   } = useDriverGPSStreaming({
     driverId: user?.id ?? null,
     rideId: currentRide?.id ?? null,
@@ -761,20 +763,22 @@ const DriverDashboard = () => {
           <div className="pt-4">
             <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
             
-            {/* GPS Status Indicator - Show when streaming */}
-            {(isOnline || currentRide) && !gpsError && (
+            {/* GPS Status Indicator - Always visible during trip/online (DB is source-of-truth) */}
+            {(isOnline || currentRide) && (
               <DriverGPSStatusIndicator
                 isStreaming={isGPSStreaming}
                 isConnected={isGPSConnected}
                 position={gpsPosition}
                 secondsSinceLastUpdate={gpsSecondsSinceLastUpdate}
                 secondsSinceDbSync={gpsSecondsSinceDbSync}
+                secondsSinceLastGpsFix={gpsSecondsSinceLastGpsFix}
                 retryCount={gpsRetryCount}
                 onRetry={retryGPS}
                 rideId={currentRide?.id ?? null}
                 lastDbWriteError={gpsLastDbWriteError}
                 dbWriteRetryCount={gpsDbWriteRetryCount}
                 isDbSyncing={gpsIsDbSyncing}
+                authStatus={gpsAuthStatus}
               />
             )}
             
