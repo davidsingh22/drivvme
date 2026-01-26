@@ -10,13 +10,14 @@ type AlertSoundOptions = {
 };
 
 /**
- * Best-effort alert sound using WebAudio (no asset files).
+ * LOUD alert sound using WebAudio (no asset files).
+ * Designed to be attention-grabbing for driver notifications.
  * Supports looping for persistent alerts that require user action to dismiss.
  */
 export function useAlertSound(options: AlertSoundOptions = {}) {
-  const volume = options.volume ?? 0.35;
+  const volume = options.volume ?? 0.8; // Default to LOUD
   const loop = options.loop ?? false;
-  const loopInterval = options.loopInterval ?? 2000;
+  const loopInterval = options.loopInterval ?? 1500; // Faster loops
 
   const ctxRef = useRef<AudioContext | null>(null);
   const unlockedRef = useRef(false);
@@ -29,7 +30,10 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     const AudioContextCtor = (window.AudioContext || (window as any).webkitAudioContext) as
       | (new () => AudioContext)
       | undefined;
-    if (!AudioContextCtor) return null;
+    if (!AudioContextCtor) {
+      console.warn('[AlertSound] WebAudio not supported');
+      return null;
+    }
     
     ctxRef.current = new AudioContextCtor();
     console.log('[AlertSound] Created AudioContext, state:', ctxRef.current.state);
@@ -38,10 +42,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
 
   const unlock = useCallback(async () => {
     const ctx = getOrCreateContext();
-    if (!ctx) {
-      console.log('[AlertSound] No AudioContext available');
-      return false;
-    }
+    if (!ctx) return false;
 
     try {
       if (ctx.state === "suspended") {
@@ -53,15 +54,16 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
       if (!unlockedRef.current && ctx.state === "running") {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
-        gain.gain.value = 0.001; // Nearly silent
+        gain.gain.value = 0.001;
         osc.connect(gain);
         gain.connect(ctx.destination);
         osc.start();
         osc.stop(ctx.currentTime + 0.01);
+        console.log('[AlertSound] Played silent unlock tone');
       }
       
       unlockedRef.current = ctx.state === "running";
-      console.log('[AlertSound] Unlock complete, state:', ctx.state, 'unlocked:', unlockedRef.current);
+      console.log('[AlertSound] Unlock result:', unlockedRef.current);
       return unlockedRef.current;
     } catch (err) {
       console.error('[AlertSound] Unlock error:', err);
@@ -69,18 +71,13 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     }
   }, [getOrCreateContext]);
 
-  // Auto-unlock on user interaction
+  // Auto-unlock on ANY user interaction
   useEffect(() => {
     const handler = () => void unlock();
-    window.addEventListener("pointerdown", handler, { passive: true });
-    window.addEventListener("keydown", handler);
-    window.addEventListener("touchstart", handler, { passive: true });
-    window.addEventListener("click", handler, { passive: true });
+    const events = ["pointerdown", "keydown", "touchstart", "click", "touchend"];
+    events.forEach(e => window.addEventListener(e, handler, { passive: true }));
     return () => {
-      window.removeEventListener("pointerdown", handler);
-      window.removeEventListener("keydown", handler);
-      window.removeEventListener("touchstart", handler);
-      window.removeEventListener("click", handler);
+      events.forEach(e => window.removeEventListener(e, handler));
     };
   }, [unlock]);
 
@@ -95,12 +92,12 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   }, []);
 
   const playOnce = useCallback(async () => {
-    // Always try to unlock first
+    // Always try to unlock/resume first
     await unlock();
     
     const ctx = ctxRef.current;
     if (!ctx) {
-      console.log('[AlertSound] playOnce: No context');
+      console.warn('[AlertSound] No AudioContext available');
       return false;
     }
     
@@ -108,57 +105,73 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     if (ctx.state === "suspended") {
       try {
         await ctx.resume();
+        console.log('[AlertSound] Resumed context before playing');
       } catch (e) {
-        console.log('[AlertSound] Failed to resume:', e);
+        console.warn('[AlertSound] Could not resume:', e);
       }
     }
     
     if (ctx.state !== "running") {
-      console.log('[AlertSound] playOnce: Context not running, state:', ctx.state);
+      console.warn('[AlertSound] Context not running:', ctx.state);
       return false;
     }
 
-    console.log('[AlertSound] Playing alert beeps...');
+    console.log('[AlertSound] 🔊 Playing LOUD alert!');
     
     const now = ctx.currentTime;
     const master = ctx.createGain();
     master.gain.value = volume;
     master.connect(ctx.destination);
 
-    const beep = (start: number, freq: number, duration: number) => {
+    // Create a more attention-grabbing alarm sound
+    const playTone = (startTime: number, freq: number, duration: number, type: OscillatorType = "square") => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = "sine";
+      osc.type = type;
       osc.frequency.value = freq;
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(1, start + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+      
+      // Sharp attack, sustain, quick release
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(1, startTime + 0.02);
+      gain.gain.setValueAtTime(1, startTime + duration - 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      
       osc.connect(gain);
       gain.connect(master);
-      osc.start(start);
-      osc.stop(start + duration + 0.02);
+      osc.start(startTime);
+      osc.stop(startTime + duration + 0.02);
     };
 
-    // Three attention-grabbing beeps (more urgent than two)
-    beep(now + 0.0, 880, 0.18);
-    beep(now + 0.26, 880, 0.18);
-    beep(now + 0.52, 1100, 0.22); // Higher pitch final beep
+    // LOUD alarm pattern - alternating high/low tones like a siren
+    playTone(now + 0.0, 880, 0.15, "square");   // High
+    playTone(now + 0.18, 660, 0.15, "square");  // Low
+    playTone(now + 0.36, 880, 0.15, "square");  // High
+    playTone(now + 0.54, 660, 0.15, "square");  // Low
+    playTone(now + 0.72, 1100, 0.25, "sawtooth"); // Final high alert
 
     return true;
   }, [unlock, volume]);
 
   const play = useCallback(async () => {
     console.log('[AlertSound] play() called, loop:', loop);
+    
+    // Stop any existing loop first
+    loopingRef.current = false;
+    if (loopTimeoutRef.current) {
+      clearTimeout(loopTimeoutRef.current);
+      loopTimeoutRef.current = null;
+    }
+    
     const result = await playOnce();
     
-    if (loop && result) {
+    if (loop) {
       loopingRef.current = true;
       
       const scheduleNext = () => {
         if (!loopingRef.current) return;
         loopTimeoutRef.current = window.setTimeout(async () => {
           if (loopingRef.current) {
-            console.log('[AlertSound] Playing loop iteration');
+            console.log('[AlertSound] 🔁 Loop iteration');
             await playOnce();
             scheduleNext();
           }
@@ -172,7 +185,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   }, [playOnce, loop, loopInterval]);
 
   const stop = useCallback(() => {
-    console.log('[AlertSound] stop() called');
+    console.log('[AlertSound] ⏹️ Stopping sound');
     loopingRef.current = false;
     if (loopTimeoutRef.current) {
       clearTimeout(loopTimeoutRef.current);
