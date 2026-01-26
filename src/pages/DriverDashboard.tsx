@@ -136,9 +136,9 @@ const DriverDashboard = () => {
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
   
   const { play: playAlertSound, stop: stopAlertSound, unlock: unlockAlertSound } = useAlertSound({
-    volume: 0.25, 
+    volume: 0.35, 
     loop: true, 
-    loopInterval: 2500 
+    loopInterval: 2000 
   });
   const alertStartTimeRef = useRef<number | null>(null);
 
