@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
-import drivemeHeroVideo from '@/assets/driveme-hero-video.mp4';
+import drivemeGirlsHero from '@/assets/driveme-girls-hero.png';
 const features = [
   {
     icon: TrendingDown,
@@ -124,7 +124,7 @@ const Landing = () => {
             </motion.div>
           </div>
 
-          {/* Hero Video */}
+          {/* Hero Image */}
           <motion.div
             className="mt-16 flex justify-center px-4"
             initial={{ opacity: 0, scale: 0.8 }}
@@ -132,12 +132,9 @@ const Landing = () => {
             transition={{ duration: 0.8, delay: 0.6 }}
           >
             <div className="relative w-full max-w-2xl">
-              <video 
-                src={drivemeHeroVideo}
-                autoPlay
-                loop
-                muted
-                playsInline
+              <img 
+                src={drivemeGirlsHero}
+                alt="Drivveme brand ambassadors"
                 className="w-full h-auto max-h-[70vh] object-contain rounded-2xl shadow-glow"
               />
               {/* Glow effect */}
