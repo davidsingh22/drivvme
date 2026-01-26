@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
-
+import drivemeGirls from '@/assets/driveme-girls.png';
 const features = [
   {
     icon: TrendingDown,
@@ -124,9 +124,9 @@ const Landing = () => {
             </motion.div>
           </div>
 
-          {/* Floating car animation */}
+          {/* Floating car animation with girls */}
           <motion.div
-            className="mt-16 flex justify-center"
+            className="mt-16 flex justify-center items-center gap-8"
             initial={{ opacity: 0, scale: 0.8 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.8, delay: 0.6 }}
@@ -141,6 +141,20 @@ const Landing = () => {
               </div>
               {/* Glow effect */}
               <div className="absolute inset-0 w-64 h-64 md:w-80 md:h-80 rounded-full bg-primary/20 blur-3xl -z-10" />
+            </motion.div>
+            
+            {/* Driveme Girls */}
+            <motion.div
+              initial={{ opacity: 0, x: 50 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.8, delay: 0.8 }}
+              className="hidden md:block"
+            >
+              <img 
+                src={drivemeGirls} 
+                alt="Driveme brand ambassadors" 
+                className="h-72 lg:h-96 w-auto object-contain rounded-2xl shadow-glow"
+              />
             </motion.div>
           </motion.div>
         </div>
