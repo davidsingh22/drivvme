@@ -136,9 +136,9 @@ const DriverDashboard = () => {
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
   
   const { play: playAlertSound, stop: stopAlertSound, unlock: unlockAlertSound } = useAlertSound({
-    volume: 0.35, 
+    volume: 1.0,  // MAXIMUM volume
     loop: true, 
-    loopInterval: 2000 
+    loopInterval: 1500  // Faster loop - every 1.5 seconds
   });
   const alertStartTimeRef = useRef<number | null>(null);
 
@@ -428,14 +428,19 @@ const DriverDashboard = () => {
           try {
             // Reliable in-app fallback alert (works even when system push is flaky on mobile browsers)
             if (!currentRide && payload.eventType === 'INSERT') {
+              console.log('[DriverDashboard] 🚗 New ride INSERT detected via realtime!');
+              
+              // Play LOUD alert sound immediately on realtime event
+              void playAlertSound();
+              
               toast({
-                title: 'New ride request',
+                title: '🚗 NEW RIDE REQUEST!',
                 description: 'A rider is looking for a driver now.',
               });
 
               if ('vibrate' in navigator) {
-                // best-effort
-                (navigator as any).vibrate?.([200, 100, 200]);
+                // Strong vibration pattern
+                (navigator as any).vibrate?.([300, 100, 300, 100, 500]);
               }
             }
             fetchRides();
