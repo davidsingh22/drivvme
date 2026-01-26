@@ -14,7 +14,7 @@ type AlertSoundOptions = {
  * Supports looping for persistent alerts that require user action to dismiss.
  */
 export function useAlertSound(options: AlertSoundOptions = {}) {
-  const volume = options.volume ?? 0.18;
+  const volume = options.volume ?? 0.35;
   const loop = options.loop ?? false;
   const loopInterval = options.loopInterval ?? 2000;
 
@@ -23,31 +23,64 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   const loopingRef = useRef(false);
   const loopTimeoutRef = useRef<number | null>(null);
 
-  const unlock = useCallback(async () => {
-    if (unlockedRef.current) return;
-
+  const getOrCreateContext = useCallback(() => {
+    if (ctxRef.current) return ctxRef.current;
+    
     const AudioContextCtor = (window.AudioContext || (window as any).webkitAudioContext) as
       | (new () => AudioContext)
       | undefined;
-    if (!AudioContextCtor) return;
-
-    if (!ctxRef.current) ctxRef.current = new AudioContextCtor();
-
-    try {
-      if (ctxRef.current.state === "suspended") await ctxRef.current.resume();
-      unlockedRef.current = ctxRef.current.state === "running";
-    } catch {
-      // ignore
-    }
+    if (!AudioContextCtor) return null;
+    
+    ctxRef.current = new AudioContextCtor();
+    console.log('[AlertSound] Created AudioContext, state:', ctxRef.current.state);
+    return ctxRef.current;
   }, []);
 
+  const unlock = useCallback(async () => {
+    const ctx = getOrCreateContext();
+    if (!ctx) {
+      console.log('[AlertSound] No AudioContext available');
+      return false;
+    }
+
+    try {
+      if (ctx.state === "suspended") {
+        console.log('[AlertSound] Resuming suspended AudioContext...');
+        await ctx.resume();
+      }
+      
+      // Play a silent sound to fully unlock on iOS
+      if (!unlockedRef.current && ctx.state === "running") {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        gain.gain.value = 0.001; // Nearly silent
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.01);
+      }
+      
+      unlockedRef.current = ctx.state === "running";
+      console.log('[AlertSound] Unlock complete, state:', ctx.state, 'unlocked:', unlockedRef.current);
+      return unlockedRef.current;
+    } catch (err) {
+      console.error('[AlertSound] Unlock error:', err);
+      return false;
+    }
+  }, [getOrCreateContext]);
+
+  // Auto-unlock on user interaction
   useEffect(() => {
     const handler = () => void unlock();
     window.addEventListener("pointerdown", handler, { passive: true });
     window.addEventListener("keydown", handler);
+    window.addEventListener("touchstart", handler, { passive: true });
+    window.addEventListener("click", handler, { passive: true });
     return () => {
       window.removeEventListener("pointerdown", handler);
       window.removeEventListener("keydown", handler);
+      window.removeEventListener("touchstart", handler);
+      window.removeEventListener("click", handler);
     };
   }, [unlock]);
 
@@ -62,10 +95,31 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   }, []);
 
   const playOnce = useCallback(async () => {
+    // Always try to unlock first
     await unlock();
+    
     const ctx = ctxRef.current;
-    if (!ctx || ctx.state !== "running") return false;
+    if (!ctx) {
+      console.log('[AlertSound] playOnce: No context');
+      return false;
+    }
+    
+    // Force resume if suspended
+    if (ctx.state === "suspended") {
+      try {
+        await ctx.resume();
+      } catch (e) {
+        console.log('[AlertSound] Failed to resume:', e);
+      }
+    }
+    
+    if (ctx.state !== "running") {
+      console.log('[AlertSound] playOnce: Context not running, state:', ctx.state);
+      return false;
+    }
 
+    console.log('[AlertSound] Playing alert beeps...');
+    
     const now = ctx.currentTime;
     const master = ctx.createGain();
     master.gain.value = volume;
@@ -94,6 +148,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   }, [unlock, volume]);
 
   const play = useCallback(async () => {
+    console.log('[AlertSound] play() called, loop:', loop);
     const result = await playOnce();
     
     if (loop && result) {
@@ -103,6 +158,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
         if (!loopingRef.current) return;
         loopTimeoutRef.current = window.setTimeout(async () => {
           if (loopingRef.current) {
+            console.log('[AlertSound] Playing loop iteration');
             await playOnce();
             scheduleNext();
           }
@@ -116,6 +172,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   }, [playOnce, loop, loopInterval]);
 
   const stop = useCallback(() => {
+    console.log('[AlertSound] stop() called');
     loopingRef.current = false;
     if (loopTimeoutRef.current) {
       clearTimeout(loopTimeoutRef.current);
