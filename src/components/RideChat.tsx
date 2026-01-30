@@ -195,18 +195,28 @@ export default function RideChat({
       {/* Header */}
       <div className="p-4 border-b bg-card flex items-center gap-3">
         {onClose && (
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <ArrowLeft className="h-5 w-5" />
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={onClose}
+            className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="text-sm">
+              {language === 'fr' ? 'Retour à la course' : 'Back to Ride'}
+            </span>
           </Button>
         )}
-        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-          <MessageSquare className="h-5 w-5 text-primary" />
-        </div>
-        <div className="flex-1">
-          <p className="font-semibold">
-            {language === 'fr' ? 'Messages de la course' : 'Ride Messages'}
-          </p>
-          <p className="text-xs text-muted-foreground">{otherPartyName}</p>
+        <div className="flex-1 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+            <MessageSquare className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <p className="font-semibold">
+              {language === 'fr' ? 'Messages de la course' : 'Ride Messages'}
+            </p>
+            <p className="text-xs text-muted-foreground">{otherPartyName}</p>
+          </div>
         </div>
         <Button variant="ghost" size="icon" onClick={fetchMessages} disabled={isLoading}>
           <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
