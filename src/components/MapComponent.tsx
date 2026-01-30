@@ -313,10 +313,9 @@ const MapComponent = ({
     marker.style.alignItems = 'center';
     marker.style.justifyContent = 'center';
     
-    // Large person standing icon
-    marker.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-      <circle cx="12" cy="4" r="3"/>
-      <path d="M12 8c-2.21 0-4 1.79-4 4v5h2v7h4v-7h2v-5c0-2.21-1.79-4-4-4z"/>
+    // Car icon (so both driver + rider are shown as vehicles on the map)
+    marker.innerHTML = `<svg width="28" height="28" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+      <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
     </svg>`;
 
     // Add label
@@ -401,7 +400,8 @@ const MapComponent = ({
         if (driverMarkerElementRef.current) {
           const arrow = driverMarkerElementRef.current.querySelector('.driver-arrow') as HTMLElement;
           if (arrow) {
-            arrow.style.transform = `rotate(${bearing}deg)`;
+            // Preserve centering translate while rotating (otherwise the marker can jump off-center)
+            arrow.style.transform = `translate(-50%, -50%) rotate(${bearing}deg)`;
           }
         }
 
