@@ -138,20 +138,20 @@ const MapComponent = ({
     };
   }, [token, onMapClick]);
 
-  // Create driver marker element with car icon and rotation support
+  // Create driver marker element with prominent car icon
   const createDriverMarkerElement = useCallback(() => {
     const wrapper = document.createElement('div');
     wrapper.className = 'driver-marker-wrapper';
-    wrapper.style.width = '56px';
-    wrapper.style.height = '56px';
+    wrapper.style.width = '70px';
+    wrapper.style.height = '70px';
     wrapper.style.position = 'relative';
 
     const pulse = document.createElement('div');
     pulse.className = 'driver-pulse';
     pulse.style.position = 'absolute';
-    pulse.style.inset = '4px';
+    pulse.style.inset = '0';
     pulse.style.borderRadius = '50%';
-    pulse.style.backgroundColor = 'rgba(168, 85, 247, 0.25)';
+    pulse.style.backgroundColor = 'rgba(168, 85, 247, 0.3)';
     pulse.style.animation = 'driver-pulse 2s infinite';
     
     const marker = document.createElement('div');
@@ -160,24 +160,41 @@ const MapComponent = ({
     marker.style.top = '50%';
     marker.style.left = '50%';
     marker.style.transform = 'translate(-50%, -50%)';
-    marker.style.width = '44px';
-    marker.style.height = '44px';
+    marker.style.width = '54px';
+    marker.style.height = '54px';
     marker.style.borderRadius = '50%';
     marker.style.backgroundColor = '#a855f7';
-    marker.style.border = '3px solid white';
-    marker.style.boxShadow = '0 4px 16px rgba(168, 85, 247, 0.6)';
+    marker.style.border = '4px solid white';
+    marker.style.boxShadow = '0 6px 20px rgba(168, 85, 247, 0.7)';
     marker.style.display = 'flex';
     marker.style.alignItems = 'center';
     marker.style.justifyContent = 'center';
     marker.style.transition = 'transform 0.3s ease-out';
     
-    // Car icon SVG - distinct vehicle shape
-    marker.innerHTML = `<svg width="26" height="26" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
+    // Large prominent car icon SVG
+    marker.innerHTML = `<svg width="32" height="32" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
       <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/>
     </svg>`;
+
+    // Add label
+    const label = document.createElement('div');
+    label.style.position = 'absolute';
+    label.style.bottom = '-20px';
+    label.style.left = '50%';
+    label.style.transform = 'translateX(-50%)';
+    label.style.backgroundColor = '#a855f7';
+    label.style.color = 'white';
+    label.style.padding = '2px 8px';
+    label.style.borderRadius = '10px';
+    label.style.fontSize = '10px';
+    label.style.fontWeight = 'bold';
+    label.style.whiteSpace = 'nowrap';
+    label.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+    label.textContent = 'DRIVER';
     
     wrapper.appendChild(pulse);
     wrapper.appendChild(marker);
+    wrapper.appendChild(label);
 
     // Add pulse animation styles
     if (!document.getElementById('driver-marker-styles')) {
@@ -186,7 +203,7 @@ const MapComponent = ({
       style.textContent = `
         @keyframes driver-pulse {
           0% { transform: scale(0.85); opacity: 1; }
-          50% { transform: scale(1.15); opacity: 0.4; }
+          50% { transform: scale(1.2); opacity: 0.3; }
           100% { transform: scale(0.85); opacity: 1; }
         }
       `;
@@ -265,12 +282,12 @@ const MapComponent = ({
     }
   }, [dropoff, mapLoaded, createMarkerElement]);
 
-  // Create rider marker element with pulsing effect
+  // Create rider marker element with prominent person icon
   const createRiderMarkerElement = useCallback(() => {
     const wrapper = document.createElement('div');
     wrapper.className = 'rider-marker-wrapper';
-    wrapper.style.width = '40px';
-    wrapper.style.height = '40px';
+    wrapper.style.width = '60px';
+    wrapper.style.height = '60px';
     wrapper.style.position = 'relative';
 
     const pulse = document.createElement('div');
@@ -278,29 +295,63 @@ const MapComponent = ({
     pulse.style.position = 'absolute';
     pulse.style.inset = '0';
     pulse.style.borderRadius = '50%';
-    pulse.style.backgroundColor = 'rgba(59, 130, 246, 0.3)';
-    pulse.style.animation = 'pulse 2s infinite';
+    pulse.style.backgroundColor = 'rgba(59, 130, 246, 0.35)';
+    pulse.style.animation = 'rider-pulse 2s infinite';
     
     const marker = document.createElement('div');
     marker.style.position = 'absolute';
     marker.style.top = '50%';
     marker.style.left = '50%';
     marker.style.transform = 'translate(-50%, -50%)';
-    marker.style.width = '28px';
-    marker.style.height = '28px';
+    marker.style.width = '44px';
+    marker.style.height = '44px';
     marker.style.borderRadius = '50%';
     marker.style.backgroundColor = '#3b82f6';
-    marker.style.border = '3px solid white';
-    marker.style.boxShadow = '0 4px 14px rgba(59, 130, 246, 0.5)';
+    marker.style.border = '4px solid white';
+    marker.style.boxShadow = '0 6px 20px rgba(59, 130, 246, 0.6)';
     marker.style.display = 'flex';
     marker.style.alignItems = 'center';
     marker.style.justifyContent = 'center';
     
-    // Add person icon
-    marker.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="8" r="4"/><path d="M12 14c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4z"/></svg>`;
+    // Large person standing icon
+    marker.innerHTML = `<svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+      <circle cx="12" cy="4" r="3"/>
+      <path d="M12 8c-2.21 0-4 1.79-4 4v5h2v7h4v-7h2v-5c0-2.21-1.79-4-4-4z"/>
+    </svg>`;
+
+    // Add label
+    const label = document.createElement('div');
+    label.style.position = 'absolute';
+    label.style.bottom = '-20px';
+    label.style.left = '50%';
+    label.style.transform = 'translateX(-50%)';
+    label.style.backgroundColor = '#3b82f6';
+    label.style.color = 'white';
+    label.style.padding = '2px 8px';
+    label.style.borderRadius = '10px';
+    label.style.fontSize = '10px';
+    label.style.fontWeight = 'bold';
+    label.style.whiteSpace = 'nowrap';
+    label.style.boxShadow = '0 2px 8px rgba(0,0,0,0.3)';
+    label.textContent = 'YOU';
     
     wrapper.appendChild(pulse);
     wrapper.appendChild(marker);
+    wrapper.appendChild(label);
+
+    // Add rider pulse animation styles
+    if (!document.getElementById('rider-marker-styles')) {
+      const style = document.createElement('style');
+      style.id = 'rider-marker-styles';
+      style.textContent = `
+        @keyframes rider-pulse {
+          0% { transform: scale(0.85); opacity: 1; }
+          50% { transform: scale(1.2); opacity: 0.3; }
+          100% { transform: scale(0.85); opacity: 1; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
 
     return wrapper;
   }, []);
