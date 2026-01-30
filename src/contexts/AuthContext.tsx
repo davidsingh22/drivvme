@@ -90,7 +90,7 @@ interface AuthContextType {
       licensePlate: string;
     }
   ) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   refreshDriverProfile: () => Promise<void>;
@@ -418,9 +418,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // THEN check for existing session
     (async () => {
       setAuthLoading(true);
+      
+      // Check if user opted out of "Remember me" - if so, clear session on new browser session
+      const isSessionOnly = sessionStorage.getItem('drivvme_session_only') === null && 
+                            localStorage.getItem('drivvme_remember_me') === null;
+      
       const {
         data: { session: existingSession },
       } = await supabase.auth.getSession();
+      
+      // If user didn't check "Remember me" and this is a new browser session, sign out
+      if (existingSession && !localStorage.getItem('drivvme_remember_me') && !sessionStorage.getItem('drivvme_session_only')) {
+        // New browser session without remember me - user needs to log in again
+        // But only if they previously logged in without remember me
+        const hadSessionOnly = localStorage.getItem('drivvme_had_session_only') === 'true';
+        if (hadSessionOnly) {
+          await supabase.auth.signOut();
+          localStorage.removeItem('drivvme_had_session_only');
+          setAuthLoading(false);
+          setHasInitialized(true);
+          return;
+        }
+      }
+      
+      // Track if this was a session-only login for next browser open
+      if (sessionStorage.getItem('drivvme_session_only')) {
+        localStorage.setItem('drivvme_had_session_only', 'true');
+      }
+      
       // Set session/user immediately so routes don't redirect while profile is still loading.
       setSession(existingSession);
       setUser(existingSession?.user ?? null);
@@ -553,8 +578,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string, rememberMe: boolean = true) => {
     // Don't set isLoading here - onAuthStateChange handles it
+    
+    // Store remember me preference for session recovery logic
+    try {
+      if (rememberMe) {
+        localStorage.setItem('drivvme_remember_me', 'true');
+      } else {
+        localStorage.removeItem('drivvme_remember_me');
+        sessionStorage.setItem('drivvme_session_only', 'true');
+      }
+    } catch {}
+    
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -583,11 +619,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setDriverProfile(null);
     setRoles([]);
     
-    // Clear cached auth data
+    // Clear cached auth data and remember me preferences
     try {
       const keys = Object.keys(localStorage).filter(k => k.startsWith('auth-cache:'));
       keys.forEach(k => localStorage.removeItem(k));
       localStorage.removeItem('last_route');
+      localStorage.removeItem('drivvme_remember_me');
+      sessionStorage.removeItem('drivvme_session_only');
     } catch {}
 
     // Fire-and-forget the actual signOut call to Supabase
