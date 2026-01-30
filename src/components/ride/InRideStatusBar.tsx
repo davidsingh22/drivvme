@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, Navigation, MapPin, Route, WifiOff } from 'lucide-react';
+import { Clock, Navigation, MapPin } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 
@@ -224,105 +224,33 @@ const InRideStatusBar = ({
     });
   };
 
-  // Format distance
-  const formatDistance = (km: number) => {
-    if (km < 1) {
-      return `${Math.round(km * 1000)} m`;
-    }
-    return `${km.toFixed(1)} km`;
-  };
-
-  // Connection status
-  // "Live" when last driver updated_at < 8 seconds old
-  const isStale = lastUpdateSeconds > 8;
 
   return (
     <motion.div
       initial={{ y: -20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      className="absolute top-4 left-4 right-4 z-10 space-y-2"
+      className="absolute top-4 left-4 right-4 z-10 pointer-events-none"
     >
-      {/* Main status bar */}
-      <div className={`${config.color} rounded-2xl px-4 py-3 shadow-lg backdrop-blur-sm`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-white/20 rounded-full">
-              <Icon className="h-5 w-5 text-white" />
-            </div>
-            <div>
-              <h3 className="text-white font-bold text-xl">{config.title}</h3>
-              <p className="text-white/80 text-sm">{config.subtitle}</p>
-            </div>
-          </div>
-
-          {eta && (
-            <div className="text-right">
-              <div className="flex items-center gap-1 text-white/80 text-sm">
-                <Clock className="h-3 w-3" />
-                <span>{getArrivalTime()}</span>
-              </div>
-              <p className="text-white/60 text-xs">
-                {formatDistance(eta.distanceKm)}
-                {eta.isFallback && ' ~'}
-              </p>
-            </div>
-          )}
+      {/* Compact status bar */}
+      <div className={`${config.color} rounded-xl px-3 py-2 shadow-lg backdrop-blur-sm inline-flex items-center gap-3 pointer-events-auto`}>
+        <div className="p-1.5 bg-white/20 rounded-full">
+          <Icon className="h-4 w-4 text-white" />
         </div>
+        <div className="flex items-center gap-2">
+          <h3 className="text-white font-bold text-base">{config.title}</h3>
+          <span className="text-white/70 text-sm">{config.subtitle}</span>
+        </div>
+
+        {eta && (
+          <>
+            <div className="w-px h-4 bg-white/30" />
+            <div className="flex items-center gap-1 text-white/80 text-xs">
+              <Clock className="h-3 w-3" />
+              <span>{getArrivalTime()}</span>
+            </div>
+          </>
+        )}
       </div>
-
-      {/* Live distance/time chip - show during arrived and inProgress phases */}
-      {eta && (phase === 'arriving' || phase === 'arrived' || phase === 'inProgress') && (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="flex justify-center"
-        >
-          <div className="bg-card/95 backdrop-blur-md rounded-full px-4 py-2 shadow-lg border border-border flex items-center gap-3">
-            {/* Live indicator */}
-            <div className="flex items-center gap-1.5">
-              <motion.div
-                animate={{ opacity: [1, 0.4, 1] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
-                className={`w-2 h-2 rounded-full ${isStale ? 'bg-warning' : 'bg-success'}`}
-              />
-              <span className={`text-xs font-semibold uppercase tracking-wide ${isStale ? 'text-warning' : 'text-success'}`}>
-                {isStale 
-                  ? (language === 'fr' ? 'Connexion...' : 'Connecting...')
-                  : (language === 'fr' ? 'En direct' : 'Live')
-                }
-              </span>
-            </div>
-
-            <div className="w-px h-4 bg-border" />
-
-            {/* Distance */}
-            <div className="flex items-center gap-1.5">
-              <Route className="h-4 w-4 text-primary" />
-              <span className="font-bold text-foreground">
-                {formatDistance(eta.distanceKm)}
-              </span>
-            </div>
-
-            <div className="w-px h-4 bg-border" />
-
-            {/* Time */}
-            <div className="flex items-center gap-1.5">
-              <Clock className="h-4 w-4 text-muted-foreground" />
-              <span className="font-bold text-foreground">
-                {eta.minutes} {language === 'fr' ? 'min' : 'min'}
-              </span>
-            </div>
-
-            {/* Connection indicator */}
-            {isStale && (
-              <>
-                <div className="w-px h-4 bg-border" />
-                <WifiOff className="h-3.5 w-3.5 text-warning" />
-              </>
-            )}
-          </div>
-        </motion.div>
-      )}
     </motion.div>
   );
 };
