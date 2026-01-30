@@ -111,7 +111,7 @@ const MapComponent = ({
       container: mapContainerRef.current,
       style: 'mapbox://styles/mapbox/dark-v11',
       center: initialCenter as [number, number],
-      zoom: 13,
+      zoom: 16, // Street-level zoom for detailed view
     });
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
@@ -506,7 +506,7 @@ const MapComponent = ({
       if (followDriver && driverLocation) {
         mapRef.current?.easeTo({
           center: [driverLocation.lng, driverLocation.lat],
-          zoom: 16,
+          zoom: 17, // Street-level zoom to see exact location
           duration: 800,
         });
         return;
@@ -524,9 +524,9 @@ const MapComponent = ({
           (bounds, coord) => bounds.extend(coord),
           new mapboxgl.LngLatBounds(points[0], points[0])
         );
-        mapRef.current?.fitBounds(bounds, { padding: 80, duration: 600 });
+        mapRef.current?.fitBounds(bounds, { padding: 80, duration: 600, maxZoom: 17 });
       } else if (points.length === 1) {
-        mapRef.current?.flyTo({ center: points[0], zoom: 14, duration: 600 });
+        mapRef.current?.flyTo({ center: points[0], zoom: 17, duration: 600 });
       }
     });
 
