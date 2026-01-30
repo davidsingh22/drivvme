@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquare, Send, X, Lock } from 'lucide-react';
+import { MessageSquare, Send, X, Lock, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetClose } from '@/components/ui/sheet';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -222,19 +222,29 @@ export default function RideMessaging({
       </SheetTrigger>
       <SheetContent side="bottom" className="h-[85vh] rounded-t-xl p-0">
         <SheetHeader className="p-4 border-b bg-card">
-          <SheetTitle className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-              <MessageSquare className="h-5 w-5 text-primary" />
-            </div>
-            <div className="text-left">
-              <p className="font-semibold">
-                {language === 'fr' ? 'Messages de la course' : 'Ride Messages'}
-              </p>
-              <p className="text-xs text-muted-foreground font-normal">
-                {driverName}
-              </p>
-            </div>
-          </SheetTitle>
+          <div className="flex items-center justify-between">
+            <SheetTitle className="flex items-center gap-2">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <MessageSquare className="h-5 w-5 text-primary" />
+              </div>
+              <div className="text-left">
+                <p className="font-semibold">
+                  {language === 'fr' ? 'Messages de la course' : 'Ride Messages'}
+                </p>
+                <p className="text-xs text-muted-foreground font-normal">
+                  {driverName}
+                </p>
+              </div>
+            </SheetTitle>
+            <SheetClose asChild>
+              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
+                <MapPin className="h-4 w-4" />
+                <span className="text-sm">
+                  {language === 'fr' ? 'Retour à la carte' : 'Back to map'}
+                </span>
+              </Button>
+            </SheetClose>
+          </div>
         </SheetHeader>
 
         {/* Messages area */}
