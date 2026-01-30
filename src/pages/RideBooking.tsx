@@ -41,6 +41,30 @@ interface Location {
 // Test accounts that bypass payment
 const TEST_ACCOUNTS = ['alsenesa@hotmail.com'];
 
+// Limited test accounts - bypass payment for a limited number of rides
+const LIMITED_TEST_ACCOUNTS: Record<string, number> = {
+  'sean.mcturk@outlook.com': 3, // 3 free rides
+};
+
+// Get remaining free rides for a limited test account
+const getRemainingFreeRides = (email: string): number => {
+  const lowerEmail = email.toLowerCase();
+  const limit = LIMITED_TEST_ACCOUNTS[lowerEmail];
+  if (!limit) return 0;
+  
+  const usedKey = `drivvme_free_rides_used_${lowerEmail}`;
+  const used = parseInt(localStorage.getItem(usedKey) || '0', 10);
+  return Math.max(0, limit - used);
+};
+
+// Increment used free rides count
+const incrementFreeRidesUsed = (email: string): void => {
+  const lowerEmail = email.toLowerCase();
+  const usedKey = `drivvme_free_rides_used_${lowerEmail}`;
+  const used = parseInt(localStorage.getItem(usedKey) || '0', 10);
+  localStorage.setItem(usedKey, String(used + 1));
+};
+
 const RideBooking = () => {
   const { t, language } = useLanguage();
   const { user, profile, roles, isRider, isDriver, isLoading: authLoading } = useAuth();
@@ -394,8 +418,10 @@ const RideBooking = () => {
   }, [currentRide?.id, t, toast]);
 
   // Hard payment gate: never allow the UI to show "searching" (or beyond) if payment isn't succeeded.
-  // Test accounts bypass this gate entirely.
-  const isTestAccount = user?.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
+  // Test accounts bypass this gate entirely (unlimited or limited free rides).
+  const isUnlimitedTestAccount = user?.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
+  const remainingFreeRides = user?.email ? getRemainingFreeRides(user.email) : 0;
+  const isTestAccount = isUnlimitedTestAccount || remainingFreeRides > 0;
 
   useEffect(() => {
     if (!currentRide?.id) return;
@@ -798,8 +824,10 @@ const RideBooking = () => {
   const handleProceedToPayment = async () => {
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
-    // Test accounts skip payment entirely
-    const skipPayment = user.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
+    // Test accounts skip payment entirely (unlimited or with remaining free rides)
+    const isUnlimited = user.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
+    const freeRidesLeft = user.email ? getRemainingFreeRides(user.email) : 0;
+    const skipPayment = isUnlimited || freeRidesLeft > 0;
 
     // Show payment UI immediately (no perceived delay) — unless test account
     if (!skipPayment) {
@@ -863,10 +891,18 @@ const RideBooking = () => {
 
         // Test accounts go directly to searching (escalation hook will handle notifications)
         if (skipPayment) {
+          // Increment free rides counter for limited test accounts
+          if (!isUnlimited && freeRidesLeft > 0 && user.email) {
+            incrementFreeRidesUsed(user.email);
+          }
+          
           setStep('searching');
+          const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
           toast({
             title: 'Test mode',
-            description: 'Payment bypassed. Starting driver search...',
+            description: isUnlimited 
+              ? 'Payment bypassed. Starting driver search...'
+              : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`,
           });
         }
       } catch (err: any) {
