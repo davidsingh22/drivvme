@@ -145,7 +145,7 @@ const Login = () => {
                   htmlFor="rememberMe" 
                   className="text-sm font-normal text-muted-foreground cursor-pointer"
                 >
-                  {t('auth.rememberMe') || 'Remember me'}
+                  Remember me
                 </Label>
               </div>
 
