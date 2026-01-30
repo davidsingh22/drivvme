@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Clock, Navigation, MapPin, AlertCircle, Route, Wifi, WifiOff } from 'lucide-react';
+import { Clock, Navigation, MapPin, Route, WifiOff } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 
@@ -68,8 +68,8 @@ const InRideStatusBar = ({
   const lastFetchPositionRef = useRef<{ lat: number; lng: number } | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Determine target based on phase
-  const targetLocation = phase === 'inProgress' ? dropoffLocation : pickupLocation;
+  // Determine target based on phase - for arrived and inProgress, show ETA to destination
+  const targetLocation = (phase === 'arrived' || phase === 'inProgress') ? dropoffLocation : pickupLocation;
 
   const fetchETA = useCallback(async (force = false) => {
     if (!driverLocation || !targetLocation) return;
@@ -196,10 +196,10 @@ const InRideStatusBar = ({
         };
       case 'arrived':
         return {
-          title: language === 'fr' ? 'Arrivé' : 'Arrived',
-          subtitle: language === 'fr' ? 'Le chauffeur vous attend' : 'Driver is waiting',
-          icon: MapPin,
-          color: 'bg-success',
+          title: `${etaMinutes} min`,
+          subtitle: language === 'fr' ? 'Vers destination' : 'To destination',
+          icon: Navigation,
+          color: 'bg-accent',
         };
       case 'inProgress':
         return {
@@ -255,7 +255,7 @@ const InRideStatusBar = ({
             </div>
           </div>
 
-          {eta && phase !== 'arrived' && (
+          {eta && (
             <div className="text-right">
               <div className="flex items-center gap-1 text-white/80 text-sm">
                 <Clock className="h-3 w-3" />
@@ -267,24 +267,11 @@ const InRideStatusBar = ({
               </p>
             </div>
           )}
-
-          {phase === 'arrived' && (
-            <motion.div
-              animate={{ scale: [1, 1.1, 1] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-              className="flex items-center gap-1 bg-white/20 px-3 py-1 rounded-full"
-            >
-              <AlertCircle className="h-4 w-4 text-white" />
-              <span className="text-white text-sm font-medium">
-                {language === 'fr' ? 'Sortez' : 'Go now'}
-              </span>
-            </motion.div>
-          )}
         </div>
       </div>
 
-      {/* Live distance/time chip - only show during active movement phases */}
-      {eta && (phase === 'arriving' || phase === 'inProgress') && (
+      {/* Live distance/time chip - show during arrived and inProgress phases */}
+      {eta && (phase === 'arriving' || phase === 'arrived' || phase === 'inProgress') && (
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
