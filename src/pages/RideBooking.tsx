@@ -1109,7 +1109,7 @@ const RideBooking = () => {
             step === 'inProgress' ? 'driver-to-dropoff' :
             'pickup-dropoff'
           }
-          followDriver={step === 'inProgress'}
+          followDriver={step === 'arriving' || step === 'arrived' || step === 'inProgress'}
         />
 
         {/* Debug Bar Overlay - ONLY visible if localStorage.DEBUG_RIDE === "1" */}
