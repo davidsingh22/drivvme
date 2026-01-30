@@ -124,7 +124,7 @@ const Navbar = () => {
                       to="/driver"
                       className="text-muted-foreground hover:text-foreground transition-colors"
                     >
-                      {t('nav.drive')}
+                      {t('nav.availableRides')}
                     </Link>
                     <Link
                       to="/earnings"
@@ -132,14 +132,29 @@ const Navbar = () => {
                     >
                       {t('nav.earnings')}
                     </Link>
+                    <Link
+                      to="/history"
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      {t('nav.history')}
+                    </Link>
+                    <Link
+                      to={activeDriverRideId ? `/driver/messages?rideId=${activeDriverRideId}` : '/driver/messages'}
+                      className="text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                    >
+                      <MessageSquare className="h-4 w-4" />
+                      {language === 'fr' ? 'Messages' : 'Messages'}
+                    </Link>
                   </>
                 )}
-                <Link
-                  to="/history"
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {t('nav.history')}
-                </Link>
+                {isRider && (
+                  <Link
+                    to="/history"
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {t('nav.history')}
+                  </Link>
+                )}
                 {isAdmin && (
                   <Link
                     to="/admin"
