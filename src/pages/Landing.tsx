@@ -105,7 +105,7 @@ const Landing = () => {
                 size="lg"
                 className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group"
               >
-                <Link to={user && isRider ? "/ride" : "/login"}>
+                <Link to={user ? "/ride" : "/login"}>
                   {t('hero.cta.rider')}
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
                 </Link>

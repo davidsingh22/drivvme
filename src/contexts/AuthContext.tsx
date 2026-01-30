@@ -419,31 +419,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (async () => {
       setAuthLoading(true);
       
-      // Check if user opted out of "Remember me" - if so, clear session on new browser session
-      const isSessionOnly = sessionStorage.getItem('drivvme_session_only') === null && 
-                            localStorage.getItem('drivvme_remember_me') === null;
-      
       const {
         data: { session: existingSession },
       } = await supabase.auth.getSession();
       
-      // If user didn't check "Remember me" and this is a new browser session, sign out
-      if (existingSession && !localStorage.getItem('drivvme_remember_me') && !sessionStorage.getItem('drivvme_session_only')) {
-        // New browser session without remember me - user needs to log in again
-        // But only if they previously logged in without remember me
-        const hadSessionOnly = localStorage.getItem('drivvme_had_session_only') === 'true';
-        if (hadSessionOnly) {
-          await supabase.auth.signOut();
-          localStorage.removeItem('drivvme_had_session_only');
-          setAuthLoading(false);
-          setHasInitialized(true);
-          return;
-        }
+      // "Remember me" logic:
+      // - If user checked "Remember me", localStorage has 'drivvme_remember_me' = 'true' -> keep session forever
+      // - If user unchecked "Remember me", we set 'drivvme_session_only' in sessionStorage during login
+      //   When browser closes, sessionStorage clears. On next open, if we have a session but NO sessionStorage
+      //   marker and NO remember_me flag, that means user logged in without remember me and closed browser.
+      const rememberMe = localStorage.getItem('drivvme_remember_me') === 'true';
+      const isActiveSession = sessionStorage.getItem('drivvme_session_active') === 'true';
+      
+      if (existingSession && !rememberMe && !isActiveSession) {
+        // User had logged in without "Remember me" and this is a new browser session
+        // Sign them out
+        await supabase.auth.signOut();
+        setAuthLoading(false);
+        setHasInitialized(true);
+        return;
       }
       
-      // Track if this was a session-only login for next browser open
-      if (sessionStorage.getItem('drivvme_session_only')) {
-        localStorage.setItem('drivvme_had_session_only', 'true');
+      // Mark this browser session as active (for non-remember-me users)
+      if (existingSession) {
+        sessionStorage.setItem('drivvme_session_active', 'true');
       }
       
       // Set session/user immediately so routes don't redirect while profile is still loading.
@@ -581,14 +580,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const signIn = async (email: string, password: string, rememberMe: boolean = true) => {
     // Don't set isLoading here - onAuthStateChange handles it
     
-    // Store remember me preference for session recovery logic
+    // Store remember me preference
     try {
       if (rememberMe) {
+        // Remember me checked: persist session across browser restarts
         localStorage.setItem('drivvme_remember_me', 'true');
       } else {
+        // Remember me unchecked: session ends when browser closes
         localStorage.removeItem('drivvme_remember_me');
-        sessionStorage.setItem('drivvme_session_only', 'true');
       }
+      // Mark current browser session as active
+      sessionStorage.setItem('drivvme_session_active', 'true');
     } catch {}
     
     const { error } = await supabase.auth.signInWithPassword({
@@ -625,7 +627,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       keys.forEach(k => localStorage.removeItem(k));
       localStorage.removeItem('last_route');
       localStorage.removeItem('drivvme_remember_me');
-      sessionStorage.removeItem('drivvme_session_only');
+      sessionStorage.removeItem('drivvme_session_active');
     } catch {}
 
     // Fire-and-forget the actual signOut call to Supabase
