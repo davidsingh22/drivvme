@@ -361,9 +361,16 @@ const DriverDashboard = () => {
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
+  // Track whether this is the first fetch (to show alert for already-existing rides)
+  const isFirstFetchRef = useRef(true);
+
   // Fetch available rides when online
   useEffect(() => {
     if (!isOnline || !user || !session) return;
+    
+    // Reset first fetch flag when going online
+    isFirstFetchRef.current = true;
+    prevRideIdsRef.current = new Set();
 
     const fetchRides = async () => {
       // Avoid forcing refreshSession here (can cause unexpected auth churn on flaky connections)
@@ -389,19 +396,32 @@ const DriverDashboard = () => {
 
           const nextIds = new Set(validRides.map((r) => r.id));
           const prevIds = prevRideIdsRef.current;
-
-          const newlyAdded = validRides.find((r) => !prevIds.has(r.id));
+          const isFirstFetch = isFirstFetchRef.current;
+          
+          // On first fetch, show alert for the most recent waiting ride
+          // On subsequent fetches, only show alert for truly new rides
+          let rideToAlert: RideRequest | null = null;
+          
+          if (isFirstFetch && validRides.length > 0) {
+            // First fetch: show the most recent ride that's waiting
+            rideToAlert = validRides[validRides.length - 1]; // Most recent by requested_at
+            isFirstFetchRef.current = false;
+          } else if (!isFirstFetch) {
+            // Subsequent fetch: only show newly added rides
+            rideToAlert = validRides.find((r) => !prevIds.has(r.id)) ?? null;
+          }
+          
           prevRideIdsRef.current = nextIds;
-
           setAvailableRides(validRides);
 
-          if (newlyAdded && !currentRide) {
+          if (rideToAlert && !currentRide && !newRideAlertOpen) {
             // Cache the full ride data so it persists even if ride is cancelled/taken
-            setCachedAlertRide(newlyAdded);
-            setNewRideAlertRideId(newlyAdded.id);
+            setCachedAlertRide(rideToAlert);
+            setNewRideAlertRideId(rideToAlert.id);
             setNewRideAlertOpen(true);
             alertStartTimeRef.current = Date.now();
             void playAlertSound();
+            console.log('[DriverDashboard] 🔔 Showing ride alert for:', rideToAlert.id, isFirstFetch ? '(initial load)' : '(new ride)');
           }
         } catch (err) {
           console.error('[DriverDashboard] Error processing rides:', err);
