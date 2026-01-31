@@ -199,7 +199,7 @@ export function RideOfferModal({
                       <div className="text-3xl font-extrabold text-white">${fare.toFixed(2)}</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-success font-semibold">
+                      <div className="earnings-glow-pulse text-success text-xl font-extrabold">
                         {language === 'fr' ? 'Gagnez' : 'Earn'} ${driverEarnings.toFixed(2)}
                       </div>
                       <div className="text-white/50 text-xs">
