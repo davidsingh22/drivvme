@@ -118,8 +118,8 @@ export function RideOfferModal({
               </div>
 
               <div className="px-6 py-5 space-y-5">
-                {/* Keep more of your fare headline */}
-                <div>
+                {/* Keep more of your fare headline - with animated border */}
+                <div className="animated-border-purple p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-2xl">💰</span>
                     <h2 className="text-2xl sm:text-3xl font-bold text-white">
@@ -158,8 +158,8 @@ export function RideOfferModal({
 
                 {/* Drivveme vs Uber Comparison */}
                 <div className="grid grid-cols-2 gap-3">
-                  {/* Drivveme Box */}
-                  <div className="drivveme-glow rounded-2xl bg-white/5 p-4">
+                  {/* Drivveme Box - animated green border */}
+                  <div className="animated-border-green drivveme-glow p-4">
                     <div className="text-white/70 text-sm flex items-center gap-2">
                       <Car className="h-4 w-4 text-primary" />
                       Drivveme
@@ -172,8 +172,8 @@ export function RideOfferModal({
                     </div>
                   </div>
 
-                  {/* Uber Box */}
-                  <div className={`${showUberShimmer ? 'uber-shimmer' : ''} rounded-2xl bg-white/5 p-4`}>
+                  {/* Uber Box - animated white border */}
+                  <div className={`animated-border-white ${showUberShimmer ? 'uber-shimmer' : ''} p-4`}>
                     <div className="text-white/70 text-sm">Uber</div>
                     <div className="mt-2 text-xl font-bold text-white">
                       {language === 'fr' ? 'Seulement' : 'Only'} ${uberEstimatedEarnings.toFixed(2)} <span className="text-white/60 text-sm">est</span>
