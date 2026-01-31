@@ -30,6 +30,61 @@ interface FCMMessage {
   };
 }
 
+// UUID validation regex
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Input validation helper
+function validateInput(input: unknown): { 
+  valid: boolean; 
+  data?: { userId: string; title: string; body?: string; data?: Record<string, string>; url?: string }; 
+  error?: string 
+} {
+  if (!input || typeof input !== 'object') {
+    return { valid: false, error: 'Invalid JSON body' };
+  }
+
+  const { userId, title, body, data, url } = input as Record<string, unknown>;
+
+  // Required fields
+  if (typeof userId !== 'string' || !UUID_REGEX.test(userId)) {
+    return { valid: false, error: 'userId must be a valid UUID' };
+  }
+  if (typeof title !== 'string' || title.length === 0 || title.length > 100) {
+    return { valid: false, error: 'title must be a string between 1-100 characters' };
+  }
+
+  // Optional fields
+  if (body !== undefined && (typeof body !== 'string' || body.length > 500)) {
+    return { valid: false, error: 'body must be a string up to 500 characters' };
+  }
+  if (url !== undefined && (typeof url !== 'string' || url.length > 200)) {
+    return { valid: false, error: 'url must be a string up to 200 characters' };
+  }
+  if (data !== undefined && (typeof data !== 'object' || data === null || Array.isArray(data))) {
+    return { valid: false, error: 'data must be an object' };
+  }
+
+  // Validate data object values are strings
+  if (data) {
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof value !== 'string') {
+        return { valid: false, error: `data.${key} must be a string` };
+      }
+    }
+  }
+
+  return {
+    valid: true,
+    data: {
+      userId,
+      title,
+      body: typeof body === 'string' ? body : undefined,
+      data: data as Record<string, string> | undefined,
+      url: typeof url === 'string' ? url : undefined,
+    },
+  };
+}
+
 async function getAccessToken(): Promise<string> {
   // For FCM HTTP v1 API, we need a service account
   // Using the legacy FCM API with server key for simplicity
@@ -46,22 +101,45 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    // Authenticate with service role key - this is an internal function
+    const authHeader = req.headers.get("Authorization");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-    const { userId, title, body, data, url } = await req.json();
+    if (!authHeader || authHeader !== `Bearer ${serviceRoleKey}`) {
+      console.error("Unauthorized: Invalid or missing service role key");
+      return new Response(
+        JSON.stringify({ error: "Unauthorized - service role key required" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+
+    // Parse and validate input
+    let rawInput: unknown;
+    try {
+      rawInput = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const validation = validateInput(rawInput);
+    if (!validation.valid || !validation.data) {
+      return new Response(
+        JSON.stringify({ error: validation.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const { userId, title, body, data, url } = validation.data;
 
     console.log("Sending FCM notification to user:", userId);
     console.log("Title:", title, "Body:", body);
 
-    if (!userId || !title) {
-      return new Response(JSON.stringify({ error: "userId and title are required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = createClient(supabaseUrl, serviceRoleKey!);
 
     // Get FCM tokens for the user
     const { data: subscriptions, error: subError } = await supabase

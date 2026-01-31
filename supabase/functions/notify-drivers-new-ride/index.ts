@@ -38,6 +38,76 @@ interface FCMMessageV1 {
   };
 }
 
+// UUID validation regex
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Input validation helper
+function validateInput(input: unknown): {
+  valid: boolean;
+  data?: {
+    rideId: string;
+    pickupAddress?: string;
+    dropoffAddress?: string;
+    estimatedFare?: number;
+    pickupLat?: number;
+    pickupLng?: number;
+    maxDistanceKm: number;
+  };
+  error?: string;
+} {
+  if (!input || typeof input !== 'object') {
+    return { valid: false, error: 'Invalid JSON body' };
+  }
+
+  const { 
+    rideId, 
+    pickupAddress, 
+    dropoffAddress, 
+    estimatedFare,
+    pickupLat,
+    pickupLng,
+    maxDistanceKm = 15,
+  } = input as Record<string, unknown>;
+
+  // Required fields
+  if (typeof rideId !== 'string' || !UUID_REGEX.test(rideId)) {
+    return { valid: false, error: 'rideId must be a valid UUID' };
+  }
+
+  // Optional fields
+  if (pickupAddress !== undefined && (typeof pickupAddress !== 'string' || pickupAddress.length > 200)) {
+    return { valid: false, error: 'pickupAddress must be a string up to 200 characters' };
+  }
+  if (dropoffAddress !== undefined && (typeof dropoffAddress !== 'string' || dropoffAddress.length > 200)) {
+    return { valid: false, error: 'dropoffAddress must be a string up to 200 characters' };
+  }
+  if (estimatedFare !== undefined && (typeof estimatedFare !== 'number' || estimatedFare < 0 || estimatedFare > 10000)) {
+    return { valid: false, error: 'estimatedFare must be a number between 0 and 10000' };
+  }
+  if (pickupLat !== undefined && (typeof pickupLat !== 'number' || pickupLat < -90 || pickupLat > 90)) {
+    return { valid: false, error: 'pickupLat must be a number between -90 and 90' };
+  }
+  if (pickupLng !== undefined && (typeof pickupLng !== 'number' || pickupLng < -180 || pickupLng > 180)) {
+    return { valid: false, error: 'pickupLng must be a number between -180 and 180' };
+  }
+  if (typeof maxDistanceKm !== 'number' || maxDistanceKm < 1 || maxDistanceKm > 100) {
+    return { valid: false, error: 'maxDistanceKm must be a number between 1 and 100' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      rideId,
+      pickupAddress: typeof pickupAddress === 'string' ? pickupAddress : undefined,
+      dropoffAddress: typeof dropoffAddress === 'string' ? dropoffAddress : undefined,
+      estimatedFare: typeof estimatedFare === 'number' ? estimatedFare : undefined,
+      pickupLat: typeof pickupLat === 'number' ? pickupLat : undefined,
+      pickupLng: typeof pickupLng === 'number' ? pickupLng : undefined,
+      maxDistanceKm: typeof maxDistanceKm === 'number' ? maxDistanceKm : 15,
+    },
+  };
+}
+
 // Calculate distance between two coordinates using Haversine formula (returns km)
 function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371; // Earth's radius in km
@@ -131,9 +201,39 @@ serve(async (req) => {
   }
 
   try {
+    // Authenticate with service role key - this is an internal function
+    const authHeader = req.headers.get("Authorization");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (!authHeader || authHeader !== `Bearer ${serviceRoleKey}`) {
+      console.error("Unauthorized: Invalid or missing service role key");
+      return new Response(
+        JSON.stringify({ error: "Unauthorized - service role key required" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
+
+    // Parse and validate input
+    let rawInput: unknown;
+    try {
+      rawInput = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const validation = validateInput(rawInput);
+    if (!validation.valid || !validation.data) {
+      return new Response(
+        JSON.stringify({ error: validation.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     const { 
       rideId, 
@@ -142,19 +242,12 @@ serve(async (req) => {
       estimatedFare,
       pickupLat,
       pickupLng,
-      maxDistanceKm = 15 // Default: notify drivers within 15km of pickup
-    } = await req.json();
+      maxDistanceKm,
+    } = validation.data;
 
     console.log("Notifying nearby drivers of new ride:", rideId);
 
-    if (!rideId) {
-      return new Response(JSON.stringify({ error: "rideId is required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = createClient(supabaseUrl, serviceRoleKey!);
 
     // Get all online drivers with their current location
     const { data: onlineDrivers, error: driverError } = await supabase

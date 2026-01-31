@@ -48,6 +48,94 @@ interface DriverWithDistance {
   current_dropoff_lng?: number | null;
 }
 
+// UUID validation regex
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Input validation helper
+function validateInput(input: unknown): {
+  valid: boolean;
+  data?: {
+    rideId: string;
+    pickupAddress?: string;
+    dropoffAddress?: string;
+    estimatedFare?: number;
+    pickupLat: number;
+    pickupLng: number;
+    tier: number;
+    excludeDriverIds: string[];
+    maxEtaMinutes?: number;
+  };
+  error?: string;
+} {
+  if (!input || typeof input !== 'object') {
+    return { valid: false, error: 'Invalid JSON body' };
+  }
+
+  const { 
+    rideId, 
+    pickupAddress, 
+    dropoffAddress, 
+    estimatedFare,
+    pickupLat,
+    pickupLng,
+    tier = 1,
+    excludeDriverIds = [],
+    maxEtaMinutes,
+  } = input as Record<string, unknown>;
+
+  // Required fields
+  if (typeof rideId !== 'string' || !UUID_REGEX.test(rideId)) {
+    return { valid: false, error: 'rideId must be a valid UUID' };
+  }
+  if (typeof pickupLat !== 'number' || pickupLat < -90 || pickupLat > 90) {
+    return { valid: false, error: 'pickupLat must be a number between -90 and 90' };
+  }
+  if (typeof pickupLng !== 'number' || pickupLng < -180 || pickupLng > 180) {
+    return { valid: false, error: 'pickupLng must be a number between -180 and 180' };
+  }
+
+  // Optional fields
+  if (pickupAddress !== undefined && (typeof pickupAddress !== 'string' || pickupAddress.length > 200)) {
+    return { valid: false, error: 'pickupAddress must be a string up to 200 characters' };
+  }
+  if (dropoffAddress !== undefined && (typeof dropoffAddress !== 'string' || dropoffAddress.length > 200)) {
+    return { valid: false, error: 'dropoffAddress must be a string up to 200 characters' };
+  }
+  if (estimatedFare !== undefined && (typeof estimatedFare !== 'number' || estimatedFare < 0 || estimatedFare > 10000)) {
+    return { valid: false, error: 'estimatedFare must be a number between 0 and 10000' };
+  }
+  if (typeof tier !== 'number' || tier < 1 || tier > 4) {
+    return { valid: false, error: 'tier must be a number between 1 and 4' };
+  }
+  if (!Array.isArray(excludeDriverIds)) {
+    return { valid: false, error: 'excludeDriverIds must be an array' };
+  }
+  // Validate each excludeDriverId is a valid UUID
+  for (const id of excludeDriverIds) {
+    if (typeof id !== 'string' || !UUID_REGEX.test(id)) {
+      return { valid: false, error: 'excludeDriverIds must contain valid UUIDs' };
+    }
+  }
+  if (maxEtaMinutes !== undefined && (typeof maxEtaMinutes !== 'number' || maxEtaMinutes < 1 || maxEtaMinutes > 120)) {
+    return { valid: false, error: 'maxEtaMinutes must be a number between 1 and 120' };
+  }
+
+  return {
+    valid: true,
+    data: {
+      rideId,
+      pickupAddress: typeof pickupAddress === 'string' ? pickupAddress : undefined,
+      dropoffAddress: typeof dropoffAddress === 'string' ? dropoffAddress : undefined,
+      estimatedFare: typeof estimatedFare === 'number' ? estimatedFare : undefined,
+      pickupLat,
+      pickupLng,
+      tier: typeof tier === 'number' ? tier : 1,
+      excludeDriverIds: excludeDriverIds as string[],
+      maxEtaMinutes: typeof maxEtaMinutes === 'number' ? maxEtaMinutes : undefined,
+    },
+  };
+}
+
 // Calculate distance between two coordinates using Haversine formula (returns km)
 function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -142,9 +230,39 @@ serve(async (req) => {
   }
 
   try {
+    // Authenticate with service role key - this is an internal function
+    const authHeader = req.headers.get("Authorization");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+
+    if (!authHeader || authHeader !== `Bearer ${serviceRoleKey}`) {
+      console.error("Unauthorized: Invalid or missing service role key");
+      return new Response(
+        JSON.stringify({ error: "Unauthorized - service role key required" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
+
+    // Parse and validate input
+    let rawInput: unknown;
+    try {
+      rawInput = await req.json();
+    } catch {
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON body" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const validation = validateInput(rawInput);
+    if (!validation.valid || !validation.data) {
+      return new Response(
+        JSON.stringify({ error: validation.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     const { 
       rideId, 
@@ -153,21 +271,14 @@ serve(async (req) => {
       estimatedFare,
       pickupLat,
       pickupLng,
-      tier = 1,
-      excludeDriverIds = [],
+      tier,
+      excludeDriverIds,
       maxEtaMinutes,
-    } = await req.json();
+    } = validation.data;
 
     console.log(`[Tier ${tier}] Notifying drivers for ride:`, rideId);
 
-    if (!rideId || !pickupLat || !pickupLng) {
-      return new Response(JSON.stringify({ error: "rideId, pickupLat, pickupLng required" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = createClient(supabaseUrl, serviceRoleKey!);
 
     // Tier configuration - TEST MODE: all tiers set to 100km for testing
     const tierConfig = {
@@ -233,14 +344,10 @@ serve(async (req) => {
         if (dropoffLocation) {
           // TEST MODE: Notify all busy drivers regardless of dropoff distance
           distance = calculateDistanceKm(pickupLat, pickupLng, dropoffLocation.lat, dropoffLocation.lng);
-          // if (distance > 2) {
-          //   return null; // Skip this busy driver - dropoff too far
-          // }
         } else if (driver.current_lat && driver.current_lng) {
           distance = calculateDistanceKm(pickupLat, pickupLng, driver.current_lat, driver.current_lng);
         } else {
           // TEST MODE: Include all drivers without location by assuming they're very close
-          // In production, this would be: distance = config.maxDistanceKm * 0.5
           distance = 1; // 1km - ensures they pass ETA filter
         }
 
