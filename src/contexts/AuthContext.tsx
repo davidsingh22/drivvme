@@ -425,23 +425,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       // "Remember me" logic:
       // - If user checked "Remember me", localStorage has 'drivvme_remember_me' = 'true' -> keep session forever
-      // - If user unchecked "Remember me", we set 'drivvme_session_only' in sessionStorage during login
-      //   When browser closes, sessionStorage clears. On next open, if we have a session but NO sessionStorage
-      //   marker and NO remember_me flag, that means user logged in without remember me and closed browser.
+      // - If user unchecked "Remember me", we clear the localStorage flag during login
+      //   We use sessionStorage 'drivvme_session_active' to track active browser sessions
+      //   When browser closes, sessionStorage clears. On next open:
+      //     - If rememberMe is true -> keep session (user explicitly wanted to stay logged in)
+      //     - If rememberMe is false AND no active session marker -> sign out
       const rememberMe = localStorage.getItem('drivvme_remember_me') === 'true';
       const isActiveSession = sessionStorage.getItem('drivvme_session_active') === 'true';
       
-      if (existingSession && !rememberMe && !isActiveSession) {
+      // CRITICAL: If "Remember me" was checked, ALWAYS keep the session - do NOT sign out
+      if (existingSession && rememberMe) {
+        // User explicitly asked to be remembered - keep them signed in
+        sessionStorage.setItem('drivvme_session_active', 'true');
+        console.log('[Auth] Remember me is enabled - keeping session');
+      } else if (existingSession && !rememberMe && !isActiveSession) {
         // User had logged in without "Remember me" and this is a new browser session
         // Sign them out
+        console.log('[Auth] Remember me disabled and new browser session - signing out');
+        localStorage.removeItem('drivvme_remember_me');
         await supabase.auth.signOut();
         setAuthLoading(false);
         setHasInitialized(true);
         return;
-      }
-      
-      // Mark this browser session as active (for non-remember-me users)
-      if (existingSession) {
+      } else if (existingSession) {
+        // Mark this browser session as active (for non-remember-me users in current session)
         sessionStorage.setItem('drivvme_session_active', 'true');
       }
       
