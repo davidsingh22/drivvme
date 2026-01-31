@@ -17,6 +17,8 @@ serve(async (req) => {
 
   try {
     const stripeKey = Deno.env.get("STRIPE_SECRET_KEY");
+    const webhookSecret = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+    
     if (!stripeKey) {
       throw new Error("Stripe secret key not configured");
     }
@@ -34,9 +36,34 @@ serve(async (req) => {
     const body = await req.text();
     const signature = req.headers.get("stripe-signature");
 
-    // For now, we'll process the event without signature verification
-    // In production, you should set STRIPE_WEBHOOK_SECRET and verify
-    const event = JSON.parse(body) as Stripe.Event;
+    let event: Stripe.Event;
+
+    // Validate webhook signature if secret is configured
+    if (webhookSecret) {
+      if (!signature) {
+        console.error("Missing stripe-signature header");
+        return new Response(
+          JSON.stringify({ error: "Missing stripe-signature header" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      try {
+        event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+        console.log(`Verified Stripe webhook signature for event: ${event.type}`);
+      } catch (err) {
+        console.error("Webhook signature verification failed:", err);
+        return new Response(
+          JSON.stringify({ error: "Invalid webhook signature" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } else {
+      // Fallback for legacy webhooks without secret configured
+      // Log warning but still process (will be removed once all envs have secret)
+      console.warn("STRIPE_WEBHOOK_SECRET not configured - processing without signature verification");
+      event = JSON.parse(body) as Stripe.Event;
+    }
 
     console.log(`Processing Stripe event: ${event.type}`);
 
