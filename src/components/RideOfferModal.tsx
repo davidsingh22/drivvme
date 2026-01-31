@@ -178,11 +178,13 @@ export function RideOfferModal({
                     <div className="mt-2 text-xl font-bold text-white">
                       {language === 'fr' ? 'Seulement' : 'Only'} ${uberEstimatedEarnings.toFixed(2)} <span className="text-white/60 text-sm">est</span>
                     </div>
-                    <div className="text-white/60 text-xs mt-1">
-                      {language === 'fr' 
-                        ? `Uber prend ~$${uberEstimatedCut.toFixed(2)} est (rapport)`
-                        : `Uber typically takes ~$${uberEstimatedCut.toFixed(2)} est (report)`
-                      }
+                    <div className="text-sm mt-1">
+                      <span className="uber-fee-glow">
+                        {language === 'fr' 
+                          ? `Uber prend ~$${uberEstimatedCut.toFixed(2)} est`
+                          : `Uber typically takes ~$${uberEstimatedCut.toFixed(2)} est`
+                        }
+                      </span>
                     </div>
                   </div>
                 </div>
