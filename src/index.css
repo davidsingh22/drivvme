@@ -350,6 +350,18 @@
   font-weight: 600;
 }
 
+/* Earnings text glow and grow animation */
+@keyframes earningsGlowPulse {
+  0%   { text-shadow: 0 0 6px rgba(34, 197, 94, 0.6); transform: scale(1); }
+  50%  { text-shadow: 0 0 20px rgba(34, 197, 94, 1), 0 0 40px rgba(34, 197, 94, 0.7); transform: scale(1.12); }
+  100% { text-shadow: 0 0 6px rgba(34, 197, 94, 0.6); transform: scale(1); }
+}
+
+.earnings-glow-pulse {
+  display: inline-block;
+  animation: earningsGlowPulse 1.8s ease-in-out infinite;
+}
+
 .drivveme-glow {
   border: 1px solid rgba(34, 197, 94, 0.25);
   animation: drivvemeGlow 2s ease-in-out infinite;
