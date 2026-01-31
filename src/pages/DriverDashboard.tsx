@@ -181,6 +181,8 @@ const DriverDashboard = () => {
         estimated_duration_minutes: cachedAlertRide.estimated_duration_minutes,
         pickup_eta_minutes: pickupEtaMinutes,
         is_priority: false,
+        pickup_lat: cachedAlertRide.pickup_lat,
+        pickup_lng: cachedAlertRide.pickup_lng,
       };
     } catch (err) {
       console.error('[DriverDashboard] Error computing alertRide:', err);

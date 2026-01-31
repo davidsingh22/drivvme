@@ -17,6 +17,8 @@ type RideSummary = {
   estimated_duration_minutes?: number;
   pickup_eta_minutes?: number;
   is_priority?: boolean;
+  pickup_lat?: number;
+  pickup_lng?: number;
 };
 
 interface RideOfferModalProps {
@@ -38,6 +40,48 @@ export function RideOfferModal({
   const [timeLeft, setTimeLeft] = useState(countdownSeconds);
   const [showUberShimmer, setShowUberShimmer] = useState(true);
   const timerRef = useRef<number | null>(null);
+  const [driverDistanceKm, setDriverDistanceKm] = useState<number | null>(null);
+
+  // Calculate distance from driver to pickup
+  useEffect(() => {
+    if (!open || !ride?.pickup_lat || !ride?.pickup_lng) {
+      setDriverDistanceKm(null);
+      return;
+    }
+
+    const getDriverDistance = () => {
+      if (!navigator.geolocation) return;
+      
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const driverLat = position.coords.latitude;
+          const driverLng = position.coords.longitude;
+          const pickupLat = ride.pickup_lat!;
+          const pickupLng = ride.pickup_lng!;
+          
+          // Haversine formula
+          const R = 6371; // Earth's radius in km
+          const dLat = (pickupLat - driverLat) * Math.PI / 180;
+          const dLng = (pickupLng - driverLng) * Math.PI / 180;
+          const a = 
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(driverLat * Math.PI / 180) * Math.cos(pickupLat * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const distance = R * c;
+          
+          setDriverDistanceKm(distance);
+        },
+        (error) => {
+          console.error('Error getting driver location:', error);
+          setDriverDistanceKm(null);
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    };
+
+    getDriverDistance();
+  }, [open, ride?.pickup_lat, ride?.pickup_lng]);
 
   // Reset timer when ride changes
   useEffect(() => {
@@ -140,6 +184,21 @@ export function RideOfferModal({
                   </p>
                 </div>
 
+                {/* Distance to Rider Badge */}
+                {driverDistanceKm !== null && (
+                  <div className="flex items-center justify-center">
+                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/20 border border-primary/40">
+                      <Navigation className="h-4 w-4 text-primary" />
+                      <span className="text-primary font-semibold text-lg">
+                        {driverDistanceKm < 1 
+                          ? `${(driverDistanceKm * 1000).toFixed(0)}m ${language === 'fr' ? 'du passager' : 'to rider'}`
+                          : `${driverDistanceKm.toFixed(1)} km ${language === 'fr' ? 'du passager' : 'to rider'}`
+                        }
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Route Info */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
                   <div className="flex items-start gap-3">
@@ -232,12 +291,12 @@ export function RideOfferModal({
 
                 {/* Decline Button */}
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   onClick={onDecline}
-                  className="w-full text-white/60 hover:text-white hover:bg-white/10"
+                  className="w-full h-12 text-base font-semibold border-2 border-destructive/50 text-destructive hover:bg-destructive/20 hover:text-destructive rounded-xl"
                 >
-                  <X className="h-4 w-4 mr-2" />
-                  {language === 'fr' ? 'Refuser' : 'Decline'}
+                  <X className="h-5 w-5 mr-2" />
+                  {language === 'fr' ? 'Refuser la course' : 'Decline Ride'}
                 </Button>
               </div>
             </Card>
