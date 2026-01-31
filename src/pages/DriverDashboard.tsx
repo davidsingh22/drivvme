@@ -90,6 +90,8 @@ const DriverDashboard = () => {
 
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
+  // Cache the full ride data when alert opens so it persists even if ride is taken/cancelled
+  const [cachedAlertRide, setCachedAlertRide] = useState<RideRequest | null>(null);
   const prevRideIdsRef = useRef<Set<string>>(new Set());
   
   // GPS Streaming for live driver location (continuous foreground tracking)
@@ -154,35 +156,29 @@ const DriverDashboard = () => {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   };
 
+  // Build alertRide from cached data so it persists even when ride is removed from availableRides
   const alertRide = useMemo(() => {
     try {
-      if (!newRideAlertRideId) return null;
-      const ride = availableRides.find((r) => r.id === newRideAlertRideId);
-      if (!ride) return null;
-      
-      // Defensive: validate ride has required fields
-      if (!ride.pickup_address || !ride.dropoff_address) {
-        console.warn('[DriverDashboard] Ride missing address fields:', ride.id);
-        return null;
-      }
+      // Use cached ride data if available (this persists even if ride is taken/cancelled)
+      if (!cachedAlertRide) return null;
       
       // Calculate pickup ETA based on driver location
       let pickupEtaMinutes: number | undefined;
-      if (driverLocation && typeof ride.pickup_lat === 'number' && typeof ride.pickup_lng === 'number') {
+      if (driverLocation && typeof cachedAlertRide.pickup_lat === 'number' && typeof cachedAlertRide.pickup_lng === 'number') {
         const distanceKm = calculateDistanceKm(
           driverLocation.lat, driverLocation.lng,
-          ride.pickup_lat, ride.pickup_lng
+          cachedAlertRide.pickup_lat, cachedAlertRide.pickup_lng
         );
         pickupEtaMinutes = Math.ceil((distanceKm / 30) * 60); // 30km/h average
       }
       
       return {
-        id: ride.id,
-        pickup_address: ride.pickup_address || 'Unknown pickup',
-        dropoff_address: ride.dropoff_address || 'Unknown destination',
-        estimated_fare: ride.estimated_fare,
-        distance_km: ride.distance_km,
-        estimated_duration_minutes: ride.estimated_duration_minutes,
+        id: cachedAlertRide.id,
+        pickup_address: cachedAlertRide.pickup_address || 'Unknown pickup',
+        dropoff_address: cachedAlertRide.dropoff_address || 'Unknown destination',
+        estimated_fare: cachedAlertRide.estimated_fare,
+        distance_km: cachedAlertRide.distance_km,
+        estimated_duration_minutes: cachedAlertRide.estimated_duration_minutes,
         pickup_eta_minutes: pickupEtaMinutes,
         is_priority: false,
       };
@@ -190,7 +186,7 @@ const DriverDashboard = () => {
       console.error('[DriverDashboard] Error computing alertRide:', err);
       return null;
     }
-  }, [availableRides, newRideAlertRideId, driverLocation]);
+  }, [cachedAlertRide, driverLocation]);
 
   const [redirectGraceOver, setRedirectGraceOver] = useState(false);
 
@@ -400,6 +396,8 @@ const DriverDashboard = () => {
           setAvailableRides(validRides);
 
           if (newlyAdded && !currentRide) {
+            // Cache the full ride data so it persists even if ride is cancelled/taken
+            setCachedAlertRide(newlyAdded);
             setNewRideAlertRideId(newlyAdded.id);
             setNewRideAlertOpen(true);
             alertStartTimeRef.current = Date.now();
@@ -570,9 +568,11 @@ const DriverDashboard = () => {
   const acceptRide = async (ride: RideRequest) => {
     if (!user) return;
 
-    // Stop the alert sound immediately
+    // Stop the alert sound immediately and clear cached ride
     stopAlertSound();
     setNewRideAlertOpen(false);
+    setCachedAlertRide(null);
+    setNewRideAlertRideId(null);
 
     // Calculate acceptance time for priority driver reward
     const acceptanceTimeSeconds = alertStartTimeRef.current 
@@ -793,18 +793,18 @@ const DriverDashboard = () => {
       <RideOfferModal
         open={newRideAlertOpen}
         ride={alertRide}
-        countdownSeconds={20}
+        countdownSeconds={45}
         onDecline={() => {
           setNewRideAlertOpen(false);
+          setCachedAlertRide(null);
+          setNewRideAlertRideId(null);
           stopAlertSound();
           alertStartTimeRef.current = null;
         }}
         onAccept={() => {
-          if (alertRide) {
-            const ride = availableRides.find((r) => r.id === alertRide.id);
-            if (ride) {
-              acceptRide(ride);
-            }
+          // Use cached ride data for acceptance (persists even if ride was removed from availableRides)
+          if (cachedAlertRide) {
+            acceptRide(cachedAlertRide);
           }
         }}
       />
