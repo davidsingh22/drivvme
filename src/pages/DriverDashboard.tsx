@@ -816,6 +816,7 @@ const DriverDashboard = () => {
         open={newRideAlertOpen}
         ride={alertRide}
         countdownSeconds={45}
+        driverLocation={driverLocation}
         onDecline={() => {
           setNewRideAlertOpen(false);
           setCachedAlertRide(null);
