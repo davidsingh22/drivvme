@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { MapPin, Navigation, Clock, DollarSign, Zap, Trophy, X, Shield, Car } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,6 +27,20 @@ interface RideOfferModalProps {
   onDecline: () => void;
   onAccept: () => void;
   countdownSeconds?: number;
+  driverLocation?: { lat: number; lng: number } | null;
+}
+
+// Haversine formula to calculate distance
+function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 export function RideOfferModal({
@@ -35,53 +49,25 @@ export function RideOfferModal({
   onDecline,
   onAccept,
   countdownSeconds = 45,
+  driverLocation,
 }: RideOfferModalProps) {
   const { language } = useLanguage();
   const [timeLeft, setTimeLeft] = useState(countdownSeconds);
   const [showUberShimmer, setShowUberShimmer] = useState(true);
   const timerRef = useRef<number | null>(null);
-  const [driverDistanceKm, setDriverDistanceKm] = useState<number | null>(null);
 
-  // Calculate distance from driver to pickup
-  useEffect(() => {
-    if (!open || !ride?.pickup_lat || !ride?.pickup_lng) {
-      setDriverDistanceKm(null);
-      return;
+  // Calculate distance from driver to pickup using passed driverLocation
+  const driverDistanceKm = useMemo(() => {
+    if (!driverLocation || !ride?.pickup_lat || !ride?.pickup_lng) {
+      return null;
     }
-
-    const getDriverDistance = () => {
-      if (!navigator.geolocation) return;
-      
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const driverLat = position.coords.latitude;
-          const driverLng = position.coords.longitude;
-          const pickupLat = ride.pickup_lat!;
-          const pickupLng = ride.pickup_lng!;
-          
-          // Haversine formula
-          const R = 6371; // Earth's radius in km
-          const dLat = (pickupLat - driverLat) * Math.PI / 180;
-          const dLng = (pickupLng - driverLng) * Math.PI / 180;
-          const a = 
-            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(driverLat * Math.PI / 180) * Math.cos(pickupLat * Math.PI / 180) *
-            Math.sin(dLng / 2) * Math.sin(dLng / 2);
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          const distance = R * c;
-          
-          setDriverDistanceKm(distance);
-        },
-        (error) => {
-          console.error('Error getting driver location:', error);
-          setDriverDistanceKm(null);
-        },
-        { enableHighAccuracy: true, timeout: 5000 }
-      );
-    };
-
-    getDriverDistance();
-  }, [open, ride?.pickup_lat, ride?.pickup_lng]);
+    return calculateDistanceKm(
+      driverLocation.lat, 
+      driverLocation.lng, 
+      ride.pickup_lat, 
+      ride.pickup_lng
+    );
+  }, [driverLocation, ride?.pickup_lat, ride?.pickup_lng]);
 
   // Reset timer when ride changes
   useEffect(() => {
