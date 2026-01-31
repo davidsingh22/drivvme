@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Calendar, MapPin, Navigation, Clock, DollarSign, Star, CheckCircle, PlayCircle } from 'lucide-react';
+import { Calendar, MapPin, Navigation, Clock, DollarSign, Star, CheckCircle, PlayCircle, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -11,11 +11,16 @@ import { supabase } from '@/integrations/supabase/client';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import Navbar from '@/components/Navbar';
 import { useToast } from '@/hooks/use-toast';
+import { RideDetailModal } from '@/components/RideDetailModal';
 
 interface Ride {
   id: string;
   pickup_address: string;
   dropoff_address: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_lat: number;
+  dropoff_lng: number;
   distance_km: number;
   estimated_duration_minutes: number;
   estimated_fare: number;
@@ -25,6 +30,7 @@ interface Ride {
   status: string;
   requested_at: string;
   dropoff_at: string | null;
+  accepted_at: string | null;
   rider_id: string;
   driver_id: string | null;
 }
@@ -50,6 +56,8 @@ const RideHistory = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'completed' | 'cancelled'>('all');
   const [updatingRideId, setUpdatingRideId] = useState<string | null>(null);
+  const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
 
   // Start Ride action (transition from arrived -> in_progress)
   const startRide = async (ride: Ride, e: React.MouseEvent) => {
@@ -252,7 +260,17 @@ const RideHistory = () => {
         // Rider flow - RideBooking will auto-restore the active ride
         navigate('/ride');
       }
+    } else {
+      // For completed/cancelled rides, open detail modal
+      setSelectedRide(ride);
+      setDetailModalOpen(true);
     }
+  };
+
+  const handleViewDetails = (ride: Ride, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedRide(ride);
+    setDetailModalOpen(true);
   };
 
   const getStatusLabel = (status: string) => {
@@ -453,12 +471,27 @@ const RideHistory = () => {
                           )}
                         </div>
 
-                        {ratings[ride.id] && (
-                          <div className="flex items-center gap-1 text-warning">
-                            <Star className="h-4 w-4 fill-current" />
-                            <span className="font-medium">{ratings[ride.id].rating}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-3">
+                          {ratings[ride.id] && (
+                            <div className="flex items-center gap-1 text-warning">
+                              <Star className="h-4 w-4 fill-current" />
+                              <span className="font-medium">{ratings[ride.id].rating}</span>
+                            </div>
+                          )}
+                          
+                          {/* View Details Button for completed/cancelled rides */}
+                          {!isActiveRide(ride.status) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={(e) => handleViewDetails(ride, e)}
+                              className="gap-1"
+                            >
+                              <Eye className="h-4 w-4" />
+                              {language === 'fr' ? 'Détails' : 'Details'}
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </Card>
                   </motion.div>
@@ -468,6 +501,17 @@ const RideHistory = () => {
           )}
         </motion.div>
       </div>
+
+      {/* Ride Detail Modal */}
+      <RideDetailModal
+        open={detailModalOpen}
+        onClose={() => {
+          setDetailModalOpen(false);
+          setSelectedRide(null);
+        }}
+        ride={selectedRide}
+        rating={selectedRide ? ratings[selectedRide.id] : null}
+      />
     </div>
   );
 };
