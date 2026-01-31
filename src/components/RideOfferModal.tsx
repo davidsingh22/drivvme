@@ -170,20 +170,21 @@ export function RideOfferModal({
                   </p>
                 </div>
 
-                {/* Distance to Rider Badge */}
-                {driverDistanceKm !== null && (
-                  <div className="flex items-center justify-center">
-                    <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/20 border border-primary/40">
-                      <Navigation className="h-4 w-4 text-primary" />
-                      <span className="text-primary font-semibold text-lg">
-                        {driverDistanceKm < 1 
-                          ? `${(driverDistanceKm * 1000).toFixed(0)}m ${language === 'fr' ? 'du passager' : 'to rider'}`
-                          : `${driverDistanceKm.toFixed(1)} km ${language === 'fr' ? 'du passager' : 'to rider'}`
-                        }
-                      </span>
-                    </div>
+                {/* Distance to Rider Badge - Always visible */}
+                <div className="flex items-center justify-center">
+                  <div className="inline-flex items-center gap-2 px-5 py-3 rounded-full bg-primary/20 border-2 border-primary/50">
+                    <Navigation className="h-5 w-5 text-primary" />
+                    <span className="text-primary font-bold text-xl">
+                      {driverDistanceKm !== null 
+                        ? (driverDistanceKm < 1 
+                            ? `${(driverDistanceKm * 1000).toFixed(0)}m ${language === 'fr' ? 'du passager' : 'to rider'}`
+                            : `${driverDistanceKm.toFixed(1)} km ${language === 'fr' ? 'du passager' : 'to rider'}`
+                          )
+                        : (language === 'fr' ? 'Localisation...' : 'Getting location...')
+                      }
+                    </span>
                   </div>
-                )}
+                </div>
 
                 {/* Route Info */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
@@ -275,11 +276,11 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Decline Button */}
+                {/* Decline Button - Same prominence as Accept */}
                 <Button
-                  variant="outline"
+                  size="lg"
                   onClick={onDecline}
-                  className="w-full h-12 text-base font-semibold border-2 border-destructive/50 text-destructive hover:bg-destructive/20 hover:text-destructive rounded-xl"
+                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl"
                 >
                   <X className="h-5 w-5 mr-2" />
                   {language === 'fr' ? 'Refuser la course' : 'Decline Ride'}
