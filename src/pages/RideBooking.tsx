@@ -1369,27 +1369,37 @@ const RideBooking = () => {
 
                   {/* Price Comparison - PROMINENT UBER vs DRIVVEME */}
                   <Card className="p-6 gradient-card border-primary/20 overflow-hidden">
+                    {/* Header */}
+                    <div className="text-center mb-4">
+                      <p className="text-sm text-muted-foreground">
+                        {language === 'fr' ? 'Comparaison des prix' : 'Price Comparison'}
+                      </p>
+                    </div>
+
                     {/* Side-by-side Price Comparison */}
                     <div className="grid grid-cols-2 gap-4 mb-4">
                       {/* Uber Price */}
-                      <div className="relative p-4 bg-muted/30 rounded-lg border border-muted">
+                      <div className="relative p-4 bg-muted rounded-lg border border-border">
                         <div className="absolute top-2 right-2">
-                          <span className="text-xs px-2 py-0.5 bg-muted rounded-full text-muted-foreground">
+                          <span className="text-[10px] px-2 py-0.5 bg-muted-foreground/20 rounded-full text-muted-foreground font-medium">
                             Uber
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground mb-1 mt-4">
-                          {language === 'fr' ? 'Prix Uber' : 'Uber Price'}
+                          {language === 'fr' ? 'Prix Uber actuel' : 'Current Uber Price'}
                         </p>
-                        <p className="text-xl font-bold line-through text-muted-foreground">
+                        <p className="text-2xl font-bold text-foreground/70">
                           {formatCurrency(fareEstimate.uberTotal, language)}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          {language === 'fr' ? 'taxes incluses' : 'taxes included'}
                         </p>
                       </div>
                       
                       {/* Drivveme Price */}
                       <div className="relative p-4 bg-primary/10 rounded-lg border-2 border-primary">
                         <div className="absolute -top-2 -right-2">
-                          <span className="text-xs px-2 py-1 bg-accent text-accent-foreground rounded-full font-bold animate-pulse">
+                          <span className="text-xs px-2 py-1 bg-accent text-accent-foreground rounded-full font-bold animate-pulse shadow-lg">
                             -7.5%
                           </span>
                         </div>
@@ -1398,6 +1408,9 @@ const RideBooking = () => {
                         </p>
                         <p className="font-display text-2xl font-bold text-primary">
                           {formatCurrency(fareEstimate.total, language)}
+                        </p>
+                        <p className="text-[10px] text-primary/70 mt-1">
+                          {language === 'fr' ? 'taxes incluses' : 'taxes included'}
                         </p>
                       </div>
                     </div>
@@ -1417,7 +1430,7 @@ const RideBooking = () => {
                       </div>
                     </div>
 
-                    {/* Fare Breakdown (collapsible feel) */}
+                    {/* Fare Breakdown */}
                     <div className="space-y-2 text-sm border-t border-border/50 pt-4">
                       <div className="flex justify-between text-muted-foreground">
                         <span>{language === 'fr' ? 'Sous-total' : 'Subtotal'}</span>
