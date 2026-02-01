@@ -1367,54 +1367,75 @@ const RideBooking = () => {
                     </Card>
                   </div>
 
-                  {/* Price Comparison */}
-                  <Card className="p-6 gradient-card border-primary/20">
-                    {/* Uber Equivalent */}
-                    <div className="mb-4 pb-4 border-b border-border/50">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm text-muted-foreground">Uber Equivalent</span>
-                        <span className="text-lg line-through text-muted-foreground">
-                          {formatCurrency(fareEstimate.uberEquivalent, language)}
-                        </span>
+                  {/* Price Comparison - PROMINENT UBER vs DRIVVEME */}
+                  <Card className="p-6 gradient-card border-primary/20 overflow-hidden">
+                    {/* Side-by-side Price Comparison */}
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      {/* Uber Price */}
+                      <div className="relative p-4 bg-muted/30 rounded-lg border border-muted">
+                        <div className="absolute top-2 right-2">
+                          <span className="text-xs px-2 py-0.5 bg-muted rounded-full text-muted-foreground">
+                            Uber
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-1 mt-4">
+                          {language === 'fr' ? 'Prix Uber' : 'Uber Price'}
+                        </p>
+                        <p className="text-xl font-bold line-through text-muted-foreground">
+                          {formatCurrency(fareEstimate.uberTotal, language)}
+                        </p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground/70">
-                        <span>Base fare: {formatCurrency(fareEstimate.uberBaseFare, language)}</span>
-                        <span>Booking fee: {formatCurrency(fareEstimate.uberBookingFee, language)}</span>
-                        <span>Distance: {formatCurrency(fareEstimate.uberDistanceFare, language)}</span>
-                        <span>Time: {formatCurrency(fareEstimate.uberTimeFare, language)}</span>
-                      </div>
-                    </div>
-
-                    {/* Drivveme Price */}
-                    <div className="mb-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-lg font-medium">Drivveme Price</span>
-                        <span className="font-display text-3xl font-bold text-gradient">
+                      
+                      {/* Drivveme Price */}
+                      <div className="relative p-4 bg-primary/10 rounded-lg border-2 border-primary">
+                        <div className="absolute -top-2 -right-2">
+                          <span className="text-xs px-2 py-1 bg-accent text-accent-foreground rounded-full font-bold animate-pulse">
+                            -7.5%
+                          </span>
+                        </div>
+                        <p className="text-xs text-primary mb-1 mt-4 font-medium">
+                          {language === 'fr' ? 'Prix Drivveme' : 'Drivveme Price'}
+                        </p>
+                        <p className="font-display text-2xl font-bold text-primary">
                           {formatCurrency(fareEstimate.total, language)}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-                        <span>Base fare: {formatCurrency(fareEstimate.baseFare, language)}</span>
-                        <span>Booking fee: {formatCurrency(fareEstimate.bookingFee, language)}</span>
-                        <span>Distance: {formatCurrency(fareEstimate.distanceFare, language)}</span>
-                        <span>Time: {formatCurrency(fareEstimate.timeFare, language)}</span>
+                        </p>
                       </div>
                     </div>
                     
-                    {/* Savings highlight */}
-                    <div className="flex items-center gap-2 text-accent bg-accent/10 rounded-lg p-3">
-                      <TrendingDown className="h-5 w-5" />
-                      <span className="font-medium">
-                        You save {formatCurrency(fareEstimate.savings, language)} ({fareEstimate.savingsPercent}% cheaper!)
-                      </span>
+                    {/* Savings Banner */}
+                    <div className="flex items-center justify-center gap-3 text-accent bg-accent/10 rounded-xl p-4 mb-4">
+                      <TrendingDown className="h-6 w-6" />
+                      <div className="text-center">
+                        <span className="font-bold text-lg">
+                          {language === 'fr' ? 'Tu économises' : 'You save'} {formatCurrency(fareEstimate.savings, language)}!
+                        </span>
+                        <p className="text-xs text-accent/80">
+                          {language === 'fr' 
+                            ? `${fareEstimate.savingsPercent}% moins cher qu'Uber`
+                            : `${fareEstimate.savingsPercent}% cheaper than Uber`}
+                        </p>
+                      </div>
                     </div>
 
-                    {fareEstimate.surgeMultiplier > 1 && (
-                      <div className="mt-3 flex items-center gap-2 text-warning text-sm">
-                        <Clock className="h-4 w-4" />
-                        <span>Surge pricing: {fareEstimate.surgeMultiplier}x</span>
+                    {/* Fare Breakdown (collapsible feel) */}
+                    <div className="space-y-2 text-sm border-t border-border/50 pt-4">
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>{language === 'fr' ? 'Sous-total' : 'Subtotal'}</span>
+                        <span>{formatCurrency(fareEstimate.subtotalBeforeTax, language)}</span>
                       </div>
-                    )}
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>{language === 'fr' ? 'TPS (5%)' : 'GST (5%)'}</span>
+                        <span>{formatCurrency(fareEstimate.gstAmount, language)}</span>
+                      </div>
+                      <div className="flex justify-between text-muted-foreground">
+                        <span>{language === 'fr' ? 'TVQ (9.975%)' : 'QST (9.975%)'}</span>
+                        <span>{formatCurrency(fareEstimate.qstAmount, language)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold pt-2 border-t border-border/50">
+                        <span>Total</span>
+                        <span className="text-primary">{formatCurrency(fareEstimate.total, language)}</span>
+                      </div>
+                    </div>
                   </Card>
 
                   {/* Push Notification Prompt */}
