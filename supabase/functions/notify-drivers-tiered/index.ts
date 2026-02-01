@@ -230,19 +230,44 @@ serve(async (req) => {
   }
 
   try {
-    // Authenticate with service role key - this is an internal function
+    // Authenticate - accept both service role key OR valid user JWT
     const authHeader = req.headers.get("Authorization");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    if (!authHeader || authHeader !== `Bearer ${serviceRoleKey}`) {
-      console.error("Unauthorized: Invalid or missing service role key");
+    let isServiceRole = false;
+    let userId: string | null = null;
+
+    if (authHeader === `Bearer ${serviceRoleKey}`) {
+      // Service role key - full access
+      isServiceRole = true;
+    } else if (authHeader?.startsWith("Bearer ")) {
+      // Try to validate as user JWT
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } }
+      });
+      
+      const token = authHeader.replace("Bearer ", "");
+      const { data: claimsData, error: claimsError } = await userClient.auth.getClaims(token);
+      
+      if (claimsError || !claimsData?.claims?.sub) {
+        console.error("Unauthorized: Invalid JWT");
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      userId = claimsData.claims.sub as string;
+    } else {
+      console.error("Unauthorized: Missing authorization header");
       return new Response(
-        JSON.stringify({ error: "Unauthorized - service role key required" }),
+        JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
 
     // Parse and validate input
@@ -278,7 +303,25 @@ serve(async (req) => {
 
     console.log(`[Tier ${tier}] Notifying drivers for ride:`, rideId);
 
+    // Use service role key for database operations (either from direct auth or fetched)
     const supabase = createClient(supabaseUrl, serviceRoleKey!);
+
+    // If user auth (not service role), verify they own this ride
+    if (!isServiceRole && userId) {
+      const { data: ride, error: rideCheckError } = await supabase
+        .from("rides")
+        .select("rider_id")
+        .eq("id", rideId)
+        .single();
+      
+      if (rideCheckError || !ride || ride.rider_id !== userId) {
+        console.error("Unauthorized: User does not own this ride");
+        return new Response(
+          JSON.stringify({ error: "Unauthorized - not your ride" }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    }
 
     // Tier configuration - TEST MODE: all tiers set to 100km for testing
     const tierConfig = {
