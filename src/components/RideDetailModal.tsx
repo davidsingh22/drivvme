@@ -76,11 +76,10 @@ export function RideDetailModal({ open, onClose, ride, rating }: RideDetailModal
 
   if (!ride) return null;
 
-  const fare = ride.actual_fare || ride.estimated_fare;
-  // Use subtotal_before_tax for platform fee calculation (new billing system)
-  const fareForFee = ride.subtotal_before_tax ?? fare;
-  const platformFee = ride.platform_fee ?? calculatePlatformFee(fareForFee);
-  const driverEarnings = ride.driver_earnings ?? calculateDriverEarnings(fareForFee);
+  // Show fare before tax to drivers (not the total with taxes)
+  const fareBeforeTax = ride.subtotal_before_tax ?? (ride.actual_fare || ride.estimated_fare);
+  const platformFee = ride.platform_fee ?? calculatePlatformFee(fareBeforeTax);
+  const driverEarnings = ride.driver_earnings ?? calculateDriverEarnings(fareBeforeTax);
   const distance = ride.distance_km || 0;
   const duration = ride.estimated_duration_minutes || 0;
 
@@ -232,7 +231,7 @@ export function RideDetailModal({ open, onClose, ride, rating }: RideDetailModal
             </Card>
           </div>
 
-          {/* Earnings Breakdown */}
+          {/* Earnings Breakdown - Show fare before tax, platform fee, and earnings only */}
           <Card className="p-5 bg-gradient-to-br from-success/10 to-success/5 border-success/20">
             <h3 className="font-semibold mb-4 flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-success" />
@@ -241,8 +240,8 @@ export function RideDetailModal({ open, onClose, ride, rating }: RideDetailModal
             
             <div className="space-y-3">
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">{language === 'fr' ? 'Tarif total' : 'Total Fare'}</span>
-                <span className="font-semibold text-lg">{formatCurrency(fare, language)}</span>
+                <span className="text-muted-foreground">{language === 'fr' ? 'Tarif' : 'Fare'}</span>
+                <span className="font-semibold text-lg">{formatCurrency(fareBeforeTax, language)}</span>
               </div>
               
               <div className="flex justify-between items-center">
