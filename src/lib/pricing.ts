@@ -34,7 +34,11 @@ const QUEBEC_TAX_RATE = 0.14975;
 // Drivveme is 7.5% cheaper than Uber AFTER taxes
 // Drivveme Final = Uber Final × 0.925
 const DRIVVEME_DISCOUNT_MULTIPLIER = 0.925;
-const DISCOUNT_PERCENT = 0.075; // 7.5%
+
+// The promo discount needed on pre-tax amount to achieve 7.5% off final
+// Math: (subtotal - promo) × 1.14975 = subtotal × 1.14975 × 0.925
+// Solving: promo = subtotal × (1 - 0.925) = subtotal × 0.075
+const PROMO_DISCOUNT_RATE = 0.075; // 7.5%
 
 // NO surge pricing for Drivveme
 const getSurgeMultiplier = (_hour: number): number => 1.0;
@@ -113,7 +117,7 @@ export const calculateFare = (
   // Total = After Promo + Taxes
   // ========================================
   const subtotal = uberPreTax;
-  const promoDiscount = subtotal * DISCOUNT_PERCENT;
+  const promoDiscount = subtotal * PROMO_DISCOUNT_RATE;
   const afterPromo = subtotal - promoDiscount;
   const taxes = afterPromo * QUEBEC_TAX_RATE;
 
