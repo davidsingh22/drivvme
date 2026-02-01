@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Star, DollarSign, TrendingDown, CheckCircle2, MessageSquare } from 'lucide-react';
+import { Star, TrendingDown, CheckCircle2, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -8,6 +8,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency } from '@/lib/pricing';
+import RideReceipt from './RideReceipt';
 
 interface DriverInfo {
   first_name: string;
@@ -22,6 +23,14 @@ interface TripCompletionScreenProps {
   actualFare: number;
   estimatedFare: number;
   savings: number;
+  pickupAddress: string;
+  dropoffAddress: string;
+  distanceKm: number;
+  durationMinutes: number;
+  subtotal: number;
+  promoDiscount: number;
+  afterPromo: number;
+  taxes: number;
   onComplete: () => void;
 }
 
@@ -35,6 +44,14 @@ const TripCompletionScreen = ({
   actualFare,
   estimatedFare,
   savings,
+  pickupAddress,
+  dropoffAddress,
+  distanceKm,
+  durationMinutes,
+  subtotal,
+  promoDiscount,
+  afterPromo,
+  taxes,
   onComplete,
 }: TripCompletionScreenProps) => {
   const { language } = useLanguage();
@@ -121,24 +138,21 @@ const TripCompletionScreen = ({
         </p>
       </div>
 
-      {/* Fare breakdown */}
-      <Card className="p-6">
-        <div className="flex items-center justify-between mb-4">
-          <span className="text-muted-foreground">
-            {language === 'fr' ? 'Tarif total' : 'Total fare'}
-          </span>
-          <span className="font-display text-3xl font-bold">
-            {formatCurrency(actualFare, language)}
-          </span>
-        </div>
-        
-        <div className="flex items-center gap-2 text-accent bg-accent/10 rounded-lg p-3">
-          <TrendingDown className="h-5 w-5" />
-          <span className="font-medium">
-            {language === 'fr' ? 'Vous avez économisé' : 'You saved'} {formatCurrency(savings, language)}!
-          </span>
-        </div>
-      </Card>
+      {/* Ride Receipt */}
+      <RideReceipt
+        rideId={rideId}
+        pickupAddress={pickupAddress}
+        dropoffAddress={dropoffAddress}
+        distanceKm={distanceKm}
+        durationMinutes={durationMinutes}
+        completedAt={new Date()}
+        subtotal={subtotal}
+        promoDiscount={promoDiscount}
+        afterPromo={afterPromo}
+        taxes={taxes}
+        total={actualFare}
+        savings={savings}
+      />
 
       {/* Driver rating */}
       <Card className="p-6">
