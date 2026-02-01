@@ -89,7 +89,7 @@ export function DailyEarningsDetail({
     setIsLoading(false);
   };
 
-  const totalPlatformFees = rideDetails.reduce((sum, r) => sum + (Number(r.platform_fee) || calculatePlatformFee(Number(r.subtotal_before_tax) || 0)), 0);
+  
 
   return (
     <Card 
@@ -130,15 +130,11 @@ export function DailyEarningsDetail({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="border-t border-border bg-muted/30 p-4 space-y-4">
-              {/* Daily Summary */}
-              <div className="grid grid-cols-3 gap-3 text-center">
+              {/* Daily Summary - Only show Fares and Earnings */}
+              <div className="grid grid-cols-2 gap-3 text-center">
                 <div className="bg-background rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Tarifs totaux' : 'Total Fares'}</p>
                   <p className="font-bold text-foreground">{formatCurrency(fares, language)}</p>
-                </div>
-                <div className="bg-background rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Frais plateforme' : 'Platform Fees'}</p>
-                  <p className="font-bold text-destructive">-{formatCurrency(totalPlatformFees || (fares - earnings), language)}</p>
                 </div>
                 <div className="bg-background rounded-lg p-3">
                   <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Vos gains' : 'Your Earnings'}</p>
@@ -160,7 +156,8 @@ export function DailyEarningsDetail({
                     // Show subtotal before tax (fare without Quebec taxes) to drivers
                     const fareBeforeTax = Number(ride.subtotal_before_tax) || 0;
                     const platformFee = Number(ride.platform_fee) || calculatePlatformFee(fareBeforeTax);
-                    const driverEarnings = Number(ride.driver_earnings) || (fareBeforeTax - platformFee);
+                    // Always recalculate driver earnings from fare - platform fee to ensure accuracy
+                    const driverEarnings = fareBeforeTax - platformFee;
                     
                     return (
                       <motion.div
