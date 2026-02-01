@@ -365,19 +365,46 @@ export function RiderBillModal({ open, onClose, ride }: RiderBillModalProps) {
               </span>
             </div>
 
+            {/* Uber vs Drivveme Comparison */}
+            <div className="mt-4 p-4 bg-muted/30 rounded-lg border border-border">
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-sm text-muted-foreground">
+                  {language === 'fr' ? 'Prix Uber' : 'Uber Price'}
+                </span>
+                <span className="text-lg line-through text-muted-foreground">
+                  {formatCurrency(fareEstimate.uberTotal, language)}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-primary">
+                  {language === 'fr' ? 'Vous payez' : 'You pay'}
+                </span>
+                <span className="text-lg font-bold text-primary">
+                  {formatCurrency(total, language)}
+                </span>
+              </div>
+            </div>
+
             {/* Savings badge */}
             {fareEstimate.savings > 0 && (
               <motion.div 
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="flex items-center justify-center gap-2 p-3 bg-success/10 rounded-lg border border-success/20"
+                className="flex items-center justify-center gap-2 p-4 bg-accent/10 rounded-lg border border-accent/20"
               >
-                <Percent className="h-4 w-4 text-success" />
-                <span className="text-sm font-medium text-success">
-                  {language === 'fr' 
-                    ? `Vous économisez ${formatCurrency(fareEstimate.savings, language)} vs Uber!`
-                    : `You saved ${formatCurrency(fareEstimate.savings, language)} vs Uber!`}
-                </span>
+                <Percent className="h-5 w-5 text-accent" />
+                <div className="text-center">
+                  <span className="text-lg font-bold text-accent">
+                    {language === 'fr' 
+                      ? `Économie: ${formatCurrency(fareEstimate.savings, language)}`
+                      : `You saved: ${formatCurrency(fareEstimate.savings, language)}`}
+                  </span>
+                  <p className="text-xs text-accent/80">
+                    {language === 'fr' 
+                      ? `${fareEstimate.savingsPercent}% moins cher qu'Uber!`
+                      : `${fareEstimate.savingsPercent}% cheaper than Uber!`}
+                  </p>
+                </div>
               </motion.div>
             )}
           </div>
