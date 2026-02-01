@@ -131,7 +131,7 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   
-  const [activeTab, setActiveTab] = useState('users');
+  const [activeTab, setActiveTab] = useState('riders');
   const [payments, setPayments] = useState<Payment[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [rides, setRides] = useState<Ride[]>([]);
@@ -915,12 +915,16 @@ const AdminDashboard = () => {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <div className="flex flex-col sm:flex-row justify-between gap-4">
             <TabsList>
-              <TabsTrigger value="users" className="gap-2">
-                <Users className="w-4 h-4" />
-                Users
+              <TabsTrigger value="riders" className="gap-2">
+                <User className="w-4 h-4" />
+                Riders
+              </TabsTrigger>
+              <TabsTrigger value="drivers" className="gap-2">
+                <Car className="w-4 h-4" />
+                Drivers
               </TabsTrigger>
               <TabsTrigger value="rides" className="gap-2">
-                <Car className="w-4 h-4" />
+                <Navigation className="w-4 h-4" />
                 Rides
               </TabsTrigger>
               <TabsTrigger value="payments" className="gap-2">
@@ -950,7 +954,7 @@ const AdminDashboard = () => {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
                 <Input
-                  placeholder={activeTab === 'users' ? 'Search users...' : activeTab === 'rides' ? 'Search rides...' : 'Search payments...'}
+                  placeholder={activeTab === 'riders' ? 'Search riders...' : activeTab === 'drivers' ? 'Search drivers...' : activeTab === 'rides' ? 'Search rides...' : 'Search payments...'}
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="pl-10 w-64"
@@ -963,73 +967,129 @@ const AdminDashboard = () => {
             </div>
           </div>
 
-          {/* Users Tab */}
-          <TabsContent value="users">
+          {/* Riders Tab */}
+          <TabsContent value="riders">
             <Card>
               <CardContent className="p-0">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>User</TableHead>
+                      <TableHead>Rider</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Phone</TableHead>
-                      <TableHead>Roles</TableHead>
                       <TableHead>Joined</TableHead>
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredUsers.map((user) => (
-                      <TableRow key={user.id}>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-                              <User className="w-4 h-4 text-muted-foreground" />
+                    {filteredUsers
+                      .filter(u => u.roles.includes('rider'))
+                      .map((user) => (
+                        <TableRow key={user.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                                <User className="w-4 h-4 text-muted-foreground" />
+                              </div>
+                              <span className="font-medium">
+                                {user.first_name || user.last_name 
+                                  ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+                                  : 'No name'}
+                              </span>
                             </div>
-                            <span className="font-medium">
-                              {user.first_name || user.last_name 
-                                ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
-                                : 'No name'}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell>{user.email || 'N/A'}</TableCell>
-                        <TableCell>{user.phone_number || 'N/A'}</TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-1">
-                            {user.roles.length > 0 ? (
-                              user.roles.map(role => (
-                                <span key={role}>{getRoleBadge(role)}</span>
-                              ))
-                            ) : (
-                              <Badge variant="outline">No role</Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {format(new Date(user.created_at), 'MMM d, yyyy')}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={() => deleteUser(user.user_id)}
-                            disabled={deletingUserId === user.user_id}
-                          >
-                            {deletingUserId === user.user_id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="w-4 h-4" />
-                            )}
-                          </Button>
+                          </TableCell>
+                          <TableCell>{user.email || 'N/A'}</TableCell>
+                          <TableCell>{user.phone_number || 'N/A'}</TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {format(new Date(user.created_at), 'MMM d, yyyy')}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => deleteUser(user.user_id)}
+                              disabled={deletingUserId === user.user_id}
+                            >
+                              {deletingUserId === user.user_id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    {filteredUsers.filter(u => u.roles.includes('rider')).length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                          <User className="w-8 h-8 mx-auto mb-2" />
+                          No riders found
                         </TableCell>
                       </TableRow>
-                    ))}
-                    {filteredUsers.length === 0 && (
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Drivers Tab */}
+          <TabsContent value="drivers">
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Driver</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Joined</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUsers
+                      .filter(u => u.roles.includes('driver'))
+                      .map((user) => (
+                        <TableRow key={user.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                                <Car className="w-4 h-4 text-muted-foreground" />
+                              </div>
+                              <span className="font-medium">
+                                {user.first_name || user.last_name 
+                                  ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
+                                  : 'No name'}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>{user.email || 'N/A'}</TableCell>
+                          <TableCell>{user.phone_number || 'N/A'}</TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {format(new Date(user.created_at), 'MMM d, yyyy')}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => deleteUser(user.user_id)}
+                              disabled={deletingUserId === user.user_id}
+                            >
+                              {deletingUserId === user.user_id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="w-4 h-4" />
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    {filteredUsers.filter(u => u.roles.includes('driver')).length === 0 && (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                          <Users className="w-8 h-8 mx-auto mb-2" />
-                          No users found
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                          <Car className="w-8 h-8 mx-auto mb-2" />
+                          No drivers found
                         </TableCell>
                       </TableRow>
                     )}
