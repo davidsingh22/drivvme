@@ -579,15 +579,8 @@ const DriverDashboard = () => {
     }
   }, []);
 
-  const sendPushNotification = async (userId: string, title: string, body: string, url?: string) => {
-    try {
-      await supabase.functions.invoke('send-push-notification', {
-        body: { userId, title, body, url }
-      });
-    } catch (error) {
-      console.error('Failed to send push notification:', error);
-    }
-  };
+  // Push notifications are handled server-side via edge functions
+  // No client-side notification sending needed
 
   const acceptRide = async (ride: RideRequest) => {
     if (!user) return;
@@ -662,12 +655,7 @@ const DriverDashboard = () => {
       message: 'Your driver is on the way to pick you up.',
     }).then(() => {});
 
-    sendPushNotification(
-      ride.rider_id,
-      'Driver Found! 🚗',
-      'Your driver is on the way to pick you up.',
-      '/ride'
-    );
+    // Push notification is handled server-side via database triggers
   };
 
   const updateRideStatus = async (status: string) => {
@@ -705,22 +693,7 @@ const DriverDashboard = () => {
       return;
     }
 
-    // Send push notification to rider based on status
-    const notifications: Record<string, { title: string; body: string }> = {
-      driver_en_route: { title: 'Driver On The Way 🚗', body: 'Your driver is heading to your pickup location.' },
-      arrived: { title: 'Driver Has Arrived! 📍', body: 'Your driver is waiting at the pickup location.' },
-      in_progress: { title: 'Ride Started 🎉', body: 'Enjoy your trip!' },
-      completed: { title: 'Ride Completed ✅', body: 'Thanks for riding with DrivvMe!' },
-    };
-
-    if (notifications[status]) {
-      await sendPushNotification(
-        currentRide.rider_id,
-        notifications[status].title,
-        notifications[status].body,
-        '/ride'
-      );
-    }
+    // Push notifications are handled server-side via database triggers
 
     if (status === 'completed') {
       const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
@@ -1004,32 +977,9 @@ const DriverDashboard = () => {
                       disabled={pushLoading}
                       onClick={async () => {
                         const ok = await subscribeToPush();
-                        if (!ok) return;
-
-                        const { data, error } = await supabase.functions.invoke('send-push-notification', {
-                          body: {
-                            userId: user?.id,
-                            title: 'Driver alerts enabled',
-                            body: 'You will receive new ride request notifications.',
-                            url: '/driver',
-                          },
-                        });
-
-                        if (error) {
-                          toast({ title: 'Test notification failed', description: error.message, variant: 'destructive' });
-                          return;
+                        if (ok) {
+                          toast({ title: language === 'fr' ? 'Notifications activées' : 'Notifications enabled' });
                         }
-
-                        if (!data?.sent) {
-                          toast({
-                            title: 'Not subscribed yet',
-                            description: 'No subscription found for this device. Try enabling again.',
-                            variant: 'destructive',
-                          });
-                          return;
-                        }
-
-                        toast({ title: 'Test notification sent' });
                       }}
                     >
                       {pushLoading ? 'Enabling…' : 'Enable & Test'}

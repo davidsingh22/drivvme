@@ -178,19 +178,50 @@ serve(async (req) => {
   }
 
   try {
-    // Authenticate with service role key - this is an internal function
+    // Authenticate - accept either service role key OR admin user JWT
     const authHeader = req.headers.get("Authorization");
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    if (!authHeader || authHeader !== `Bearer ${serviceRoleKey}`) {
-      console.error("Unauthorized: Invalid or missing service role key");
+    let isAuthorized = false;
+
+    // Check if using service role key (internal server calls)
+    if (authHeader === `Bearer ${serviceRoleKey}`) {
+      isAuthorized = true;
+    } else if (authHeader?.startsWith('Bearer ')) {
+      // Check if user is an admin
+      const userSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } }
+      });
+      
+      const token = authHeader.replace('Bearer ', '');
+      const { data: claimsData, error: claimsError } = await userSupabase.auth.getClaims(token);
+      
+      if (!claimsError && claimsData?.claims?.sub) {
+        const userId = claimsData.claims.sub as string;
+        // Check if user has admin role
+        const { data: roleData } = await createClient(supabaseUrl, serviceRoleKey!)
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', userId)
+          .eq('role', 'admin')
+          .maybeSingle();
+        
+        if (roleData) {
+          isAuthorized = true;
+        }
+      }
+    }
+
+    if (!isAuthorized) {
+      console.error("Unauthorized: Invalid credentials or not admin");
       return new Response(
-        JSON.stringify({ error: "Unauthorized - service role key required" }),
+        JSON.stringify({ error: "Unauthorized - service role key or admin access required" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
 
     // Parse and validate input
