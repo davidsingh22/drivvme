@@ -88,6 +88,9 @@ interface Ride {
   status: 'pending_payment' | 'searching' | 'driver_assigned' | 'driver_en_route' | 'arrived' | 'in_progress' | 'completed' | 'cancelled';
   estimated_fare: number;
   actual_fare: number | null;
+  subtotal_before_tax: number | null;
+  gst_amount: number | null;
+  qst_amount: number | null;
   distance_km: number | null;
   estimated_duration_minutes: number | null;
   requested_at: string;
@@ -1574,14 +1577,58 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
+              {/* Financial Breakdown */}
+              <div className="p-4 bg-muted rounded-lg space-y-3">
+                <p className="text-sm font-medium">Bill Breakdown</p>
+                
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Subtotal (before tax)</span>
+                    <span className="font-medium">
+                      {selectedRide.subtotal_before_tax ? `$${selectedRide.subtotal_before_tax.toFixed(2)}` : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">GST (5%)</span>
+                    <span>
+                      {selectedRide.gst_amount ? `$${selectedRide.gst_amount.toFixed(2)}` : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">QST (9.975%)</span>
+                    <span>
+                      {selectedRide.qst_amount ? `$${selectedRide.qst_amount.toFixed(2)}` : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm pt-2 border-t border-border">
+                    <span className="font-medium">Trip Total (with tax)</span>
+                    <span className="font-bold">
+                      {selectedRide.actual_fare ? `$${selectedRide.actual_fare.toFixed(2)}` : 
+                       `$${selectedRide.estimated_fare.toFixed(2)}`}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-border space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Platform Fee</span>
+                    <span className="text-destructive">
+                      {selectedRide.platform_fee ? `-$${selectedRide.platform_fee.toFixed(2)}` : '-'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="font-medium text-primary">Driver Earnings</span>
+                    <span className="font-bold text-primary">
+                      {selectedRide.driver_earnings ? `$${selectedRide.driver_earnings.toFixed(2)}` : '-'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-sm text-muted-foreground">Estimated Fare</p>
                   <p className="font-medium">${selectedRide.estimated_fare.toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Actual Fare</p>
-                  <p className="font-medium">{selectedRide.actual_fare ? `$${selectedRide.actual_fare.toFixed(2)}` : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Distance</p>
@@ -1590,21 +1637,6 @@ const AdminDashboard = () => {
                 <div>
                   <p className="text-sm text-muted-foreground">Duration</p>
                   <p className="font-medium">{selectedRide.estimated_duration_minutes ? `${selectedRide.estimated_duration_minutes} min` : '-'}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Driver Earnings</p>
-                  <p className="font-medium">{selectedRide.driver_earnings ? `$${selectedRide.driver_earnings.toFixed(2)}` : '-'}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Platform Fee</p>
-                  <p className="font-medium">{selectedRide.platform_fee ? `$${selectedRide.platform_fee.toFixed(2)}` : '-'}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Requested At</p>
-                  <p className="font-medium text-sm">{format(new Date(selectedRide.requested_at), 'MMM d, yyyy HH:mm')}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Completed At</p>
