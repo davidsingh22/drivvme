@@ -92,7 +92,7 @@ const Login = () => {
               {t('auth.loginTitle')}
             </h1>
             <p className="text-muted-foreground text-center mb-8">
-              Sign in to continue
+              Connectez-vous pour continuer
             </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -145,7 +145,7 @@ const Login = () => {
                   htmlFor="rememberMe" 
                   className="text-sm font-normal text-muted-foreground cursor-pointer"
                 >
-                  Remember me
+                  Se souvenir de moi
                 </Label>
               </div>
 
