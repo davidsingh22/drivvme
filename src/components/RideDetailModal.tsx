@@ -26,6 +26,10 @@ interface RideData {
   actual_fare: number | null;
   driver_earnings: number | null;
   platform_fee: number | null;
+  promo_discount?: number | null;
+  subtotal_before_tax?: number | null;
+  gst_amount?: number | null;
+  qst_amount?: number | null;
   status: string;
   requested_at: string;
   dropoff_at: string | null;
@@ -73,8 +77,10 @@ export function RideDetailModal({ open, onClose, ride, rating }: RideDetailModal
   if (!ride) return null;
 
   const fare = ride.actual_fare || ride.estimated_fare;
-  const platformFee = ride.platform_fee || calculatePlatformFee(fare);
-  const driverEarnings = ride.driver_earnings || calculateDriverEarnings(fare);
+  // Use subtotal_before_tax for platform fee calculation (new billing system)
+  const fareForFee = ride.subtotal_before_tax ?? fare;
+  const platformFee = ride.platform_fee ?? calculatePlatformFee(fareForFee);
+  const driverEarnings = ride.driver_earnings ?? calculateDriverEarnings(fareForFee);
   const distance = ride.distance_km || 0;
   const duration = ride.estimated_duration_minutes || 0;
 

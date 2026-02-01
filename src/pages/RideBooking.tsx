@@ -263,27 +263,10 @@ const RideBooking = () => {
       setPickupAddress(activeRide.pickup_address);
       setDropoffAddress(activeRide.dropoff_address);
       
-      // Set fare estimate from the ride data (approximate breakdown for display)
-      if (activeRide.estimated_fare) {
-        const total = activeRide.estimated_fare;
-        setFareEstimate({
-          baseFare: total * 0.2,
-          distanceFare: total * 0.4,
-          timeFare: total * 0.15,
-          bookingFee: total * 0.1,
-          surgeMultiplier: 1.0,
-          subtotal: total,
-          total: total,
-          platformFee: 5.0,
-          driverEarnings: Math.max(0, total - 5),
-          uberEquivalent: total / 0.85,
-          uberBaseFare: total * 0.2 / 0.85,
-          uberBookingFee: total * 0.1 / 0.85,
-          uberDistanceFare: total * 0.4 / 0.85,
-          uberTimeFare: total * 0.15 / 0.85,
-          savings: (total / 0.85) - total,
-          savingsPercent: 15,
-        });
+      // Set fare estimate from the ride data using stored values or recalculate
+      if (activeRide.distance_km && activeRide.estimated_duration_minutes) {
+        const recalculated = calculateFare(activeRide.distance_km, activeRide.estimated_duration_minutes);
+        setFareEstimate(recalculated);
       }
       
       // If ride is pending_payment or searching without a succeeded payment, show payment
@@ -867,6 +850,11 @@ const RideBooking = () => {
             distance_km: distanceKm,
             estimated_duration_minutes: Math.round(durationMinutes),
             estimated_fare: fareEstimate.total,
+            promo_discount: fareEstimate.promoDiscount,
+            subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+            gst_amount: fareEstimate.gstAmount,
+            qst_amount: fareEstimate.qstAmount,
+            platform_fee: fareEstimate.platformFee,
             status: rideStatus,
           })
           .select('*')
@@ -1259,6 +1247,7 @@ const RideBooking = () => {
             actualFare={currentRide.actual_fare || fareEstimate?.total || 0}
             estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0}
             savings={fareEstimate?.savings || 0}
+            ride={currentRide}
             onComplete={resetBooking}
           />
         </div>

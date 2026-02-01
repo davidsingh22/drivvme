@@ -666,6 +666,7 @@ export type Database = {
           dropoff_lng: number
           estimated_duration_minutes: number | null
           estimated_fare: number
+          gst_amount: number | null
           id: string
           last_notification_at: string | null
           notification_tier: number | null
@@ -675,9 +676,12 @@ export type Database = {
           pickup_lat: number
           pickup_lng: number
           platform_fee: number | null
+          promo_discount: number | null
+          qst_amount: number | null
           requested_at: string
           rider_id: string | null
           status: Database["public"]["Enums"]["ride_status"]
+          subtotal_before_tax: number | null
           updated_at: string
         }
         Insert: {
@@ -697,6 +701,7 @@ export type Database = {
           dropoff_lng: number
           estimated_duration_minutes?: number | null
           estimated_fare: number
+          gst_amount?: number | null
           id?: string
           last_notification_at?: string | null
           notification_tier?: number | null
@@ -706,9 +711,12 @@ export type Database = {
           pickup_lat: number
           pickup_lng: number
           platform_fee?: number | null
+          promo_discount?: number | null
+          qst_amount?: number | null
           requested_at?: string
           rider_id?: string | null
           status?: Database["public"]["Enums"]["ride_status"]
+          subtotal_before_tax?: number | null
           updated_at?: string
         }
         Update: {
@@ -728,6 +736,7 @@ export type Database = {
           dropoff_lng?: number
           estimated_duration_minutes?: number | null
           estimated_fare?: number
+          gst_amount?: number | null
           id?: string
           last_notification_at?: string | null
           notification_tier?: number | null
@@ -737,9 +746,12 @@ export type Database = {
           pickup_lat?: number
           pickup_lng?: number
           platform_fee?: number | null
+          promo_discount?: number | null
+          qst_amount?: number | null
           requested_at?: string
           rider_id?: string | null
           status?: Database["public"]["Enums"]["ride_status"]
+          subtotal_before_tax?: number | null
           updated_at?: string
         }
         Relationships: []

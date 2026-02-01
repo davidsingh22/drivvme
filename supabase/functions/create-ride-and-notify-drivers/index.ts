@@ -14,6 +14,12 @@ type CreateRidePayload = {
   distanceKm: number;
   durationMinutes: number;
   estimatedFare: number;
+  // New billing breakdown fields
+  promoDiscount?: number;
+  subtotalBeforeTax?: number;
+  gstAmount?: number;
+  qstAmount?: number;
+  platformFee?: number;
 };
 
 serve(async (req) => {
@@ -74,6 +80,11 @@ serve(async (req) => {
         distance_km: payload.distanceKm,
         estimated_duration_minutes: Math.round(payload.durationMinutes),
         estimated_fare: payload.estimatedFare,
+        promo_discount: payload.promoDiscount || 0,
+        subtotal_before_tax: payload.subtotalBeforeTax || 0,
+        gst_amount: payload.gstAmount || 0,
+        qst_amount: payload.qstAmount || 0,
+        platform_fee: payload.platformFee || 0,
         status: "pending_payment", // <-- new pre-payment status
       })
       .select()

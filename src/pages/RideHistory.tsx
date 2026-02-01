@@ -1,17 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Calendar, MapPin, Navigation, Clock, DollarSign, Star, CheckCircle, PlayCircle, Eye } from 'lucide-react';
+import { Calendar, MapPin, Navigation, Clock, DollarSign, Star, CheckCircle, PlayCircle, Eye, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
+import { formatCurrency, formatDistance, formatDuration, calculateFare } from '@/lib/pricing';
+import { calculatePlatformFee, calculateDriverEarnings } from '@/lib/platformFees';
 import Navbar from '@/components/Navbar';
 import { useToast } from '@/hooks/use-toast';
 import { RideDetailModal } from '@/components/RideDetailModal';
+import { RiderBillModal } from '@/components/RiderBillModal';
 
 interface Ride {
   id: string;
@@ -26,7 +28,11 @@ interface Ride {
   estimated_fare: number;
   actual_fare: number | null;
   driver_earnings: number | null;
-  platform_fee: number;
+  platform_fee: number | null;
+  promo_discount?: number | null;
+  subtotal_before_tax?: number | null;
+  gst_amount?: number | null;
+  qst_amount?: number | null;
   status: string;
   requested_at: string;
   dropoff_at: string | null;
@@ -40,7 +46,7 @@ interface Rating {
   comment: string | null;
 }
 
-const PLATFORM_FEE = 5.00;
+// Platform fee is now calculated dynamically based on fare tier
 
 const RideHistory = () => {
   const { t, language } = useLanguage();
@@ -58,6 +64,7 @@ const RideHistory = () => {
   const [updatingRideId, setUpdatingRideId] = useState<string | null>(null);
   const [selectedRide, setSelectedRide] = useState<Ride | null>(null);
   const [detailModalOpen, setDetailModalOpen] = useState(false);
+  const [billModalOpen, setBillModalOpen] = useState(false);
 
   // Start Ride action (transition from arrived -> in_progress)
   const startRide = async (ride: Ride, e: React.MouseEvent) => {
@@ -102,15 +109,23 @@ const RideHistory = () => {
 
     setUpdatingRideId(ride.id);
     try {
-      const driverEarnings = ride.estimated_fare - PLATFORM_FEE;
+      // Calculate fare breakdown with new pricing engine
+      const fareEstimate = calculateFare(ride.distance_km, ride.estimated_duration_minutes);
+      const platformFee = calculatePlatformFee(fareEstimate.subtotalBeforeTax);
+      const driverEarnings = calculateDriverEarnings(fareEstimate.subtotalBeforeTax);
 
       const { error } = await supabase
         .from('rides')
         .update({
           status: 'completed',
           dropoff_at: new Date().toISOString(),
-          actual_fare: ride.estimated_fare,
+          actual_fare: fareEstimate.total,
+          platform_fee: platformFee,
           driver_earnings: driverEarnings,
+          promo_discount: fareEstimate.promoDiscount,
+          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+          gst_amount: fareEstimate.gstAmount,
+          qst_amount: fareEstimate.qstAmount,
         })
         .eq('id', ride.id)
         .eq('driver_id', currentUserId);
@@ -130,7 +145,7 @@ const RideHistory = () => {
 
       // Update local state - move to completed
       setRides((prev) =>
-        prev.map((r) => (r.id === ride.id ? { ...r, status: 'completed', driver_earnings: driverEarnings } : r))
+        prev.map((r) => (r.id === ride.id ? { ...r, status: 'completed', driver_earnings: driverEarnings, platform_fee: platformFee } : r))
       );
 
       // Switch to completed tab
@@ -261,16 +276,26 @@ const RideHistory = () => {
         navigate('/ride');
       }
     } else {
-      // For completed/cancelled rides, open detail modal
+      // For completed/cancelled rides, open appropriate modal based on role
       setSelectedRide(ride);
-      setDetailModalOpen(true);
+      // Show bill modal for riders, detail modal for drivers
+      if (ride.rider_id === user?.id && ride.driver_id !== user?.id) {
+        setBillModalOpen(true);
+      } else {
+        setDetailModalOpen(true);
+      }
     }
   };
 
   const handleViewDetails = (ride: Ride, e: React.MouseEvent) => {
     e.stopPropagation();
     setSelectedRide(ride);
-    setDetailModalOpen(true);
+    // Show bill modal for riders viewing their own rides, detail modal for drivers
+    if (ride.rider_id === user?.id && ride.driver_id !== user?.id) {
+      setBillModalOpen(true);
+    } else {
+      setDetailModalOpen(true);
+    }
   };
 
   const getStatusLabel = (status: string) => {
@@ -502,7 +527,7 @@ const RideHistory = () => {
         </motion.div>
       </div>
 
-      {/* Ride Detail Modal */}
+      {/* Ride Detail Modal (for drivers) */}
       <RideDetailModal
         open={detailModalOpen}
         onClose={() => {
@@ -511,6 +536,16 @@ const RideHistory = () => {
         }}
         ride={selectedRide}
         rating={selectedRide ? ratings[selectedRide.id] : null}
+      />
+
+      {/* Rider Bill Modal (for riders) */}
+      <RiderBillModal
+        open={billModalOpen}
+        onClose={() => {
+          setBillModalOpen(false);
+          setSelectedRide(null);
+        }}
+        ride={selectedRide}
       />
     </div>
   );
