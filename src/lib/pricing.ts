@@ -1,47 +1,33 @@
 // Drivveme Pricing Engine
-// 
-// FORMULA FLOW (from Uber Quebec Rates):
-// ========================================
-// Uber Pre-Tax = (Base + Booking + Distance + Time) × 1.195
-// Uber Final = Uber Pre-Tax × 1.14975 (Quebec taxes: GST 5% + QST 9.975%)
-// Drivveme Final = Uber Final × 0.925 (7.5% cheaper)
-//
-// UBER QUEBEC RATES (UberX):
-// - Base Fare: $2.50
-// - Per KM: $0.715
-// - Per Minute: $0.185
-// - Booking Fee: $2.50
-// - Minimum Fare: $6.00
-// - Calibration Multiplier: 1.195×
+// Always 15% cheaper than Uber, with a flat $5 platform fee per ride
+// Calibrated against real Uber Quebec rates (Jan 2026)
 
-import { calculatePlatformFee } from './platformFees';
+// Uber Quebec base rates (UberX) - calibrated from actual Uber app
+// NOTE: We price off distance+time; keep these tuned so our totals stay
+// consistently below Uber for common Montreal routes.
+const UBER_BASE_FARE = 2.50; // Uber base fare in CAD
+// Calibrated so 11.6km / 23min = $17.55 Uber → $14.92 Drivveme (15% off)
+const UBER_PER_KM_RATE = 0.715; // Uber per km rate in CAD
+const UBER_PER_MINUTE_RATE = 0.185; // Uber per minute rate in CAD
+const UBER_BOOKING_FEE = 2.50; // Uber booking fee in CAD
+const UBER_MINIMUM_FARE = 6.00; // Uber minimum fare in CAD
 
-// Uber Quebec base rates (UberX)
-const UBER_BASE_FARE = 2.50;
-const UBER_PER_KM_RATE = 0.715;
-const UBER_PER_MINUTE_RATE = 0.185;
-const UBER_BOOKING_FEE = 2.50;
-const UBER_MINIMUM_FARE = 6.00;
-
-// Calibration multiplier to match real Uber totals
+// Uber app totals typically include additional fees/taxes that aren't captured
+// by a simple base+booking+distance+time model. We apply a single multiplier
+// to better match real screenshots in our market.
+// Example: 9.8km / 15min → model $14.78, Uber shows $17.66 → factor ~1.195.
 const UBER_CALIBRATION_MULTIPLIER = 1.195;
 
-// Quebec taxes (GST 5% + QST 9.975% = 14.975%)
-// Uber Final = Uber Pre-Tax × 1.14975
-const QUEBEC_TAX_MULTIPLIER = 1.14975;
-const QUEBEC_TAX_RATE = 0.14975;
+// Drivveme rates: 15% cheaper than Uber (always)
+const DISCOUNT_FACTOR = 0.85;
+const MINIMUM_FARE = UBER_MINIMUM_FARE * DISCOUNT_FACTOR;
+const PLATFORM_FEE = 5.00; // Fixed platform fee to driver in CAD
 
-// Drivveme is 7.5% cheaper than Uber AFTER taxes
-// Drivveme Final = Uber Final × 0.925
-const DRIVVEME_DISCOUNT_MULTIPLIER = 0.925;
-
-// The promo discount needed on pre-tax amount to achieve 7.5% off final
-// Math: (subtotal - promo) × 1.14975 = subtotal × 1.14975 × 0.925
-// Solving: promo = subtotal × (1 - 0.925) = subtotal × 0.075
-const PROMO_DISCOUNT_RATE = 0.075; // 7.5%
-
-// NO surge pricing for Drivveme
-const getSurgeMultiplier = (_hour: number): number => 1.0;
+// NO surge pricing for Drivveme - we stay flat while Uber surges
+const getSurgeMultiplier = (_hour: number): number => {
+  // Drivveme doesn't apply surge - this is our competitive advantage
+  return 1.0;
+};
 
 export interface FareEstimate {
   baseFare: number;
@@ -49,19 +35,16 @@ export interface FareEstimate {
   timeFare: number;
   bookingFee: number;
   surgeMultiplier: number;
-  subtotal: number; // Pre-promo fare (matches Uber pre-tax)
-  promoDiscount: number; // 7.5% discount amount
-  afterPromo: number; // Subtotal after promo
-  taxes: number; // Quebec taxes (14.975%)
-  total: number; // Final amount rider pays
-  platformFee: number; // Tiered fee based on afterPromo
+  subtotal: number;
+  total: number;
+  platformFee: number;
   driverEarnings: number;
-  uberEquivalent: number; // Uber's final price with taxes
+  uberEquivalent: number;
   uberBaseFare: number;
   uberBookingFee: number;
   uberDistanceFare: number;
   uberTimeFare: number;
-  savings: number; // Dollar amount saved vs Uber
+  savings: number;
   savingsPercent: number;
 }
 
@@ -73,71 +56,41 @@ export const calculateFare = (
   const hour = new Date().getHours();
   const surgeMultiplier = applySurge ? getSurgeMultiplier(hour) : 1.0;
 
-  // ========================================
-  // STEP 1: Calculate Uber Pre-Tax
-  // Uber Pre-Tax = (Base + Booking + Distance + Time) × 1.195
-  // ========================================
-  const rawBase = UBER_BASE_FARE;
-  const rawBooking = UBER_BOOKING_FEE;
-  const rawDistance = distanceKm * UBER_PER_KM_RATE;
-  const rawTime = durationMinutes * UBER_PER_MINUTE_RATE;
-  
-  let uberPreTax = (rawBase + rawBooking + rawDistance + rawTime) * UBER_CALIBRATION_MULTIPLIER * surgeMultiplier;
-  
-  if (uberPreTax < UBER_MINIMUM_FARE) {
-    uberPreTax = UBER_MINIMUM_FARE;
+  // IMPORTANT: To keep the "15% cheaper" promise mathematically consistent,
+  // we first compute an Uber-equivalent estimate from our Uber calibration,
+  // then apply the discount and only round at the very end.
+  const uberBaseFare = UBER_BASE_FARE * UBER_CALIBRATION_MULTIPLIER;
+  const uberBookingFee = UBER_BOOKING_FEE * UBER_CALIBRATION_MULTIPLIER;
+  const uberDistanceFare = distanceKm * UBER_PER_KM_RATE * UBER_CALIBRATION_MULTIPLIER;
+  const uberTimeFare = durationMinutes * UBER_PER_MINUTE_RATE * UBER_CALIBRATION_MULTIPLIER;
+
+  let uberSubtotal = (uberBaseFare + uberBookingFee + uberDistanceFare + uberTimeFare) * surgeMultiplier;
+  if (uberSubtotal < UBER_MINIMUM_FARE) {
+    uberSubtotal = UBER_MINIMUM_FARE;
   }
 
-  // Individual Uber components (for display)
-  const uberBaseFare = rawBase * UBER_CALIBRATION_MULTIPLIER;
-  const uberBookingFee = rawBooking * UBER_CALIBRATION_MULTIPLIER;
-  const uberDistanceFare = rawDistance * UBER_CALIBRATION_MULTIPLIER;
-  const uberTimeFare = rawTime * UBER_CALIBRATION_MULTIPLIER;
+  const uberEquivalent = Math.round(uberSubtotal * 100) / 100;
 
-  // ========================================
-  // STEP 2: Calculate Uber Final (with taxes)
-  // Uber Final = Uber Pre-Tax × 1.14975
-  // ========================================
-  const uberFinal = uberPreTax * QUEBEC_TAX_MULTIPLIER;
-  const uberEquivalent = Math.round(uberFinal * 100) / 100;
+  // Drivveme is always 15% cheaper than the Uber-equivalent estimate.
+  let drivvemeSubtotal = uberSubtotal * DISCOUNT_FACTOR;
+  if (drivvemeSubtotal < MINIMUM_FARE) {
+    drivvemeSubtotal = MINIMUM_FARE;
+  }
 
-  // ========================================
-  // STEP 3: Calculate Drivveme Final
-  // Drivveme Final = Uber Final × 0.925 (7.5% cheaper)
-  // ========================================
-  const drivvemeFinal = uberFinal * DRIVVEME_DISCOUNT_MULTIPLIER;
-  const total = Math.round(drivvemeFinal * 100) / 100;
+  const total = Math.round(drivvemeSubtotal * 100) / 100;
 
-  // ========================================
-  // STEP 4: Work backwards for receipt display
-  // Subtotal = Uber Pre-Tax (what we would charge without promo)
-  // Promo = Subtotal × 7.5%
-  // After Promo = Subtotal - Promo
-  // Taxes = After Promo × 14.975%
-  // Total = After Promo + Taxes
-  // ========================================
-  const subtotal = uberPreTax;
-  const promoDiscount = subtotal * PROMO_DISCOUNT_RATE;
-  const afterPromo = subtotal - promoDiscount;
-  const taxes = afterPromo * QUEBEC_TAX_RATE;
+  // Breakdowns: derive directly from Uber breakdown to guarantee exactly -15%
+  // for every component (and therefore the total).
+  const baseFare = uberBaseFare * DISCOUNT_FACTOR;
+  const bookingFee = uberBookingFee * DISCOUNT_FACTOR;
+  const distanceFare = uberDistanceFare * DISCOUNT_FACTOR;
+  const timeFare = uberTimeFare * DISCOUNT_FACTOR;
 
-  // ========================================
-  // STEP 5: Driver earnings
-  // Platform fee based on pre-tax fare (after promo)
-  // ========================================
-  const platformFee = calculatePlatformFee(afterPromo);
-  const driverEarnings = Math.max(0, afterPromo - platformFee);
-
-  // Savings calculation
   const savings = Math.round((uberEquivalent - total) * 100) / 100;
-  const savingsPercent = uberEquivalent > 0 ? Math.round((savings / uberEquivalent) * 100) : 0;
+  const savingsPercent = Math.round((1 - DISCOUNT_FACTOR) * 100);
 
-  // Drivveme breakdown for display (proportional reduction)
-  const ratio = DRIVVEME_DISCOUNT_MULTIPLIER; // 0.925
-  const baseFare = uberBaseFare * ratio;
-  const bookingFee = uberBookingFee * ratio;
-  const distanceFare = uberDistanceFare * ratio;
-  const timeFare = uberTimeFare * ratio;
+  // Driver earnings = total fare - $5 platform fee
+  const driverEarnings = Math.max(0, total - PLATFORM_FEE);
 
   return {
     baseFare: Math.round(baseFare * 100) / 100,
@@ -145,12 +98,9 @@ export const calculateFare = (
     distanceFare: Math.round(distanceFare * 100) / 100,
     timeFare: Math.round(timeFare * 100) / 100,
     surgeMultiplier,
-    subtotal: Math.round(subtotal * 100) / 100,
-    promoDiscount: Math.round(promoDiscount * 100) / 100,
-    afterPromo: Math.round(afterPromo * 100) / 100,
-    taxes: Math.round(taxes * 100) / 100,
+    subtotal: Math.round(drivvemeSubtotal * 100) / 100,
     total,
-    platformFee,
+    platformFee: PLATFORM_FEE,
     driverEarnings: Math.round(driverEarnings * 100) / 100,
     uberEquivalent,
     uberBaseFare: Math.round(uberBaseFare * 100) / 100,

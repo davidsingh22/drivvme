@@ -266,35 +266,23 @@ const RideBooking = () => {
       // Set fare estimate from the ride data (approximate breakdown for display)
       if (activeRide.estimated_fare) {
         const total = activeRide.estimated_fare;
-        // Reverse-engineer from total (which includes taxes)
-        const taxRate = 0.14975;
-        const afterPromo = total / (1 + taxRate);
-        const promoRate = 0.075;
-        const subtotal = afterPromo / (1 - promoRate);
-        const promoDiscount = subtotal * promoRate;
-        const taxes = total - afterPromo;
-        const uberEquivalent = subtotal; // Uber equivalent before promo
-        
         setFareEstimate({
-          baseFare: subtotal * 0.2,
-          distanceFare: subtotal * 0.4,
-          timeFare: subtotal * 0.15,
-          bookingFee: subtotal * 0.1,
+          baseFare: total * 0.2,
+          distanceFare: total * 0.4,
+          timeFare: total * 0.15,
+          bookingFee: total * 0.1,
           surgeMultiplier: 1.0,
-          subtotal: subtotal,
-          promoDiscount: promoDiscount,
-          afterPromo: afterPromo,
-          taxes: taxes,
+          subtotal: total,
           total: total,
           platformFee: 5.0,
-          driverEarnings: Math.max(0, afterPromo - 5),
-          uberEquivalent: uberEquivalent,
-          uberBaseFare: subtotal * 0.2,
-          uberBookingFee: subtotal * 0.1,
-          uberDistanceFare: subtotal * 0.4,
-          uberTimeFare: subtotal * 0.15,
-          savings: uberEquivalent - total,
-          savingsPercent: Math.round(((uberEquivalent - total) / uberEquivalent) * 100),
+          driverEarnings: Math.max(0, total - 5),
+          uberEquivalent: total / 0.85,
+          uberBaseFare: total * 0.2 / 0.85,
+          uberBookingFee: total * 0.1 / 0.85,
+          uberDistanceFare: total * 0.4 / 0.85,
+          uberTimeFare: total * 0.15 / 0.85,
+          savings: (total / 0.85) - total,
+          savingsPercent: 15,
         });
       }
       
@@ -1271,14 +1259,6 @@ const RideBooking = () => {
             actualFare={currentRide.actual_fare || fareEstimate?.total || 0}
             estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0}
             savings={fareEstimate?.savings || 0}
-            pickupAddress={currentRide.pickup_address || pickupAddress}
-            dropoffAddress={currentRide.dropoff_address || dropoffAddress}
-            distanceKm={currentRide.distance_km || distanceKm || 0}
-            durationMinutes={currentRide.estimated_duration_minutes || durationMinutes || 0}
-            subtotal={fareEstimate?.subtotal || 0}
-            promoDiscount={fareEstimate?.promoDiscount || 0}
-            afterPromo={fareEstimate?.afterPromo || 0}
-            taxes={fareEstimate?.taxes || 0}
             onComplete={resetBooking}
           />
         </div>
