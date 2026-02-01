@@ -13,7 +13,7 @@ interface Ride {
   id: string;
   pickup_address: string;
   dropoff_address: string;
-  actual_fare: number | null;
+  subtotal_before_tax: number | null;
   driver_earnings: number | null;
   platform_fee: number | null;
   dropoff_at: string;
@@ -76,7 +76,7 @@ export function DailyEarningsDetail({
 
     const { data, error } = await supabase
       .from('rides')
-      .select('id, pickup_address, dropoff_address, actual_fare, driver_earnings, platform_fee, dropoff_at, distance_km, estimated_duration_minutes')
+      .select('id, pickup_address, dropoff_address, subtotal_before_tax, driver_earnings, platform_fee, dropoff_at, distance_km, estimated_duration_minutes')
       .eq('driver_id', driverId)
       .eq('status', 'completed')
       .gte('dropoff_at', startDate.toISOString())
@@ -89,7 +89,7 @@ export function DailyEarningsDetail({
     setIsLoading(false);
   };
 
-  const totalPlatformFees = rideDetails.reduce((sum, r) => sum + (Number(r.platform_fee) || calculatePlatformFee(Number(r.actual_fare) || 0)), 0);
+  const totalPlatformFees = rideDetails.reduce((sum, r) => sum + (Number(r.platform_fee) || calculatePlatformFee(Number(r.subtotal_before_tax) || 0)), 0);
 
   return (
     <Card 
@@ -157,9 +157,10 @@ export function DailyEarningsDetail({
                     {language === 'fr' ? 'Détails des courses' : 'Ride Details'}
                   </h4>
                   {rideDetails.map((ride, index) => {
-                    const fare = Number(ride.actual_fare) || 0;
-                    const platformFee = Number(ride.platform_fee) || calculatePlatformFee(fare);
-                    const driverEarnings = Number(ride.driver_earnings) || (fare - platformFee);
+                    // Show subtotal before tax (fare without Quebec taxes) to drivers
+                    const fareBeforeTax = Number(ride.subtotal_before_tax) || 0;
+                    const platformFee = Number(ride.platform_fee) || calculatePlatformFee(fareBeforeTax);
+                    const driverEarnings = Number(ride.driver_earnings) || (fareBeforeTax - platformFee);
                     
                     return (
                       <motion.div
@@ -188,9 +189,9 @@ export function DailyEarningsDetail({
                           </div>
                         </div>
 
-                        {/* Fee breakdown */}
+                        {/* Fee breakdown - show fare before tax to drivers */}
                         <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
-                          <span>{language === 'fr' ? 'Tarif' : 'Fare'}: {formatCurrency(fare, language)}</span>
+                          <span>{language === 'fr' ? 'Tarif' : 'Fare'}: {formatCurrency(fareBeforeTax, language)}</span>
                           <span className="flex items-center gap-1">
                             <ArrowDown className="h-3 w-3 text-destructive" />
                             {language === 'fr' ? 'Frais' : 'Fee'}: {formatCurrency(platformFee, language)}
