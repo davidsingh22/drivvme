@@ -235,20 +235,17 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Trip Total & Accept Button */}
+                {/* Driver Earnings & Accept Button */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <div className="flex items-end justify-between mb-4">
-                    <div>
-                      <div className="text-white/70 text-sm">
-                        {language === 'fr' ? 'Total course' : 'Trip total'}
+                  <div className="flex items-center justify-center mb-4">
+                    <div className="text-center">
+                      <div className="text-white/70 text-sm mb-1">
+                        {language === 'fr' ? 'Vous gagnez' : 'You earn'}
                       </div>
-                      <div className="text-3xl font-extrabold text-white">${fare.toFixed(2)}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="earnings-glow-pulse text-success text-xl font-extrabold">
-                        {language === 'fr' ? 'Gagnez' : 'Earn'} ${driverEarnings.toFixed(2)}
+                      <div className="earnings-glow-pulse text-success text-4xl font-extrabold">
+                        ${driverEarnings.toFixed(2)}
                       </div>
-                      <div className="text-white/50 text-xs">
+                      <div className="text-white/50 text-xs mt-1">
                         {language === 'fr' ? 'Estimation' : 'Estimate'}
                       </div>
                     </div>
