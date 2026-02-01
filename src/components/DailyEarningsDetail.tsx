@@ -16,6 +16,9 @@ interface Ride {
   subtotal_before_tax: number | null;
   driver_earnings: number | null;
   platform_fee: number | null;
+  gst_amount: number | null;
+  qst_amount: number | null;
+  actual_fare: number | null;
   dropoff_at: string;
   distance_km: number | null;
   estimated_duration_minutes: number | null;
@@ -76,7 +79,7 @@ export function DailyEarningsDetail({
 
     const { data, error } = await supabase
       .from('rides')
-      .select('id, pickup_address, dropoff_address, subtotal_before_tax, driver_earnings, platform_fee, dropoff_at, distance_km, estimated_duration_minutes')
+      .select('id, pickup_address, dropoff_address, subtotal_before_tax, driver_earnings, platform_fee, gst_amount, qst_amount, actual_fare, dropoff_at, distance_km, estimated_duration_minutes')
       .eq('driver_id', driverId)
       .eq('status', 'completed')
       .gte('dropoff_at', startDate.toISOString())
@@ -156,6 +159,9 @@ export function DailyEarningsDetail({
                     // Show subtotal before tax (fare without Quebec taxes) to drivers
                     const fareBeforeTax = Number(ride.subtotal_before_tax) || 0;
                     const platformFee = Number(ride.platform_fee) || calculatePlatformFee(fareBeforeTax);
+                    const gstAmount = Number(ride.gst_amount) || 0;
+                    const qstAmount = Number(ride.qst_amount) || 0;
+                    const tripTotal = Number(ride.actual_fare) || (fareBeforeTax + gstAmount + qstAmount);
                     // Always recalculate driver earnings from fare - platform fee to ensure accuracy
                     const driverEarnings = fareBeforeTax - platformFee;
                     
@@ -186,13 +192,32 @@ export function DailyEarningsDetail({
                           </div>
                         </div>
 
-                        {/* Fee breakdown - show fare before tax to drivers */}
-                        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t border-border/50">
-                          <span>{language === 'fr' ? 'Tarif' : 'Fare'}: {formatCurrency(fareBeforeTax, language)}</span>
-                          <span className="flex items-center gap-1">
-                            <ArrowDown className="h-3 w-3 text-destructive" />
-                            {language === 'fr' ? 'Frais' : 'Fee'}: {formatCurrency(platformFee, language)}
-                          </span>
+                        {/* Full breakdown with Quebec taxes */}
+                        <div className="pt-2 border-t border-border/50 space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">{language === 'fr' ? 'Sous-total' : 'Subtotal'}</span>
+                            <span>{formatCurrency(fareBeforeTax, language)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">{language === 'fr' ? 'TPS (5%)' : 'GST (5%)'}</span>
+                            <span>{formatCurrency(gstAmount, language)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">{language === 'fr' ? 'TVQ (9.975%)' : 'QST (9.975%)'}</span>
+                            <span>{formatCurrency(qstAmount, language)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs font-medium pt-1 border-t border-border/30">
+                            <span>{language === 'fr' ? 'Total course' : 'Trip Total'}</span>
+                            <span>{formatCurrency(tripTotal, language)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs pt-1">
+                            <span className="text-destructive">{language === 'fr' ? 'Frais Drivveme' : 'Drivveme Fee'}</span>
+                            <span className="text-destructive">-{formatCurrency(platformFee, language)}</span>
+                          </div>
+                          <div className="flex justify-between text-sm font-bold pt-1 border-t border-border/30">
+                            <span className="text-accent">{language === 'fr' ? 'Vos gains' : 'Your Earnings'}</span>
+                            <span className="text-accent">{formatCurrency(driverEarnings, language)}</span>
+                          </div>
                         </div>
 
                         {ride.distance_km && (
