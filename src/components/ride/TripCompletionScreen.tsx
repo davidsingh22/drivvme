@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Star, DollarSign, TrendingDown, CheckCircle2, MessageSquare } from 'lucide-react';
+import { Star, DollarSign, TrendingDown, CheckCircle2, MessageSquare, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -8,10 +8,35 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency } from '@/lib/pricing';
+import { RiderBillModal } from '@/components/RiderBillModal';
 
 interface DriverInfo {
   first_name: string;
   avatar_url: string | null;
+}
+
+interface RideData {
+  id: string;
+  pickup_address: string;
+  dropoff_address: string;
+  pickup_lat: number;
+  pickup_lng: number;
+  dropoff_lat: number;
+  dropoff_lng: number;
+  distance_km: number | null;
+  estimated_duration_minutes: number | null;
+  estimated_fare: number;
+  actual_fare: number | null;
+  promo_discount?: number | null;
+  subtotal_before_tax?: number | null;
+  gst_amount?: number | null;
+  qst_amount?: number | null;
+  platform_fee: number | null;
+  driver_earnings: number | null;
+  status: string;
+  requested_at: string;
+  dropoff_at: string | null;
+  driver_id: string | null;
 }
 
 interface TripCompletionScreenProps {
@@ -22,6 +47,7 @@ interface TripCompletionScreenProps {
   actualFare: number;
   estimatedFare: number;
   savings: number;
+  ride?: RideData | null;
   onComplete: () => void;
 }
 
@@ -35,6 +61,7 @@ const TripCompletionScreen = ({
   actualFare,
   estimatedFare,
   savings,
+  ride,
   onComplete,
 }: TripCompletionScreenProps) => {
   const { language } = useLanguage();
@@ -45,6 +72,7 @@ const TripCompletionScreen = ({
   const [comment, setComment] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [showBillModal, setShowBillModal] = useState(false);
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
@@ -132,12 +160,25 @@ const TripCompletionScreen = ({
           </span>
         </div>
         
-        <div className="flex items-center gap-2 text-accent bg-accent/10 rounded-lg p-3">
+        <div className="flex items-center gap-2 text-accent bg-accent/10 rounded-lg p-3 mb-4">
           <TrendingDown className="h-5 w-5" />
           <span className="font-medium">
             {language === 'fr' ? 'Vous avez économisé' : 'You saved'} {formatCurrency(savings, language)}!
           </span>
         </div>
+
+        {/* View Receipt Button */}
+        {ride && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full gap-2"
+            onClick={() => setShowBillModal(true)}
+          >
+            <Receipt className="h-4 w-4" />
+            {language === 'fr' ? 'Voir la facture détaillée' : 'View detailed receipt'}
+          </Button>
+        )}
       </Card>
 
       {/* Driver rating */}
@@ -263,6 +304,15 @@ const TripCompletionScreen = ({
           language === 'fr' ? 'Terminer' : 'Done'
         )}
       </Button>
+
+      {/* Rider Bill Modal */}
+      {ride && (
+        <RiderBillModal
+          open={showBillModal}
+          onClose={() => setShowBillModal(false)}
+          ride={ride}
+        />
+      )}
     </motion.div>
   );
 };

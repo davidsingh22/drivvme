@@ -43,6 +43,8 @@ interface RideRequest {
   distance_km: number;
   estimated_duration_minutes: number;
   estimated_fare: number;
+  subtotal_before_tax?: number | null;
+  platform_fee?: number | null;
   status: string;
   requested_at: string;
 }
@@ -681,10 +683,12 @@ const DriverDashboard = () => {
       updates.pickup_at = new Date().toISOString();
     } else if (status === 'completed') {
       updates.dropoff_at = new Date().toISOString();
+      // Use subtotal_before_tax if available (new billing), otherwise fall back to estimated_fare
+      const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
+      const fee = calculatePlatformFee(fareForFee);
       updates.actual_fare = currentRide.estimated_fare;
-      const fee = calculatePlatformFee(currentRide.estimated_fare);
       updates.platform_fee = fee;
-      updates.driver_earnings = currentRide.estimated_fare - fee;
+      updates.driver_earnings = fareForFee - fee;
     }
 
     const { error } = await supabase
@@ -719,10 +723,11 @@ const DriverDashboard = () => {
     }
 
     if (status === 'completed') {
-      const fee = calculatePlatformFee(currentRide.estimated_fare);
+      const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
+      const fee = calculatePlatformFee(fareForFee);
       toast({
         title: 'Ride completed!',
-        description: `You earned ${formatCurrency(currentRide.estimated_fare - fee, language)}`,
+        description: `You earned ${formatCurrency(fareForFee - fee, language)}`,
       });
       setCurrentRide(null);
       setRiderInfo(null);
@@ -760,8 +765,10 @@ const DriverDashboard = () => {
     setRiderInfo(null);
   };
 
-  const currentRideFee = currentRide ? calculatePlatformFee(currentRide.estimated_fare) : 0;
-  const driverEarnings = currentRide ? currentRide.estimated_fare - currentRideFee : 0;
+  // Use subtotal_before_tax for fee calculation (excludes taxes which riders pay)
+  const currentRideFareForFee = currentRide ? (currentRide.subtotal_before_tax ?? currentRide.estimated_fare) : 0;
+  const currentRideFee = currentRide ? calculatePlatformFee(currentRideFareForFee) : 0;
+  const driverEarnings = currentRide ? currentRideFareForFee - currentRideFee : 0;
 
   // Loading states: never redirect while we are still restoring session/profile on iOS.
   if (authLoading) {
