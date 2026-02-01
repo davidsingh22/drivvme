@@ -1389,7 +1389,7 @@ const RideBooking = () => {
                           {language === 'fr' ? 'Prix Uber actuel' : 'Current Uber Price'}
                         </p>
                         <p className="text-2xl font-bold text-foreground/70">
-                          {formatCurrency(fareEstimate.uberTotal, language)}
+                          {formatCurrency(fareEstimate.uberTotal || (fareEstimate.total / 0.925), language)}
                         </p>
                         <p className="text-[10px] text-muted-foreground mt-1">
                           {language === 'fr' ? 'taxes incluses' : 'taxes included'}
