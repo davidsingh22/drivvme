@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
-import drivemeGirlsHero from '@/assets/driveme-girls-hero.png';
+import drivemeHeroNew from '@/assets/driveme-hero-new.png';
 const features = [
   {
     icon: TrendingDown,
@@ -133,8 +133,8 @@ const Landing = () => {
           >
             <div className="relative w-full max-w-2xl">
               <img 
-                src={drivemeGirlsHero}
-                alt="Drivveme brand ambassadors"
+                src={drivemeHeroNew}
+                alt="Drivveme - Same Ride, Less Money"
                 className="w-full h-auto max-h-[70vh] object-contain rounded-2xl shadow-glow"
               />
               {/* Glow effect */}
