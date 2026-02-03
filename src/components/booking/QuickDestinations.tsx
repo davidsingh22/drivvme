@@ -115,14 +115,15 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
               lat: dest.lat, 
               lng: dest.lng 
             })}
-            className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all group hover:bg-white/10"
+            className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all group hover:bg-white/15"
             style={{
-              background: 'rgba(0, 0, 0, 0.25)',
+              background: 'rgba(0, 0, 0, 0.3)',
               border: '1px solid rgba(255, 255, 255, 0.12)',
             }}
           >
-            <div className="h-10 w-10 rounded-full flex items-center justify-center transition-colors flex-shrink-0"
-              style={{ background: 'rgba(168, 85, 247, 0.3)' }}
+            <div 
+              className="h-10 w-10 rounded-full flex items-center justify-center transition-colors flex-shrink-0"
+              style={{ background: 'rgba(168, 85, 247, 0.4)' }}
             >
               <Icon className="h-5 w-5 text-white" />
             </div>
@@ -131,7 +132,7 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
                 {shortName}
               </p>
               <p className="text-xs text-white/60 truncate">
-                {dest.visit_count}x {language === 'fr' ? 'visite' : 'visited'}
+                {dest.visit_count}× {language === 'fr' ? 'visité' : 'visited'}
               </p>
             </div>
           </motion.button>
