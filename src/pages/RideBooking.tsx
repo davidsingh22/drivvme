@@ -1408,28 +1408,42 @@ const RideBooking = () => {
           </div>
         )}
           
-        {/* Bottom Frosted Glass Sheet (40vh) */}
+        {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
         <motion.div
           initial={{ y: 100, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="absolute z-20"
+          className="absolute z-20 overflow-hidden"
           style={{
             left: '12px',
             right: '12px',
             bottom: '12px',
             height: '40vh',
+            borderRadius: '20px',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)',
           }}
         >
+          {/* Background image layer */}
           <div 
-            className="h-full p-5 pt-6 space-y-4 overflow-y-auto"
+            className="absolute inset-0"
             style={{
-              borderRadius: '20px',
-              background: 'rgba(20, 10, 30, 0.35)',
-              backdropFilter: 'blur(18px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(18px) saturate(140%)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)',
+              backgroundImage: `url(${montrealCityscapeBg})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center top',
             }}
+          />
+          {/* Frosted glass overlay */}
+          <div 
+            className="absolute inset-0"
+            style={{
+              background: 'rgba(80, 40, 120, 0.45)',
+              backdropFilter: 'blur(8px) saturate(140%)',
+              WebkitBackdropFilter: 'blur(8px) saturate(140%)',
+            }}
+          />
+          {/* Content layer */}
+          <div 
+            className="relative h-full p-5 pt-6 space-y-4 overflow-y-auto z-10"
           >
             {/* Greeting */}
             <GreetingHeader />
