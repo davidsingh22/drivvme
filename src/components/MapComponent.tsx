@@ -18,6 +18,8 @@ interface MapComponentProps {
   onMapClick?: (lat: number, lng: number) => void;
   showUserLocation?: boolean;
   followDriver?: boolean;
+  pickupAddress?: string;
+  use3DStyle?: boolean;
 }
 
 const defaultCenter: [number, number] = [-73.5673, 45.5017]; // Montreal [lng, lat]
@@ -59,6 +61,8 @@ const MapComponent = ({
   onMapClick,
   showUserLocation = true,
   followDriver = false,
+  pickupAddress,
+  use3DStyle = false,
 }: MapComponentProps) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -109,9 +113,10 @@ const MapComponent = ({
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: use3DStyle ? 'mapbox://styles/mapbox/standard' : 'mapbox://styles/mapbox/dark-v11',
       center: initialCenter as [number, number],
       zoom: 16, // Street-level zoom for detailed view
+      pitch: use3DStyle ? 45 : 0, // 3D tilt for buildings view
     });
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
@@ -225,6 +230,47 @@ const MapComponent = ({
     return el;
   }, []);
 
+  // Create teardrop pin marker with address label (for 3D style)
+  const createTeardropMarker = useCallback((address?: string) => {
+    const wrapper = document.createElement('div');
+    wrapper.style.position = 'relative';
+    wrapper.style.display = 'flex';
+    wrapper.style.flexDirection = 'column';
+    wrapper.style.alignItems = 'center';
+
+    // Teardrop pin SVG
+    const pin = document.createElement('div');
+    pin.innerHTML = `
+      <svg width="36" height="48" viewBox="0 0 36 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M18 0C8.059 0 0 8.059 0 18c0 13.5 18 30 18 30s18-16.5 18-30C36 8.059 27.941 0 18 0z" fill="#a855f7"/>
+        <circle cx="18" cy="18" r="8" fill="white"/>
+      </svg>
+    `;
+    pin.style.filter = 'drop-shadow(0 4px 12px rgba(168, 85, 247, 0.5))';
+    wrapper.appendChild(pin);
+
+    // Address pill below the pin
+    if (address) {
+      const pill = document.createElement('div');
+      pill.style.marginTop = '4px';
+      pill.style.backgroundColor = 'rgba(40, 40, 50, 0.95)';
+      pill.style.color = 'white';
+      pill.style.padding = '8px 14px';
+      pill.style.borderRadius = '20px';
+      pill.style.fontSize = '14px';
+      pill.style.fontWeight = '500';
+      pill.style.whiteSpace = 'nowrap';
+      pill.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+      pill.style.maxWidth = '200px';
+      pill.style.overflow = 'hidden';
+      pill.style.textOverflow = 'ellipsis';
+      pill.textContent = address.split(',')[0]; // Just the street address
+      wrapper.appendChild(pill);
+    }
+
+    return wrapper;
+  }, []);
+
   // Update user location marker
   useEffect(() => {
     if (!mapRef.current || !mapLoaded || !userLocation) return;
@@ -251,18 +297,25 @@ const MapComponent = ({
     if (!mapRef.current || !mapLoaded) return;
 
     if (pickup) {
+      // Remove existing marker to recreate with potentially new address
       if (pickupMarkerRef.current) {
-        pickupMarkerRef.current.setLngLat([pickup.lng, pickup.lat]);
-      } else {
-        pickupMarkerRef.current = new mapboxgl.Marker(createMarkerElement('#a855f7'))
-          .setLngLat([pickup.lng, pickup.lat])
-          .addTo(mapRef.current);
+        pickupMarkerRef.current.remove();
+        pickupMarkerRef.current = null;
       }
+      
+      // Use teardrop marker with address pill for 3D style, otherwise simple circle
+      const markerElement = use3DStyle 
+        ? createTeardropMarker(pickupAddress)
+        : createMarkerElement('#a855f7');
+      
+      pickupMarkerRef.current = new mapboxgl.Marker(markerElement)
+        .setLngLat([pickup.lng, pickup.lat])
+        .addTo(mapRef.current);
     } else if (pickupMarkerRef.current) {
       pickupMarkerRef.current.remove();
       pickupMarkerRef.current = null;
     }
-  }, [pickup, mapLoaded, createMarkerElement]);
+  }, [pickup, pickupAddress, mapLoaded, createMarkerElement, createTeardropMarker, use3DStyle]);
 
   // Update dropoff marker
   useEffect(() => {
