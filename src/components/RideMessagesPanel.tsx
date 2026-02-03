@@ -399,48 +399,6 @@ export default function RideMessagesPanel() {
 
   return (
     <Card className="mb-4 border-primary/30 overflow-visible" style={{ minHeight: 240 }}>
-      {/* Debug Banner (dev only) */}
-      {import.meta.env.DEV && (
-        <div className="bg-muted/80 border-b border-border px-3 py-2 text-xs font-mono overflow-x-auto">
-          <div className="flex items-center gap-2 mb-1">
-            <Bug className="h-4 w-4 text-warning" />
-            <span className="font-bold text-warning">DEBUG</span>
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1">
-            <span><strong>userId:</strong> {debugInfo.currentUserId || 'null'}</span>
-            <span><strong>role:</strong> {debugInfo.role}</span>
-            <span><strong>rideId:</strong> {debugInfo.activeRideId || 'null'}</span>
-            <span><strong>status:</strong> {debugInfo.activeRideStatus || 'null'}</span>
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
-            <span><strong>driver_id:</strong> {debugInfo.activeRideDriverId || 'null'}</span>
-            <span><strong>rider_id:</strong> {debugInfo.activeRideRiderId || 'null'}</span>
-            <span className={debugInfo.isLinked ? 'text-green-400' : 'text-destructive'}>
-              <strong>isLinked:</strong> {String(debugInfo.isLinked)}
-            </span>
-            <span className={debugInfo.isActive ? 'text-green-400' : 'text-warning'}>
-              <strong>isActive:</strong> {String(debugInfo.isActive)}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
-            <span><strong>msgCount:</strong> {debugInfo.lastQueryCount ?? 'null'}</span>
-            <span className={debugInfo.lastError ? 'text-destructive' : 'text-green-400'}>
-              <strong>error:</strong> {debugInfo.lastError || 'null'}
-            </span>
-          </div>
-          {/* Admin test button */}
-          {isAdmin && activeRide && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="mt-2"
-              onClick={sendTestMessage}
-            >
-              Send Test Message (as rider)
-            </Button>
-          )}
-        </div>
-      )}
 
       {/* Header */}
       <div className="flex items-center gap-2 p-4 border-b border-border">
