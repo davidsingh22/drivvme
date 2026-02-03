@@ -28,10 +28,10 @@ export const GreetingHeader: React.FC = () => {
       animate={{ opacity: 1, y: 0 }}
       className="mb-2"
     >
-      <h1 className="text-2xl md:text-3xl font-bold text-foreground">
+      <h1 className="text-2xl md:text-3xl font-bold text-white drop-shadow-md">
         {greeting}
       </h1>
-      <p className="text-base text-muted-foreground mt-1">
+      <p className="text-base text-white/80 mt-1 drop-shadow-sm">
         {language === 'fr' ? "Où allons-nous aujourd'hui ?" : 'Where are we headed today?'}
       </p>
     </motion.div>
