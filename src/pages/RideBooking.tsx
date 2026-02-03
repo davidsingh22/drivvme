@@ -1351,15 +1351,65 @@ const RideBooking = () => {
               />
             </div>
             
-            {/* Interactive Mapbox Map - Semi-transparent over background */}
-            <div className="absolute inset-0 z-10" style={{ opacity: 0.85 }}>
+            {/* Interactive Mapbox Map - 3D buildings style */}
+            <div className="absolute inset-0 z-10">
               <MapComponent
                 pickup={pickup}
                 dropoff={dropoff}
                 driverLocation={null}
                 routeMode="pickup-dropoff"
+                pickupAddress={pickupAddress}
+                use3DStyle={true}
               />
             </div>
+            
+            {/* Floating Header Bar */}
+            <motion.div
+              initial={{ y: -100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="absolute top-0 left-0 right-0 z-20 px-4 pt-3"
+            >
+              <div 
+                className="flex items-center justify-between px-5 py-3 rounded-2xl"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(42, 26, 64, 0.95) 0%, rgba(61, 32, 96, 0.95) 50%, rgba(42, 26, 64, 0.95) 100%)',
+                  backdropFilter: 'blur(12px)',
+                  WebkitBackdropFilter: 'blur(12px)',
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
+                  border: '1px solid rgba(168, 85, 247, 0.2)',
+                }}
+              >
+                {/* Logo */}
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-primary/20 flex items-center justify-center">
+                    <Car className="h-5 w-5 text-primary" />
+                  </div>
+                  <span 
+                    className="font-display font-bold text-2xl"
+                    style={{
+                      background: 'linear-gradient(135deg, #a855f7 0%, #c084fc 50%, #a855f7 100%)',
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent',
+                      backgroundClip: 'text',
+                    }}
+                  >
+                    Drivveme
+                  </span>
+                </div>
+                
+                {/* Hamburger Menu */}
+                <button 
+                  onClick={() => navigate('/')}
+                  className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  <div className="flex flex-col gap-1.5">
+                    <div className="w-6 h-0.5 bg-white/80 rounded-full" />
+                    <div className="w-6 h-0.5 bg-white/80 rounded-full" />
+                    <div className="w-6 h-0.5 bg-white/80 rounded-full" />
+                  </div>
+                </button>
+              </div>
+            </motion.div>
             
             {/* GPS Detection Overlay */}
             {isDetectingLocation && (
