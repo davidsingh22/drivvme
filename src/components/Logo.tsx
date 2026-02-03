@@ -25,14 +25,14 @@ const Logo = ({ size = 'md', showText = true }: LogoProps) => {
       whileHover={{ scale: 1.02 }}
     >
       <motion.div 
-        className={`${sizeClasses[size]} rounded-lg gradient-primary flex items-center justify-center shadow-button`}
+        className={`${sizeClasses[size]} rounded-lg gradient-primary flex items-center justify-center shadow-button logo-icon-pulse`}
         whileHover={{ rotate: -5 }}
         transition={{ type: 'spring', stiffness: 300 }}
       >
         <Car className={`${size === 'sm' ? 'h-4 w-4' : size === 'md' ? 'h-5 w-5' : 'h-7 w-7'} text-primary-foreground`} />
       </motion.div>
       {showText && (
-        <span className={`font-display font-bold ${textSizes[size]} text-gradient`}>
+        <span className={`font-display font-bold ${textSizes[size]} logo-flash`}>
           Drivveme
         </span>
       )}
