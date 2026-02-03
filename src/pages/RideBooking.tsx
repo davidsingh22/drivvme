@@ -1467,21 +1467,48 @@ const RideBooking = () => {
               </span>
             </div>
 
-            {/* Destination Input Row - blank for user to enter */}
+            {/* Destination Input Row - inline input */}
             <div 
-              onClick={() => setShowFullInput(true)}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors"
+              className="rounded-xl overflow-hidden"
               style={{
                 background: 'rgba(40, 20, 60, 0.7)',
                 border: '1px solid rgba(255, 255, 255, 0.15)',
               }}
             >
-              <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                <MapPin className="h-4 w-4 text-primary" />
-              </div>
-              <span className="flex-1 text-white/60 font-medium truncate">
-                {dropoffAddress || (language === 'fr' ? 'Où allez-vous ?' : 'Where to?')}
-              </span>
+              {dropoffAddress ? (
+                // Show selected destination with option to change
+                <div 
+                  onClick={() => setShowFullInput(true)}
+                  className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/10 transition-colors"
+                >
+                  <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                    <MapPin className="h-4 w-4 text-primary" />
+                  </div>
+                  <span className="flex-1 text-white font-semibold truncate drop-shadow-sm">
+                    {dropoffAddress}
+                  </span>
+                  <span className="text-white font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/15">
+                    {language === 'fr' ? 'Changer' : 'Change'}
+                  </span>
+                </div>
+              ) : (
+                // Show inline input for destination
+                <div className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                      <MapPin className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <LocationInput
+                        type="dropoff"
+                        value={dropoffAddress}
+                        onChange={(addr, coords) => handleDropoffChange(addr, coords)}
+                        placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Quick Destinations - Top 2 Most Visited */}
@@ -1493,18 +1520,19 @@ const RideBooking = () => {
               />
             )}
 
-            {/* Get Estimate Button */}
+            {/* Get Estimate Button - shows when destination is selected */}
             {dropoffAddress && pickup && (
               <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
               >
                 <Button
                   onClick={handleGetEstimate}
-                  className="w-full gradient-primary shadow-button py-5 text-lg"
+                  className="w-full gradient-primary shadow-button py-5 text-lg font-semibold"
                   disabled={!pickupAddress || !dropoffAddress}
                 >
-                  {t('booking.estimate')}
+                  {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
                 </Button>
               </motion.div>
             )}
