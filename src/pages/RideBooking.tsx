@@ -1450,20 +1450,37 @@ const RideBooking = () => {
             {/* Pickup Location Row */}
             <div 
               onClick={() => setShowFullInput(true)}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/5 transition-colors"
+              className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors"
               style={{
-                background: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
+                background: 'rgba(40, 20, 60, 0.7)',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+              }}
+            >
+              <div className="h-9 w-9 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0">
+                <Navigation className="h-4 w-4 text-lime-400" />
+              </div>
+              <span className="flex-1 text-white font-semibold truncate drop-shadow-sm">
+                {displayPickupAddress}
+              </span>
+              <span className="text-white font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/15">
+                {language === 'fr' ? 'Éditer' : 'Edit'}
+              </span>
+            </div>
+
+            {/* Destination Input Row - blank for user to enter */}
+            <div 
+              onClick={() => setShowFullInput(true)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors"
+              style={{
+                background: 'rgba(40, 20, 60, 0.7)',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
               }}
             >
               <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                <Navigation className="h-4 w-4 text-primary" />
+                <MapPin className="h-4 w-4 text-primary" />
               </div>
-              <span className="flex-1 text-white font-medium truncate">
-                {displayPickupAddress}
-              </span>
-              <span className="text-white/60 font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/10">
-                {language === 'fr' ? 'Editer' : 'Edit'}
+              <span className="flex-1 text-white/60 font-medium truncate">
+                {dropoffAddress || (language === 'fr' ? 'Où allez-vous ?' : 'Where to?')}
               </span>
             </div>
 
