@@ -113,11 +113,18 @@ const MapComponent = ({
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: use3DStyle ? 'mapbox://styles/mapbox/standard' : 'mapbox://styles/mapbox/dark-v11',
+      style: use3DStyle ? 'mapbox://styles/mapbox/streets-v12' : 'mapbox://styles/mapbox/dark-v11',
       center: initialCenter as [number, number],
-      zoom: 16, // Street-level zoom for detailed view
-      pitch: use3DStyle ? 45 : 0, // 3D tilt for buildings view
+      zoom: use3DStyle ? 16.2 : 16,
+      pitch: use3DStyle ? 45 : 0,
+      bearing: use3DStyle ? -20 : 0,
     });
+
+    // Add map padding for bottom sheet visibility (40% of viewport height)
+    if (use3DStyle) {
+      const bottomPadding = Math.round(window.innerHeight * 0.4);
+      map.setPadding({ top: 60, bottom: bottomPadding, left: 20, right: 20 });
+    }
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
