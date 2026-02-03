@@ -1418,7 +1418,7 @@ const RideBooking = () => {
             left: '12px',
             right: '12px',
             bottom: '12px',
-            height: '40vh',
+            height: '55vh',
             borderRadius: '20px',
             border: '1px solid rgba(255, 255, 255, 0.12)',
             boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)',
@@ -1467,48 +1467,20 @@ const RideBooking = () => {
               </span>
             </div>
 
-            {/* Destination Input Row - inline input */}
+            {/* Destination Input - Where to? */}
             <div 
-              className="rounded-xl overflow-hidden"
+              className="rounded-xl"
               style={{
                 background: 'rgba(40, 20, 60, 0.7)',
                 border: '1px solid rgba(255, 255, 255, 0.15)',
               }}
             >
-              {dropoffAddress ? (
-                // Show selected destination with option to change
-                <div 
-                  onClick={() => setShowFullInput(true)}
-                  className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-white/10 transition-colors"
-                >
-                  <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                    <MapPin className="h-4 w-4 text-primary" />
-                  </div>
-                  <span className="flex-1 text-white font-semibold truncate drop-shadow-sm">
-                    {dropoffAddress}
-                  </span>
-                  <span className="text-white font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/15">
-                    {language === 'fr' ? 'Changer' : 'Change'}
-                  </span>
-                </div>
-              ) : (
-                // Show inline input for destination
-                <div className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
-                      <MapPin className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <LocationInput
-                        type="dropoff"
-                        value={dropoffAddress}
-                        onChange={(addr, coords) => handleDropoffChange(addr, coords)}
-                        placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
+              <LocationInput
+                type="dropoff"
+                value={dropoffAddress}
+                onChange={(addr, coords) => handleDropoffChange(addr, coords)}
+                placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
+              />
             </div>
 
             {/* Quick Destinations - Top 2 Most Visited */}
