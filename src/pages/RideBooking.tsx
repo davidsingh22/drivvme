@@ -26,6 +26,8 @@ import TripCompletionScreen from '@/components/ride/TripCompletionScreen';
 import { MapRecenterButton } from '@/components/MapRecenterButton';
 import { useRealtimeDriverTracking } from '@/hooks/useRealtimeDriverTracking';
 import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
+import { GreetingHeader } from '@/components/booking/GreetingHeader';
+import { RecentDestinations } from '@/components/booking/RecentDestinations';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({ default: m.RideDebugBar })));
 const RideLocationHistory = React.lazy(() => import('@/components/RideLocationHistory').then(m => ({ default: m.RideLocationHistory })));
@@ -1286,24 +1288,26 @@ const RideBooking = () => {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -20 }}
-                  className="space-y-4"
+                  className="space-y-5"
                 >
-                  <h2 className="font-display text-2xl font-bold mb-6">
-                    {t('nav.ride')}
-                  </h2>
+                  {/* Personalized Greeting */}
+                  <GreetingHeader />
                   
-                  <LocationInput
-                    type="pickup"
-                    value={pickupAddress}
-                    onChange={handlePickupChange}
-                    onUseCurrentLocation={useCurrentLocation}
-                  />
-                  
-                  <LocationInput
-                    type="dropoff"
-                    value={dropoffAddress}
-                    onChange={handleDropoffChange}
-                  />
+                  {/* Location Inputs */}
+                  <div className="space-y-3">
+                    <LocationInput
+                      type="pickup"
+                      value={pickupAddress}
+                      onChange={handlePickupChange}
+                      onUseCurrentLocation={useCurrentLocation}
+                    />
+                    
+                    <LocationInput
+                      type="dropoff"
+                      value={dropoffAddress}
+                      onChange={handleDropoffChange}
+                    />
+                  </div>
 
                   <Button
                     onClick={handleGetEstimate}
@@ -1312,6 +1316,14 @@ const RideBooking = () => {
                   >
                     {t('booking.estimate')}
                   </Button>
+
+                  {!dropoffAddress && (
+                    <RecentDestinations 
+                      onSelectDestination={(dest) => {
+                        handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+                      }}
+                    />
+                  )}
                 </motion.div>
               )}
 
