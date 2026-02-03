@@ -1326,17 +1326,29 @@ const RideBooking = () => {
   };
 
   // DEFAULT BOOKING FLOW - MATCHING REFERENCE IMAGE EXACTLY
-  // Two-section layout: Map top (~58vh), Skyline visible bottom (~42vh), Frosted glass panel overlay
+  // Phone container with: Map top (58vh) + City photo bottom (42vh) + Frosted glass overlay
   if (step === 'input') {
     return (
-      <div className="min-h-screen bg-background flex justify-center">
-        {/* Mobile Frame Container - max 420px */}
-        <div className="w-full max-w-[420px] h-screen relative overflow-hidden">
+      <div className="min-h-screen bg-black flex justify-center items-center">
+        {/* Mobile Phone Container */}
+        <div 
+          className="relative overflow-hidden"
+          style={{
+            width: '100%',
+            maxWidth: '420px',
+            height: '100vh',
+            borderRadius: '0px',
+            background: '#000',
+          }}
+        >
+          {/* Drivveme Header */}
           <Navbar />
           
-          <div className="pt-16 h-full flex flex-col relative">
-            {/* TOP SECTION: Map (~58vh) */}
-            <div className="relative z-10" style={{ height: '58vh', minHeight: '58vh' }}>
+          {/* Main Content - Positioned after navbar */}
+          <div className="absolute inset-0 pt-16 flex flex-col">
+            
+            {/* TOP SECTION: Full-width Map (58vh) */}
+            <div className="relative w-full" style={{ height: '58vh', flexShrink: 0 }}>
               <MapComponent
                 pickup={pickup}
                 dropoff={dropoff}
@@ -1344,16 +1356,18 @@ const RideBooking = () => {
                 routeMode="pickup-dropoff"
               />
               
-              {/* Address Label Pill on Map */}
+              {/* Address Label Pill - Anchored near pickup marker */}
               {pickup && pickupAddress && !isDetectingLocation && (
-                <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 translate-y-4 z-20 pointer-events-none">
-                  <div className="flex items-center gap-2 px-4 py-2 rounded-full shadow-lg"
+                <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 translate-y-6 z-20 pointer-events-none">
+                  <div 
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-full shadow-xl"
                     style={{
-                      background: 'rgba(30, 30, 35, 0.9)',
+                      background: 'rgba(25, 25, 30, 0.95)',
                       backdropFilter: 'blur(8px)',
+                      border: '1px solid rgba(255,255,255,0.1)',
                     }}
                   >
-                    <div className="h-3 w-3 rounded-full bg-primary" />
+                    <div className="h-2.5 w-2.5 rounded-full bg-primary" />
                     <span className="text-white text-sm font-medium whitespace-nowrap">
                       {getShortPickupAddress()}
                     </span>
@@ -1363,7 +1377,7 @@ const RideBooking = () => {
               
               {/* GPS Detection Overlay */}
               {isDetectingLocation && (
-                <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-20">
+                <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-20">
                   <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-primary/20">
                     <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
                     <p className="text-sm font-medium">
@@ -1374,9 +1388,10 @@ const RideBooking = () => {
               )}
             </div>
             
-            {/* BOTTOM SECTION: Skyline Background (~42vh) */}
-            <div className="relative flex-1" style={{ minHeight: '42vh' }}>
-              {/* Skyline Background Image - Fully Visible */}
+            {/* BOTTOM SECTION: City Photo Background (42vh) with Frosted Glass Panel */}
+            <div className="relative w-full flex-1" style={{ minHeight: '42vh' }}>
+              
+              {/* Montreal Skyline Background - CLEARLY VISIBLE */}
               <div className="absolute inset-0 z-0">
                 {/* Day Cityscape */}
                 <div 
@@ -1388,7 +1403,6 @@ const RideBooking = () => {
                     backgroundPosition: 'center top',
                   }}
                 />
-                
                 {/* Night Cityscape */}
                 <div 
                   className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
@@ -1401,24 +1415,25 @@ const RideBooking = () => {
                 />
               </div>
               
-              {/* Frosted Glass Bottom Sheet */}
+              {/* Frosted Glass Panel - Floating ABOVE the cityscape */}
               <motion.div
-                initial={{ y: 50, opacity: 0 }}
+                initial={{ y: 40, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.2, duration: 0.4 }}
-                className="absolute inset-x-0 top-0 bottom-0 z-10"
+                className="absolute bottom-0 left-0 right-0 z-10"
               >
                 <div 
-                  className="h-full rounded-t-[24px] p-6 space-y-5 overflow-hidden"
+                  className="rounded-t-[24px] px-6 pt-6 pb-8 space-y-5"
                   style={{
-                    background: 'rgba(120, 60, 200, 0.35)',
+                    background: 'linear-gradient(180deg, rgba(120, 60, 200, 0.35) 0%, rgba(20, 10, 30, 0.55) 100%)',
                     backdropFilter: 'blur(16px)',
                     WebkitBackdropFilter: 'blur(16px)',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    boxShadow: '0 -8px 32px rgba(168, 85, 247, 0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderBottom: 'none',
+                    boxShadow: '0 -8px 40px rgba(168, 85, 247, 0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
                   }}
                 >
-                  {/* Greeting - Simple format like reference */}
+                  {/* Greeting - French */}
                   <div>
                     <h1 className="text-2xl font-bold text-white">
                       {language === 'fr' ? 'Bonjour' : 'Hello'}{profile?.first_name ? `, ${profile.first_name}` : ''}
@@ -1433,7 +1448,7 @@ const RideBooking = () => {
                     onClick={() => setShowFullInput(true)}
                     className="flex items-center gap-3 px-4 py-3.5 rounded-xl cursor-pointer transition-all hover:bg-white/10"
                     style={{
-                      background: 'rgba(0, 0, 0, 0.25)',
+                      background: 'rgba(0, 0, 0, 0.3)',
                       border: '1px solid rgba(255, 255, 255, 0.12)',
                     }}
                   >
@@ -1442,7 +1457,7 @@ const RideBooking = () => {
                       {getShortPickupAddress() || (language === 'fr' ? 'Chargement...' : 'Loading...')}
                     </span>
                     <button 
-                      className="text-white/90 font-semibold text-sm px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors flex-shrink-0"
+                      className="text-white font-semibold text-sm px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors flex-shrink-0"
                       onClick={(e) => {
                         e.stopPropagation();
                         setShowFullInput(true);
@@ -1452,7 +1467,7 @@ const RideBooking = () => {
                     </button>
                   </div>
 
-                  {/* Quick Destination Buttons */}
+                  {/* Quick Destination Cards */}
                   {!dropoffAddress && (
                     <QuickDestinations 
                       onSelectDestination={(dest) => {
@@ -1461,7 +1476,7 @@ const RideBooking = () => {
                     />
                   )}
 
-                  {/* Get Estimate Button - shown when destination selected */}
+                  {/* Get Estimate Button */}
                   {dropoffAddress && pickup && (
                     <motion.div
                       initial={{ opacity: 0, scale: 0.95 }}
@@ -1479,77 +1494,77 @@ const RideBooking = () => {
                 </div>
               </motion.div>
             </div>
-
-            {/* Full Input Modal - for editing pickup or when tapped */}
-            <AnimatePresence>
-              {showFullInput && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="fixed inset-0 z-50 bg-background"
-                >
-                  <div className="h-full flex flex-col">
-                    {/* Header */}
-                    <div className="flex items-center gap-4 p-4 border-b border-border">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setShowFullInput(false)}
-                      >
-                        <X className="h-5 w-5" />
-                      </Button>
-                      <h2 className="font-semibold">
-                        {language === 'fr' ? 'Où allons-nous?' : 'Where to?'}
-                      </h2>
-                    </div>
-
-                    {/* Location Inputs */}
-                    <div className="p-4 space-y-3">
-                      <LocationInput
-                        type="pickup"
-                        value={pickupAddress}
-                        onChange={handlePickupChange}
-                        onUseCurrentLocation={useCurrentLocation}
-                      />
-                      
-                      <LocationInput
-                        type="dropoff"
-                        value={dropoffAddress}
-                        onChange={handleDropoffChange}
-                      />
-                    </div>
-
-                    {/* Recent Destinations */}
-                    <div className="flex-1 overflow-y-auto p-4">
-                      <RecentDestinations 
-                        onSelectDestination={(dest) => {
-                          handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-                          setShowFullInput(false);
-                        }}
-                      />
-                    </div>
-
-                    {/* Action Button */}
-                    <div className="p-4 border-t border-border">
-                      <Button
-                        onClick={() => {
-                          setShowFullInput(false);
-                          if (pickup && dropoff) {
-                            handleGetEstimate();
-                          }
-                        }}
-                        className="w-full gradient-primary shadow-button py-6 text-lg"
-                        disabled={!pickupAddress || !dropoffAddress}
-                      >
-                        {pickup && dropoff ? t('booking.estimate') : (language === 'fr' ? 'Confirmer' : 'Confirm')}
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
           </div>
+
+          {/* Full Input Modal - for editing pickup or when tapped */}
+          <AnimatePresence>
+            {showFullInput && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 bg-background"
+              >
+                <div className="h-full flex flex-col">
+                  {/* Header */}
+                  <div className="flex items-center gap-4 p-4 border-b border-border">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setShowFullInput(false)}
+                    >
+                      <X className="h-5 w-5" />
+                    </Button>
+                    <h2 className="font-semibold">
+                      {language === 'fr' ? 'Où allons-nous?' : 'Where to?'}
+                    </h2>
+                  </div>
+
+                  {/* Location Inputs */}
+                  <div className="p-4 space-y-3">
+                    <LocationInput
+                      type="pickup"
+                      value={pickupAddress}
+                      onChange={handlePickupChange}
+                      onUseCurrentLocation={useCurrentLocation}
+                    />
+                    
+                    <LocationInput
+                      type="dropoff"
+                      value={dropoffAddress}
+                      onChange={handleDropoffChange}
+                    />
+                  </div>
+
+                  {/* Recent Destinations */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    <RecentDestinations 
+                      onSelectDestination={(dest) => {
+                        handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+                        setShowFullInput(false);
+                      }}
+                    />
+                  </div>
+
+                  {/* Action Button */}
+                  <div className="p-4 border-t border-border">
+                    <Button
+                      onClick={() => {
+                        setShowFullInput(false);
+                        if (pickup && dropoff) {
+                          handleGetEstimate();
+                        }
+                      }}
+                      className="w-full gradient-primary shadow-button py-6 text-lg"
+                      disabled={!pickupAddress || !dropoffAddress}
+                    >
+                      {pickup && dropoff ? t('booking.estimate') : (language === 'fr' ? 'Confirmer' : 'Confirm')}
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     );
