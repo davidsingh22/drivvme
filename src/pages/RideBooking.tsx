@@ -1317,117 +1317,111 @@ const RideBooking = () => {
   // Time-based dynamic background
   const timeOfDay = useTimeOfDay();
 
-  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
+  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN WITH CITYSCAPE BACKGROUND
   if (step === 'input') {
+    // Extract short location name for the pin label
+    const locationName = pickupAddress ? pickupAddress.split(',')[0] : '';
+    
     return (
       <div className="min-h-screen bg-background relative overflow-hidden">
-        {/* Dynamic Time-Based Background - Visible at top */}
-        <div className="absolute inset-0 z-0 pointer-events-none">
-          {/* Day Background */}
-          <div 
-            className="absolute inset-x-0 top-0 h-[60vh] transition-opacity duration-1000 ease-in-out"
-            style={{ 
-              opacity: timeOfDay === 'day' ? 1 : 0,
-              backgroundImage: `url(${montrealDayBg})`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center bottom',
-            }}
-          />
-          {/* Night Background */}
-          <div 
-            className="absolute inset-x-0 top-0 h-[60vh] transition-opacity duration-1000 ease-in-out"
-            style={{ 
-              opacity: timeOfDay === 'night' ? 1 : 0,
-              backgroundImage: `url(${montrealNightBg})`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center bottom',
-            }}
-          />
-          {/* Gradient Fade to Background */}
-          <div 
-            className={`absolute inset-x-0 top-0 h-[70vh] transition-all duration-1000 ${
-              timeOfDay === 'day' 
-                ? 'bg-gradient-to-b from-transparent via-transparent to-background' 
-                : 'bg-gradient-to-b from-primary/10 via-transparent to-background'
-            }`}
-          />
-        </div>
-
         <Navbar />
         
-        <div className="pt-16 h-screen flex flex-col relative z-10">
-          {/* Map Container with Semi-Transparent Background to Show Cityscape */}
-          <div className="flex-1 relative">
-            {/* Cityscape Background Bleed-Through Layer */}
-            <div className="absolute inset-0 z-0 overflow-hidden rounded-b-3xl">
-              <div 
-                className="absolute inset-0 transition-opacity duration-1000"
+        <div className="pt-16 h-screen flex flex-col relative">
+          {/* Cityscape "Map" Area - Exactly like mockup */}
+          <div className="flex-1 relative overflow-hidden">
+            {/* Purple Glow Border Frame */}
+            <div className="absolute inset-2 rounded-2xl overflow-hidden z-10 shadow-[0_0_30px_rgba(168,85,247,0.3)] border border-primary/30">
+              {/* Day Cityscape */}
+              <motion.div 
+                className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
                 style={{ 
-                  opacity: timeOfDay === 'day' ? 0.3 : 0.4,
-                  backgroundImage: `url(${timeOfDay === 'day' ? montrealDayBg : montrealNightBg})`,
+                  opacity: timeOfDay === 'day' ? 1 : 0,
+                  backgroundImage: `url(${montrealDayBg})`,
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',
                 }}
+                initial={{ scale: 1.05 }}
+                animate={{ scale: 1 }}
+                transition={{ duration: 1.5, ease: 'easeOut' }}
               />
+              
+              {/* Night Cityscape */}
+              <motion.div 
+                className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+                style={{ 
+                  opacity: timeOfDay === 'night' ? 1 : 0,
+                  backgroundImage: `url(${montrealNightBg})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                }}
+                initial={{ scale: 1.05 }}
+                animate={{ scale: 1 }}
+                transition={{ duration: 1.5, ease: 'easeOut' }}
+              />
+              
+              {/* Subtle Gradient Overlay for depth */}
               <div className={`absolute inset-0 ${
                 timeOfDay === 'day' 
-                  ? 'bg-background/70' 
-                  : 'bg-background/60'
+                  ? 'bg-gradient-to-t from-black/20 via-transparent to-transparent' 
+                  : 'bg-gradient-to-t from-black/40 via-transparent to-primary/10'
               }`} />
-            </div>
-            
-            {/* Actual Map on Top - with slight opacity to blend cityscape */}
-            <div className="absolute inset-0 z-[1]" style={{ opacity: 0.85 }}>
-              <MapComponent
-                pickup={pickup}
-                dropoff={dropoff}
-                driverLocation={driverLocation}
-                routeMode="pickup-dropoff"
-              />
-            </div>
-            
-            {/* GPS Detection Overlay */}
-            {isDetectingLocation && (
-              <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex items-center justify-center z-20">
-                <div className="bg-card rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4">
-                  <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                  <p className="text-sm font-medium">
-                    {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-                  </p>
-                </div>
+              
+              {/* Street Name Overlay at Bottom - like mockup */}
+              <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-black/60 to-transparent flex items-end px-4 pb-1">
+                <span className="text-white/70 text-xs font-medium tracking-wide">
+                  {locationName ? `📍 ${locationName}` : ''}
+                </span>
               </div>
-            )}
-
-            {/* Current Location Marker Info */}
-            {pickup && !isDetectingLocation && (
-              <motion.div 
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="absolute top-4 left-4 right-4 z-10"
-              >
-                <div className="bg-card/90 backdrop-blur-md rounded-xl border border-primary/20 shadow-lg shadow-primary/10 p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center">
-                      <MapPin className="h-5 w-5 text-primary" />
+              
+              {/* Floating Pin Marker - Centered in the cityscape */}
+              {pickup && !isDetectingLocation && (
+                <motion.div 
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full z-20"
+                  initial={{ scale: 0, y: 20 }}
+                  animate={{ scale: 1, y: 0 }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                >
+                  {/* Pulsing Ring */}
+                  <div className="absolute -inset-3 rounded-full bg-primary/30 animate-ping" />
+                  
+                  {/* Pin Icon */}
+                  <div className="relative">
+                    <svg width="40" height="50" viewBox="0 0 40 50" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path 
+                        d="M20 0C8.954 0 0 8.954 0 20c0 14 20 30 20 30s20-16 20-30C40 8.954 31.046 0 20 0z" 
+                        fill="url(#pin-gradient)"
+                      />
+                      <circle cx="20" cy="18" r="8" fill="white"/>
+                      <defs>
+                        <linearGradient id="pin-gradient" x1="20" y1="0" x2="20" y2="50" gradientUnits="userSpaceOnUse">
+                          <stop stopColor="#a855f7"/>
+                          <stop offset="1" stopColor="#7c3aed"/>
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                  </div>
+                  
+                  {/* Location Label */}
+                  <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap">
+                    <div className="bg-card/95 backdrop-blur-md px-3 py-1.5 rounded-lg shadow-lg border border-primary/20">
+                      <span className="text-xs font-medium">{locationName || (language === 'fr' ? 'Votre position' : 'Your location')}</span>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-muted-foreground">
-                        {language === 'fr' ? 'Point de départ' : 'Pickup location'}
-                      </p>
-                      <p className="font-medium text-sm truncate">{pickupAddress}</p>
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm"
-                      onClick={() => setShowFullInput(true)}
-                      className="text-xs"
-                    >
-                      {language === 'fr' ? 'Modifier' : 'Edit'}
-                    </Button>
+                  </div>
+                </motion.div>
+              )}
+              
+              {/* GPS Detection Overlay */}
+              {isDetectingLocation && (
+                <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-20">
+                  <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-primary/20">
+                    <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                    <p className="text-sm font-medium">
+                      {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+                    </p>
                   </div>
                 </div>
-              </motion.div>
-            )}
+              )}
+            </div>
           </div>
           
           {/* Bottom Overlay - Destination Selection */}
