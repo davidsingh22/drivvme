@@ -31,6 +31,7 @@ import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
 import montrealCityscapeBg from '@/assets/montreal-purple-skyline.png';
 import { HelpDialog } from '@/components/HelpDialog';
+import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({ default: m.RideDebugBar })));
@@ -114,6 +115,7 @@ const RideBooking = () => {
   const [isDetectingLocation, setIsDetectingLocation] = useState(true);
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
+  const { unreadCount: unreadSupportMessages } = useUnreadSupportMessages();
 
   // Realtime driver tracking with live ETA
   const isActiveRidePhase = step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress';
@@ -1501,12 +1503,22 @@ const RideBooking = () => {
                     onClick={() => {
                       setHelpDialogOpen(true);
                     }}
-                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left"
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left relative"
                   >
-                    <HelpCircle className="h-5 w-5 text-primary" />
+                    <div className="relative">
+                      <HelpCircle className="h-5 w-5 text-primary" />
+                      {unreadSupportMessages > 0 && (
+                        <span className="absolute -top-1 -right-1 h-3 w-3 bg-destructive rounded-full animate-pulse" />
+                      )}
+                    </div>
                     <span className="text-white font-medium">
                       {language === 'fr' ? 'Aide' : 'Help'}
                     </span>
+                    {unreadSupportMessages > 0 && (
+                      <span className="ml-auto bg-destructive text-destructive-foreground text-xs font-bold px-2 py-0.5 rounded-full animate-pulse">
+                        {unreadSupportMessages}
+                      </span>
+                    )}
                   </button>
                   <div className="h-px bg-white/10" />
                   <button

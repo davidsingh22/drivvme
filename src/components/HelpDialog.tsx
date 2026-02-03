@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Loader2, Send, MessageSquare, CheckCircle, Clock, HelpCircle } from 'lucide-react';
 import { format } from 'date-fns';
+import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 
 interface SupportMessage {
   id: string;
@@ -29,6 +30,7 @@ interface HelpDialogProps {
 export const HelpDialog = ({ open, onOpenChange }: HelpDialogProps) => {
   const { user, isRider, isDriver } = useAuth();
   const { toast } = useToast();
+  const { markAllAsRead } = useUnreadSupportMessages();
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -40,6 +42,8 @@ export const HelpDialog = ({ open, onOpenChange }: HelpDialogProps) => {
     if (open && user) {
       fetchMessages();
       subscribeToMessages();
+      // Mark all messages as read when dialog opens
+      markAllAsRead();
     }
   }, [open, user]);
 
