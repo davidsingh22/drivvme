@@ -765,29 +765,31 @@ const MapComponent = ({
     };
   }, [pickup, dropoff, driverLocation, riderLocation, mapLoaded, followDriver]);
 
+  // Show loading state while fetching token
   if (loading) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-card">
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span>Loading map...</span>
+      <div className="w-full h-full flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <span className="text-sm">Loading map...</span>
         </div>
       </div>
     );
   }
 
-  if (error) {
+  // Show error only if we have a genuine error (not just auth redirect in progress)
+  if (error && !loading) {
     const handleRetry = () => {
       clearMapboxTokenCache();
       window.location.reload();
     };
 
     return (
-      <div className="w-full h-full flex items-center justify-center bg-card p-4">
+      <div className="w-full h-full flex items-center justify-center bg-background p-4">
         <div className="max-w-md text-center space-y-3">
-          <AlertCircle className="h-12 w-12 text-destructive mx-auto" />
-          <p className="text-foreground font-medium">Map configuration error</p>
-          <p className="text-sm text-muted-foreground">{error}</p>
+          <AlertCircle className="h-10 w-10 text-muted-foreground mx-auto opacity-60" />
+          <p className="text-foreground font-medium text-sm">Map loading issue</p>
+          <p className="text-xs text-muted-foreground">{error}</p>
           <Button 
             variant="outline" 
             size="sm" 
