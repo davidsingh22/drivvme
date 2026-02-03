@@ -32,6 +32,7 @@ import RideMessagesPanel from '@/components/RideMessagesPanel';
 import { calculatePlatformFee } from '@/lib/platformFees';
 import montrealDriverBg from '@/assets/montreal-driver-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
+import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 
 interface RideRequest {
   id: string;
@@ -91,6 +92,7 @@ const DriverDashboard = () => {
   const [todayRides, setTodayRides] = useState(0);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
+  const { unreadCount: unreadSupportMessages } = useUnreadSupportMessages();
   const [showGPSNavigation, setShowGPSNavigation] = useState(false);
 
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
@@ -950,8 +952,14 @@ const DriverDashboard = () => {
               <Button
                 variant="outline"
                 onClick={() => setHelpDialogOpen(true)}
+                className="relative"
               >
                 <HelpCircle className="h-5 w-5" />
+                {unreadSupportMessages > 0 && (
+                  <span className="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-destructive-foreground text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                    {unreadSupportMessages}
+                  </span>
+                )}
               </Button>
               <DriverInbox />
             </div>
