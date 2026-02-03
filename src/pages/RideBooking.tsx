@@ -1433,13 +1433,11 @@ const RideBooking = () => {
               backgroundPosition: 'center top',
             }}
           />
-          {/* Frosted glass overlay */}
+          {/* Frosted glass overlay - light tint so city shows through */}
           <div 
             className="absolute inset-0"
             style={{
-              background: 'rgba(80, 40, 120, 0.45)',
-              backdropFilter: 'blur(8px) saturate(140%)',
-              WebkitBackdropFilter: 'blur(8px) saturate(140%)',
+              background: 'rgba(60, 30, 90, 0.35)',
             }}
           />
           {/* Content layer */}
