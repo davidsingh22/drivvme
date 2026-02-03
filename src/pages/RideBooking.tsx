@@ -1429,9 +1429,7 @@ const RideBooking = () => {
             className="absolute inset-0"
             style={{
               backgroundImage: `url(${montrealCityscapeBg})`,
-              backgroundRepeat: 'no-repeat',
-              // Show the whole image inside the box (no cropping)
-              backgroundSize: 'contain',
+              backgroundSize: 'cover',
               backgroundPosition: 'center',
             }}
           />
