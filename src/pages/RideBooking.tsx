@@ -1351,8 +1351,8 @@ const RideBooking = () => {
               />
             </div>
             
-            {/* Interactive Mapbox Map - On Top */}
-            <div className="absolute inset-0 z-10">
+            {/* Interactive Mapbox Map - Semi-transparent over background */}
+            <div className="absolute inset-0 z-10" style={{ opacity: 0.85 }}>
               <MapComponent
                 pickup={pickup}
                 dropoff={dropoff}
