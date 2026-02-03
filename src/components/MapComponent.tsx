@@ -109,41 +109,9 @@ const MapComponent = ({
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/light-v11', // Light style matching reference
+      style: 'mapbox://styles/mapbox/dark-v11',
       center: initialCenter as [number, number],
       zoom: 16, // Street-level zoom for detailed view
-      pitch: 45, // 3D tilt for building visibility
-      bearing: 0,
-    });
-    
-    // Enable 3D buildings (fill-extrusion) on map load
-    map.on('style.load', () => {
-      // Check if 3D building layer already exists
-      if (!map.getLayer('3d-buildings')) {
-        // Add 3D building layer
-        const layers = map.getStyle().layers;
-        const labelLayerId = layers?.find(
-          (layer) => layer.type === 'symbol' && layer.layout?.['text-field']
-        )?.id;
-        
-        map.addLayer(
-          {
-            id: '3d-buildings',
-            source: 'composite',
-            'source-layer': 'building',
-            filter: ['==', 'extrude', 'true'],
-            type: 'fill-extrusion',
-            minzoom: 14,
-            paint: {
-              'fill-extrusion-color': '#d4d4d8',
-              'fill-extrusion-height': ['get', 'height'],
-              'fill-extrusion-base': ['get', 'min_height'],
-              'fill-extrusion-opacity': 0.7,
-            },
-          },
-          labelLayerId
-        );
-      }
     });
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');

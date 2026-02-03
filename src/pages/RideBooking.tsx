@@ -1317,184 +1317,111 @@ const RideBooking = () => {
   // Time-based dynamic background
   const timeOfDay = useTimeOfDay();
 
-  // Get short pickup address for display
-  const getShortPickupAddress = () => {
-    if (!pickupAddress) return '';
-    // Extract street name from full address
-    const parts = pickupAddress.split(',');
-    return parts[0]?.trim() || pickupAddress;
-  };
-
-  // DEFAULT BOOKING FLOW - MATCHING REFERENCE IMAGE EXACTLY
-  // Phone container with: Map top (58vh) + City photo bottom (42vh) + Frosted glass overlay
+  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN WITH MAPBOX MAP OVER CITYSCAPE BACKGROUND
   if (step === 'input') {
     return (
-      <div className="min-h-screen bg-black flex justify-center items-center">
-        {/* Mobile Phone Container */}
-        <div 
-          className="relative overflow-hidden"
-          style={{
-            width: '100%',
-            maxWidth: '420px',
-            height: '100vh',
-            borderRadius: '0px',
-            background: '#000',
-          }}
-        >
-          {/* Drivveme Header */}
-          <Navbar />
-          
-          {/* Main Content - Positioned after navbar */}
-          <div className="absolute inset-0 pt-16 flex flex-col">
+      <div className="min-h-screen bg-background relative overflow-hidden">
+        <Navbar />
+        
+        <div className="pt-16 h-screen flex flex-col relative">
+          {/* Map Area with Cityscape Background */}
+          <div className="flex-1 relative overflow-hidden">
+            {/* Cityscape Background Layer (behind map) */}
+            <div className="absolute inset-0 z-0">
+              {/* Day Cityscape */}
+              <div 
+                className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+                style={{ 
+                  opacity: timeOfDay === 'day' ? 1 : 0,
+                  backgroundImage: `url(${montrealDayBg})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                }}
+              />
+              
+              {/* Night Cityscape */}
+              <div 
+                className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+                style={{ 
+                  opacity: timeOfDay === 'night' ? 1 : 0,
+                  backgroundImage: `url(${montrealNightBg})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                }}
+              />
+            </div>
             
-            {/* TOP SECTION: Full-width Map (58vh) */}
-            <div className="relative w-full" style={{ height: '58vh', flexShrink: 0 }}>
+            {/* Interactive Mapbox Map - Semi-transparent over background */}
+            <div className="absolute inset-0 z-10" style={{ opacity: 0.85 }}>
               <MapComponent
                 pickup={pickup}
                 dropoff={dropoff}
                 driverLocation={null}
                 routeMode="pickup-dropoff"
               />
-              
-              {/* Address Label Pill - Anchored near pickup marker */}
-              {pickup && pickupAddress && !isDetectingLocation && (
-                <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 translate-y-6 z-20 pointer-events-none">
-                  <div 
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-full shadow-xl"
-                    style={{
-                      background: 'rgba(25, 25, 30, 0.95)',
-                      backdropFilter: 'blur(8px)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                    }}
-                  >
-                    <div className="h-2.5 w-2.5 rounded-full bg-primary" />
-                    <span className="text-white text-sm font-medium whitespace-nowrap">
-                      {getShortPickupAddress()}
-                    </span>
-                  </div>
-                </div>
-              )}
-              
-              {/* GPS Detection Overlay */}
-              {isDetectingLocation && (
-                <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-20">
-                  <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-primary/20">
-                    <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                    <p className="text-sm font-medium">
-                      {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-                    </p>
-                  </div>
-                </div>
-              )}
             </div>
             
-            {/* BOTTOM SECTION: City Photo Background (42vh) with Frosted Glass Panel */}
-            <div className="relative w-full flex-1" style={{ minHeight: '42vh' }}>
+            {/* GPS Detection Overlay */}
+            {isDetectingLocation && (
+              <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-20">
+                <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-primary/20">
+                  <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                  <p className="text-sm font-medium">
+                    {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Bottom Overlay - Destination Selection */}
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="absolute bottom-0 left-0 right-0 z-10"
+          >
+            <div className="bg-card/90 backdrop-blur-xl rounded-t-3xl border-t border-primary/20 shadow-2xl shadow-primary/10 p-6 pb-8 space-y-4">
+              {/* Greeting */}
+              <GreetingHeader />
               
-              {/* Montreal Skyline Background - CLEARLY VISIBLE */}
-              <div className="absolute inset-0 z-0">
-                {/* Day Cityscape */}
-                <div 
-                  className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-                  style={{ 
-                    opacity: timeOfDay === 'day' ? 1 : 0,
-                    backgroundImage: `url(${montrealDayBg})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center top',
-                  }}
-                />
-                {/* Night Cityscape */}
-                <div 
-                  className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-                  style={{ 
-                    opacity: timeOfDay === 'night' ? 1 : 0,
-                    backgroundImage: `url(${montrealNightBg})`,
-                    backgroundSize: 'cover',
-                    backgroundPosition: 'center top',
-                  }}
+              {/* Destination Input */}
+              <div 
+                onClick={() => setShowFullInput(true)}
+                className="cursor-pointer"
+              >
+                <LocationInput
+                  type="dropoff"
+                  value={dropoffAddress}
+                  onChange={handleDropoffChange}
                 />
               </div>
-              
-              {/* Frosted Glass Panel - Floating ABOVE the cityscape */}
-              <motion.div
-                initial={{ y: 40, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.2, duration: 0.4 }}
-                className="absolute bottom-0 left-0 right-0 z-10"
-              >
-                <div 
-                  className="rounded-t-[24px] px-6 pt-6 pb-8 space-y-5"
-                  style={{
-                    background: 'linear-gradient(180deg, rgba(120, 60, 200, 0.35) 0%, rgba(20, 10, 30, 0.55) 100%)',
-                    backdropFilter: 'blur(16px)',
-                    WebkitBackdropFilter: 'blur(16px)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    borderBottom: 'none',
-                    boxShadow: '0 -8px 40px rgba(168, 85, 247, 0.3), inset 0 1px 0 rgba(255,255,255,0.08)',
+
+              {/* Quick Destinations - Top 2 Most Visited */}
+              {!dropoffAddress && (
+                <QuickDestinations 
+                  onSelectDestination={(dest) => {
+                    handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
                   }}
+                />
+              )}
+
+              {/* Get Estimate Button */}
+              {dropoffAddress && pickup && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
                 >
-                  {/* Greeting - French */}
-                  <div>
-                    <h1 className="text-2xl font-bold text-white">
-                      {language === 'fr' ? 'Bonjour' : 'Hello'}{profile?.first_name ? `, ${profile.first_name}` : ''}
-                    </h1>
-                    <p className="text-white/70 text-sm mt-1">
-                      {language === 'fr' ? 'Où allons-nous aujourd\'hui ?' : 'Where are we headed today?'}
-                    </p>
-                  </div>
-                  
-                  {/* Pickup Location Row */}
-                  <div 
-                    onClick={() => setShowFullInput(true)}
-                    className="flex items-center gap-3 px-4 py-3.5 rounded-xl cursor-pointer transition-all hover:bg-white/10"
-                    style={{
-                      background: 'rgba(0, 0, 0, 0.3)',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
-                    }}
+                  <Button
+                    onClick={handleGetEstimate}
+                    className="w-full gradient-primary shadow-button py-6 text-lg"
+                    disabled={!pickupAddress || !dropoffAddress}
                   >
-                    <Navigation className="h-5 w-5 text-[#4ade80] flex-shrink-0" />
-                    <span className="flex-1 text-white font-medium truncate">
-                      {getShortPickupAddress() || (language === 'fr' ? 'Chargement...' : 'Loading...')}
-                    </span>
-                    <button 
-                      className="text-white font-semibold text-sm px-3 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors flex-shrink-0"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowFullInput(true);
-                      }}
-                    >
-                      {language === 'fr' ? 'Éditer' : 'Edit'}
-                    </button>
-                  </div>
-
-                  {/* Quick Destination Cards */}
-                  {!dropoffAddress && (
-                    <QuickDestinations 
-                      onSelectDestination={(dest) => {
-                        handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-                      }}
-                    />
-                  )}
-
-                  {/* Get Estimate Button */}
-                  {dropoffAddress && pickup && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                    >
-                      <Button
-                        onClick={handleGetEstimate}
-                        className="w-full py-6 text-lg font-semibold bg-white text-primary hover:bg-white/90 shadow-lg rounded-xl"
-                        disabled={!pickupAddress || !dropoffAddress}
-                      >
-                        {t('booking.estimate')}
-                      </Button>
-                    </motion.div>
-                  )}
-                </div>
-              </motion.div>
+                    {t('booking.estimate')}
+                  </Button>
+                </motion.div>
+              )}
             </div>
-          </div>
+          </motion.div>
 
           {/* Full Input Modal - for editing pickup or when tapped */}
           <AnimatePresence>

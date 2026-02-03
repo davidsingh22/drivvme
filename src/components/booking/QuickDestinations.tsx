@@ -115,26 +115,20 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
               lat: dest.lat, 
               lng: dest.lng 
             })}
-            className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all group hover:bg-white/15"
-            style={{
-              background: 'rgba(0, 0, 0, 0.3)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-            }}
+            className="flex-1 flex items-center gap-3 px-4 py-3 rounded-xl bg-card/95 backdrop-blur-md border border-border/50 shadow-lg hover:bg-card hover:shadow-xl transition-all group"
           >
-            <div 
-              className="h-10 w-10 rounded-full flex items-center justify-center transition-colors flex-shrink-0"
-              style={{ background: 'rgba(168, 85, 247, 0.4)' }}
-            >
-              <Icon className="h-5 w-5 text-white" />
+            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+              <Icon className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1 text-left min-w-0">
-              <p className="font-semibold text-white truncate">
+              <p className="font-semibold text-foreground truncate">
                 {shortName}
               </p>
-              <p className="text-xs text-white/60 truncate">
-                {dest.visit_count}× {language === 'fr' ? 'visité' : 'visited'}
+              <p className="text-xs text-muted-foreground truncate">
+                {dest.visit_count}x {language === 'fr' ? 'visité' : 'visited'}
               </p>
             </div>
+            <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
           </motion.button>
         );
       })}
