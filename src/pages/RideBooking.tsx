@@ -1317,49 +1317,54 @@ const RideBooking = () => {
   // Time-based dynamic background
   const timeOfDay = useTimeOfDay();
 
-  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN WITH MAPBOX MAP OVER CITYSCAPE BACKGROUND
+  // Get short pickup address for display
+  const getShortPickupAddress = () => {
+    if (!pickupAddress) return '';
+    // Extract street name from full address
+    const parts = pickupAddress.split(',');
+    return parts[0]?.trim() || pickupAddress;
+  };
+
+  // DEFAULT BOOKING FLOW - FULL MAP TOP, FROSTED GLASS BOTTOM PANEL
   if (step === 'input') {
     return (
       <div className="min-h-screen bg-background relative overflow-hidden">
         <Navbar />
         
         <div className="pt-16 h-screen flex flex-col relative">
-          {/* Map Area with Cityscape Background */}
-          <div className="flex-1 relative overflow-hidden">
-            {/* Cityscape Background Layer (behind map) */}
-            <div className="absolute inset-0 z-0">
-              {/* Day Cityscape */}
-              <div 
-                className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-                style={{ 
-                  opacity: timeOfDay === 'day' ? 1 : 0,
-                  backgroundImage: `url(${montrealDayBg})`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                }}
-              />
-              
-              {/* Night Cityscape */}
-              <div 
-                className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-                style={{ 
-                  opacity: timeOfDay === 'night' ? 1 : 0,
-                  backgroundImage: `url(${montrealNightBg})`,
-                  backgroundSize: 'cover',
-                  backgroundPosition: 'center',
-                }}
-              />
-            </div>
+          {/* Cityscape Background - Visible at bottom through blur */}
+          <div className="absolute inset-0 z-0">
+            {/* Day Cityscape */}
+            <div 
+              className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+              style={{ 
+                opacity: timeOfDay === 'day' ? 1 : 0,
+                backgroundImage: `url(${montrealDayBg})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center bottom',
+              }}
+            />
             
-            {/* Interactive Mapbox Map - Semi-transparent over background */}
-            <div className="absolute inset-0 z-10" style={{ opacity: 0.65 }}>
-              <MapComponent
-                pickup={pickup}
-                dropoff={dropoff}
-                driverLocation={null}
-                routeMode="pickup-dropoff"
-              />
-            </div>
+            {/* Night Cityscape */}
+            <div 
+              className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+              style={{ 
+                opacity: timeOfDay === 'night' ? 1 : 0,
+                backgroundImage: `url(${montrealNightBg})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center bottom',
+              }}
+            />
+          </div>
+          
+          {/* Full Opacity Map - Takes up top ~55% */}
+          <div className="relative z-10 flex-1" style={{ minHeight: '55vh' }}>
+            <MapComponent
+              pickup={pickup}
+              dropoff={dropoff}
+              driverLocation={null}
+              routeMode="pickup-dropoff"
+            />
             
             {/* GPS Detection Overlay */}
             {isDetectingLocation && (
@@ -1374,29 +1379,56 @@ const RideBooking = () => {
             )}
           </div>
           
-          {/* Bottom Overlay - Destination Selection */}
+          {/* Bottom Frosted Glass Panel */}
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className="absolute bottom-0 left-0 right-0 z-10"
+            className="relative z-20"
           >
-            <div className="bg-card/90 backdrop-blur-xl rounded-t-3xl border-t border-primary/20 shadow-2xl shadow-primary/10 p-6 pb-8 space-y-4">
-              {/* Greeting */}
-              <GreetingHeader />
+            <div 
+              className="rounded-t-[2rem] p-6 pb-10 space-y-5"
+              style={{
+                background: 'linear-gradient(180deg, hsla(var(--primary) / 0.85) 0%, hsla(var(--primary) / 0.70) 100%)',
+                backdropFilter: 'blur(24px)',
+                WebkitBackdropFilter: 'blur(24px)',
+                boxShadow: '0 -10px 40px hsla(var(--primary) / 0.3)',
+              }}
+            >
+              {/* Greeting - Simple format like reference */}
+              <div>
+                <h1 className="text-2xl font-bold text-primary-foreground">
+                  {language === 'fr' ? 'Bonjour' : 'Hello'}{profile?.first_name ? `, ${profile.first_name}` : ''}
+                </h1>
+                <p className="text-primary-foreground/80 text-sm mt-1">
+                  {language === 'fr' ? 'Où allons-nous aujourd\'hui ?' : 'Where are we headed today?'}
+                </p>
+              </div>
               
-              {/* Destination Input */}
+              {/* Pickup Location Row */}
               <div 
                 onClick={() => setShowFullInput(true)}
-                className="cursor-pointer"
+                className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
+                style={{
+                  background: 'hsla(var(--background) / 0.15)',
+                  border: '1px solid hsla(var(--primary-foreground) / 0.2)',
+                }}
               >
-                <LocationInput
-                  type="dropoff"
-                  value={dropoffAddress}
-                  onChange={handleDropoffChange}
-                />
+                <Navigation className="h-5 w-5 text-[hsl(142,76%,55%)]" />
+                <span className="flex-1 text-primary-foreground font-medium truncate">
+                  {getShortPickupAddress() || (language === 'fr' ? 'Chargement...' : 'Loading...')}
+                </span>
+                <button 
+                  className="text-primary-foreground/90 font-semibold text-sm px-2 py-1 rounded-lg hover:bg-white/10 transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowFullInput(true);
+                  }}
+                >
+                  {language === 'fr' ? 'Éditer' : 'Edit'}
+                </button>
               </div>
 
-              {/* Quick Destinations - Top 2 Most Visited */}
+              {/* Quick Destination Buttons */}
               {!dropoffAddress && (
                 <QuickDestinations 
                   onSelectDestination={(dest) => {
@@ -1405,7 +1437,7 @@ const RideBooking = () => {
                 />
               )}
 
-              {/* Get Estimate Button */}
+              {/* Get Estimate Button - shown when destination selected */}
               {dropoffAddress && pickup && (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
@@ -1413,7 +1445,7 @@ const RideBooking = () => {
                 >
                   <Button
                     onClick={handleGetEstimate}
-                    className="w-full gradient-primary shadow-button py-6 text-lg"
+                    className="w-full py-6 text-lg font-semibold bg-primary-foreground text-primary hover:bg-primary-foreground/90 shadow-lg"
                     disabled={!pickupAddress || !dropoffAddress}
                   >
                     {t('booking.estimate')}
