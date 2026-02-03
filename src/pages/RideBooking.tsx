@@ -246,6 +246,40 @@ const RideBooking = () => {
     };
   }, [user, authLoading, roles.length, isDriver, navigate]);
 
+  // Helper to reverse geocode coordinates to a readable address
+  const reverseGeocode = useCallback(async (lat: number, lng: number): Promise<string | null> => {
+    if (!mapboxToken) return null;
+    
+    try {
+      const res = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxToken}&language=${language}&types=address,poi`
+      );
+      const data = await res.json();
+      const place = data?.features?.[0];
+      
+      if (place) {
+        // Extract a clean street address
+        let cleanAddress = '';
+        
+        // Check if it's a POI with address
+        if (place.properties?.address) {
+          cleanAddress = place.properties.address;
+        } else if (place.text && place.address) {
+          // Combine street number and street name
+          cleanAddress = `${place.address} ${place.text}`;
+        } else if (place.place_name) {
+          // Use first part of place_name (before first comma)
+          cleanAddress = place.place_name.split(',')[0];
+        }
+        
+        return cleanAddress || place.place_name || null;
+      }
+    } catch (err) {
+      console.error('[RideBooking] Reverse geocode error:', err);
+    }
+    return null;
+  }, [mapboxToken, language]);
+
   // Auto-detect GPS location on mount and set as default pickup
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
@@ -255,54 +289,49 @@ const RideBooking = () => {
     }
 
     hasAutoDetectedLocation.current = true;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    const attemptReverseGeocode = async (lat: number, lng: number) => {
+      const address = await reverseGeocode(lat, lng);
+      
+      if (address) {
+        setPickupAddress(address);
+        setPickup({ address, lat, lng });
+        setIsDetectingLocation(false);
+        return;
+      }
+      
+      // Retry if geocoding failed and we have retries left
+      if (retryCount < maxRetries && mapboxToken) {
+        retryCount++;
+        console.log(`[RideBooking] Reverse geocode retry ${retryCount}/${maxRetries}`);
+        setTimeout(() => attemptReverseGeocode(lat, lng), 1000);
+        return;
+      }
+      
+      // Final fallback: use coordinates as readable address
+      const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      setPickupAddress(coordAddress);
+      setPickup({ address: coordAddress, lat, lng });
+      setIsDetectingLocation(false);
+    };
     
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         
-        // Try to reverse geocode the location
-        if (mapboxToken) {
-          try {
-            const res = await fetch(
-              `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxToken}&language=${language}&types=address,poi`
-            );
-            const data = await res.json();
-            const place = data?.features?.[0];
-            
-            if (place) {
-              // Extract a clean street address
-              // Try to get house number + street from context or place_name
-              let cleanAddress = '';
-              
-              // Check if it's a POI with address
-              if (place.properties?.address) {
-                cleanAddress = place.properties.address;
-              } else if (place.text && place.address) {
-                // Combine street number and street name
-                cleanAddress = `${place.address} ${place.text}`;
-              } else if (place.place_name) {
-                // Use first part of place_name (before first comma)
-                cleanAddress = place.place_name.split(',')[0];
-              }
-              
-              // Fallback to full place_name if no clean address
-              const address = cleanAddress || place.place_name || (language === 'fr' ? 'Position actuelle' : 'Current location');
-              setPickupAddress(address);
-              setPickup({ address, lat, lng });
-              setIsDetectingLocation(false);
-              return;
-            }
-          } catch (err) {
-            console.error('[RideBooking] Reverse geocode error:', err);
-          }
+        // Wait for mapboxToken if not available yet
+        if (!mapboxToken) {
+          // Store coords and wait for token
+          const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
+          setPickupAddress(tempAddress);
+          setPickup({ address: tempAddress, lat, lng });
+          return;
         }
         
-        // Fallback: show "Current location" instead of coordinates
-        const fallbackAddress = language === 'fr' ? 'Position actuelle' : 'Current location';
-        setPickupAddress(fallbackAddress);
-        setPickup({ address: fallbackAddress, lat, lng });
-        setIsDetectingLocation(false);
+        await attemptReverseGeocode(lat, lng);
       },
       (error) => {
         console.log('[RideBooking] GPS auto-detect failed:', error.message);
@@ -310,7 +339,25 @@ const RideBooking = () => {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
-  }, [mapboxToken, language]);
+  }, [mapboxToken, language, reverseGeocode]);
+  
+  // Effect to resolve address when pickup has coords but generic address
+  useEffect(() => {
+    if (!pickup || !mapboxToken) return;
+    
+    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle'];
+    const isGeneric = genericLabels.includes(pickupAddress) || pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
+    
+    if (isGeneric) {
+      reverseGeocode(pickup.lat, pickup.lng).then(address => {
+        if (address) {
+          setPickupAddress(address);
+          setPickup(prev => prev ? { ...prev, address } : null);
+          setIsDetectingLocation(false);
+        }
+      });
+    }
+  }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
   // Restore active ride when returning to the app (especially on iOS)
   useEffect(() => {
@@ -1331,10 +1378,11 @@ const RideBooking = () => {
 
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
   if (step === 'input') {
-    // Extract short address for display
-    const displayPickupAddress = pickupAddress 
+    // Extract short address for display - always show real address, never generic label
+    const displayPickupAddress = pickupAddress && 
+      !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress)
       ? pickupAddress.split(',')[0] 
-      : (language === 'fr' ? 'Position actuelle' : 'Current location');
+      : (isDetectingLocation ? (language === 'fr' ? 'Détection...' : 'Detecting...') : pickupAddress?.split(',')[0] || '');
     
     return (
       <div className="min-h-screen bg-background relative overflow-hidden">
