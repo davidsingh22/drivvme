@@ -1386,8 +1386,25 @@ const RideBooking = () => {
     
     return (
       <div className="min-h-screen bg-background relative overflow-hidden">
-        {/* Full-bleed Map - No overlay, fully visible */}
-        <div className="absolute inset-0">
+        {/* Full-page background image */}
+        <div 
+          className="absolute inset-0 z-0"
+          style={{
+            backgroundImage: `url(${montrealCityscapeBg})`,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+          }}
+        />
+        {/* Gradient overlay for better contrast */}
+        <div 
+          className="absolute inset-0 z-0"
+          style={{
+            background: 'linear-gradient(to bottom, rgba(10, 10, 25, 0.3) 0%, rgba(60, 30, 100, 0.4) 50%, rgba(10, 10, 25, 0.6) 100%)',
+          }}
+        />
+        
+        {/* Full-bleed Map - with transparency to show background */}
+        <div className="absolute inset-0 z-10" style={{ opacity: 0.85 }}>
           <MapComponent
             pickup={pickup}
             dropoff={dropoff}
