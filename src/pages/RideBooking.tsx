@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -30,6 +30,7 @@ import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
 import montrealCityscapeBg from '@/assets/montreal-purple-skyline.png';
+import { HelpDialog } from '@/components/HelpDialog';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({ default: m.RideDebugBar })));
@@ -112,6 +113,7 @@ const RideBooking = () => {
   const hasAutoDetectedLocation = useRef(false);
   const [isDetectingLocation, setIsDetectingLocation] = useState(true);
   const [showFullInput, setShowFullInput] = useState(false);
+  const [helpDialogOpen, setHelpDialogOpen] = useState(false);
 
   // Realtime driver tracking with live ETA
   const isActiveRidePhase = step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress';
@@ -1497,6 +1499,18 @@ const RideBooking = () => {
                   <div className="h-px bg-white/10" />
                   <button
                     onClick={() => {
+                      setHelpDialogOpen(true);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left"
+                  >
+                    <HelpCircle className="h-5 w-5 text-primary" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Aide' : 'Help'}
+                    </span>
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button
+                    onClick={() => {
                       signOut();
                       navigate('/');
                     }}
@@ -1510,6 +1524,8 @@ const RideBooking = () => {
                 </div>
               </div>
             </div>
+
+            <HelpDialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen} />
           </div>
         </motion.div>
         

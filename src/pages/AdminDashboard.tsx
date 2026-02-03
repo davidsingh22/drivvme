@@ -36,10 +36,13 @@ import {
   Mail,
   Phone,
   Radio,
-  FileText
+  FileText,
+  MessageSquare,
+  HelpCircle
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
+import { SupportMessagesPanel } from '@/components/admin/SupportMessagesPanel';
 
 interface Payment {
   id: string;
@@ -948,6 +951,10 @@ const AdminDashboard = () => {
                   </Badge>
                 )}
               </TabsTrigger>
+              <TabsTrigger value="support" className="gap-2">
+                <HelpCircle className="w-4 h-4" />
+                Support
+              </TabsTrigger>
             </TabsList>
             
             <div className="flex gap-2">
@@ -1807,6 +1814,13 @@ const AdminDashboard = () => {
             </Table>
           </CardContent>
         </Card>
+      )}
+
+      {/* Support Messages Tab */}
+      {activeTab === 'support' && (
+        <div className="mt-4">
+          <SupportMessagesPanel />
+        </div>
       )}
     </div>
   );
