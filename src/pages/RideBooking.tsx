@@ -1353,15 +1353,23 @@ const RideBooking = () => {
         <motion.div
           initial={{ y: -100, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="absolute top-0 left-0 right-0 z-20"
+          className="absolute z-20"
+          style={{
+            top: '12px',
+            left: '12px',
+            right: '12px',
+          }}
         >
           <div 
             className="flex items-center justify-between px-5"
             style={{
-              height: '56px',
+              height: '58px',
+              borderRadius: '16px',
               background: 'rgba(10, 10, 15, 0.55)',
               backdropFilter: 'blur(14px)',
               WebkitBackdropFilter: 'blur(14px)',
+              border: '1px solid rgba(255, 255, 255, 0.10)',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
             }}
           >
             {/* Logo */}
@@ -1400,21 +1408,27 @@ const RideBooking = () => {
           </div>
         )}
           
-        {/* Bottom Frosted Glass Sheet (~40% height) */}
+        {/* Bottom Frosted Glass Sheet (40vh) */}
         <motion.div
           initial={{ y: 100, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="absolute bottom-0 left-0 right-0 z-20"
-          style={{ height: '40%' }}
+          className="absolute z-20"
+          style={{
+            left: '12px',
+            right: '12px',
+            bottom: '12px',
+            height: '40vh',
+          }}
         >
           <div 
             className="h-full p-5 pt-6 space-y-4 overflow-y-auto"
             style={{
+              borderRadius: '20px',
               background: 'rgba(20, 10, 30, 0.35)',
               backdropFilter: 'blur(18px) saturate(140%)',
               WebkitBackdropFilter: 'blur(18px) saturate(140%)',
               border: '1px solid rgba(255, 255, 255, 0.12)',
-              borderRadius: '18px 18px 0 0',
+              boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)',
             }}
           >
             {/* Greeting */}
