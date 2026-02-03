@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { MapPin, Home, Briefcase, Building2, Plane, ArrowRight } from 'lucide-react';
+import { MapPin, Home, Briefcase, Building2, Plane } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -88,7 +88,7 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
     return (
       <div className="flex gap-3">
         {[1, 2].map((i) => (
-          <div key={i} className="flex-1 animate-pulse h-14 rounded-xl bg-muted/50" />
+          <div key={i} className="flex-1 animate-pulse h-16 rounded-2xl bg-muted/30" />
         ))}
       </div>
     );
@@ -115,20 +115,19 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
               lat: dest.lat, 
               lng: dest.lng 
             })}
-            className="flex-1 flex items-center gap-3 px-4 py-3 rounded-xl bg-card/95 backdrop-blur-md border border-border/50 shadow-lg hover:bg-card hover:shadow-xl transition-all group"
+            className="flex-1 flex items-center gap-3 px-4 py-3 rounded-2xl bg-background/80 backdrop-blur-md border border-border/50 hover:bg-background/90 hover:border-primary/30 transition-all group"
           >
-            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+            <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
               <Icon className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1 text-left min-w-0">
-              <p className="font-semibold text-foreground truncate">
+              <p className="font-semibold text-foreground truncate text-base">
                 {shortName}
               </p>
-              <p className="text-xs text-muted-foreground truncate">
-                {dest.visit_count}x {language === 'fr' ? 'visité' : 'visited'}
+              <p className="text-sm text-muted-foreground truncate">
+                {dest.visit_count}x {language === 'fr' ? 'visite' : 'visited'}
               </p>
             </div>
-            <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
           </motion.button>
         );
       })}

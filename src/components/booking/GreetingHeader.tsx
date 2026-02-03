@@ -9,54 +9,30 @@ export const GreetingHeader: React.FC = () => {
   
   const firstName = profile?.first_name || '';
   
-  // Get time-based greeting
+  // Simple greeting based on time of day
   const getGreeting = () => {
     const hour = new Date().getHours();
     
-    if (hour >= 5 && hour < 12) {
-      return language === 'fr' ? 'Bon matin' : 'Good morning';
-    } else if (hour >= 12 && hour < 17) {
-      return language === 'fr' ? 'Bon après-midi' : 'Good afternoon';
-    } else if (hour >= 17 && hour < 21) {
-      return language === 'fr' ? 'Bonsoir' : 'Good evening';
+    if (hour >= 5 && hour < 18) {
+      return language === 'fr' ? 'Bonjour' : 'Hello';
     } else {
-      return language === 'fr' ? 'Bonne nuit' : 'Good night';
+      return language === 'fr' ? 'Bonsoir' : 'Good evening';
     }
   };
   
-  // Get day of week greeting
-  const getDayGreeting = () => {
-    const days = language === 'fr' 
-      ? ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
-      : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    
-    const today = new Date().getDay();
-    const dayName = days[today];
-    
-    if (firstName) {
-      return language === 'fr' 
-        ? `Joyeux ${dayName}, ${firstName}` 
-        : `Happy ${dayName}, ${firstName}`;
-    }
-    
-    return language === 'fr' 
-      ? `Joyeux ${dayName}` 
-      : `Happy ${dayName}`;
-  };
-  
-  const greeting = getDayGreeting();
+  const greeting = firstName ? `${getGreeting()}, ${firstName}` : getGreeting();
   
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="mb-4"
+      className="mb-2"
     >
-      <h1 className="font-display text-2xl md:text-3xl font-bold bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+      <h1 className="text-2xl md:text-3xl font-bold text-foreground">
         {greeting}
       </h1>
-      <p className="text-sm text-muted-foreground mt-1">
-        {language === 'fr' ? 'Où allons-nous aujourd\'hui?' : 'Where are we headed today?'}
+      <p className="text-base text-muted-foreground mt-1">
+        {language === 'fr' ? "Où allons-nous aujourd'hui ?" : 'Where are we headed today?'}
       </p>
     </motion.div>
   );
