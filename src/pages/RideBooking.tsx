@@ -29,7 +29,7 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
-import montrealCityscapeBg from '@/assets/montreal-cityscape-bg.png';
+import montrealCityscapeBg from '@/assets/montreal-purple-skyline.png';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({ default: m.RideDebugBar })));
