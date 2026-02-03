@@ -29,6 +29,9 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
+import { useTimeOfDay } from '@/hooks/useTimeOfDay';
+import montrealDayBg from '@/assets/montreal-day-bg.jpg';
+import montrealNightBg from '@/assets/montreal-night-bg.jpg';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({ default: m.RideDebugBar })));
 const RideLocationHistory = React.lazy(() => import('@/components/RideLocationHistory').then(m => ({ default: m.RideLocationHistory })));
@@ -1311,13 +1314,48 @@ const RideBooking = () => {
     );
   }
 
+  // Time-based dynamic background
+  const timeOfDay = useTimeOfDay();
+
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
   if (step === 'input') {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background relative overflow-hidden">
+        {/* Dynamic Time-Based Background */}
+        <div className="absolute inset-0 z-0">
+          {/* Day Background */}
+          <div 
+            className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+            style={{ 
+              opacity: timeOfDay === 'day' ? 1 : 0,
+              backgroundImage: `url(${montrealDayBg})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }}
+          />
+          {/* Night Background */}
+          <div 
+            className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+            style={{ 
+              opacity: timeOfDay === 'night' ? 1 : 0,
+              backgroundImage: `url(${montrealNightBg})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }}
+          />
+          {/* Purple Overlay for Map Readability */}
+          <div 
+            className={`absolute inset-0 transition-all duration-1000 ${
+              timeOfDay === 'day' 
+                ? 'bg-gradient-to-b from-primary/20 via-background/40 to-background/80' 
+                : 'bg-gradient-to-b from-primary/30 via-background/60 to-background/90'
+            }`}
+          />
+        </div>
+
         <Navbar />
         
-        <div className="pt-16 h-screen flex flex-col relative">
+        <div className="pt-16 h-screen flex flex-col relative z-10">
           {/* Full-screen Map */}
           <div className="flex-1 relative">
             <MapComponent
@@ -1346,9 +1384,9 @@ const RideBooking = () => {
                 animate={{ opacity: 1, y: 0 }}
                 className="absolute top-4 left-4 right-4 z-10"
               >
-                <div className="bg-card/95 backdrop-blur-md rounded-xl border border-border/50 shadow-lg p-4">
+                <div className="bg-card/90 backdrop-blur-md rounded-xl border border-primary/20 shadow-lg shadow-primary/10 p-4">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center">
                       <MapPin className="h-5 w-5 text-primary" />
                     </div>
                     <div className="flex-1 min-w-0">
@@ -1377,7 +1415,7 @@ const RideBooking = () => {
             animate={{ y: 0, opacity: 1 }}
             className="absolute bottom-0 left-0 right-0 z-10"
           >
-            <div className="bg-card/95 backdrop-blur-md rounded-t-3xl border-t border-border/50 shadow-2xl p-6 pb-8 space-y-4">
+            <div className="bg-card/90 backdrop-blur-xl rounded-t-3xl border-t border-primary/20 shadow-2xl shadow-primary/10 p-6 pb-8 space-y-4">
               {/* Greeting */}
               <GreetingHeader />
               
