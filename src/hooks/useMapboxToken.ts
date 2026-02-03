@@ -10,7 +10,6 @@ interface TokenState {
 // Cache token in memory for instant reuse
 let cachedToken: string | null = null;
 let tokenFetchPromise: Promise<string | null> | null = null;
-let prefetchStarted = false;
 
 // Also cache in sessionStorage for page refreshes
 const CACHE_KEY = 'mapbox_token_cache';
@@ -36,7 +35,6 @@ const getSessionCache = (): string | null => {
 export const clearMapboxTokenCache = () => {
   cachedToken = null;
   tokenFetchPromise = null;
-  prefetchStarted = false;
   try {
     sessionStorage.removeItem(CACHE_KEY);
   } catch {
@@ -72,6 +70,13 @@ const fetchTokenInternal = async (): Promise<string | null> => {
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        // Check if user is authenticated before making the call
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          console.log('[useMapboxToken] No session, skipping token fetch');
+          return null;
+        }
+
         const { data, error } = await supabase.functions.invoke('get-mapbox-token');
 
         if (error) {
@@ -115,11 +120,8 @@ const fetchTokenInternal = async (): Promise<string | null> => {
   return tokenFetchPromise;
 };
 
-// Prefetch token on module load - runs immediately when JS loads
-export const prefetchMapboxToken = () => {
-  if (prefetchStarted) return;
-  prefetchStarted = true;
-  
+// Prefetch token - only fetches if user is already authenticated
+export const prefetchMapboxToken = async () => {
   // Check session cache first for instant availability
   const sessionToken = getSessionCache();
   if (sessionToken) {
@@ -127,12 +129,13 @@ export const prefetchMapboxToken = () => {
     return;
   }
   
-  // Start fetching in background
-  fetchTokenInternal();
+  // Check if user is authenticated before prefetching
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    // Start fetching in background
+    fetchTokenInternal();
+  }
 };
-
-// Auto-prefetch on module import
-prefetchMapboxToken();
 
 export const useMapboxToken = (): TokenState => {
   const [state, setState] = useState<TokenState>(() => {
@@ -152,6 +155,16 @@ export const useMapboxToken = (): TokenState => {
     let mounted = true;
 
     const fetchToken = async () => {
+      // Wait for auth state to be determined
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        if (mounted) {
+          setState({ token: null, loading: false, error: 'Not authenticated' });
+        }
+        return;
+      }
+
       const token = await fetchTokenInternal();
       
       if (mounted) {
