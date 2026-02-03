@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -72,7 +72,7 @@ const incrementFreeRidesUsed = (email: string): void => {
 
 const RideBooking = () => {
   const { t, language } = useLanguage();
-  const { user, profile, roles, isRider, isDriver, isLoading: authLoading } = useAuth();
+  const { user, profile, roles, isRider, isDriver, isLoading: authLoading, signOut } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const {
@@ -1492,6 +1492,19 @@ const RideBooking = () => {
                     <Car className="h-5 w-5 text-accent" />
                     <span className="text-white font-medium">
                       {language === 'fr' ? 'Réserver' : 'Book a Ride'}
+                    </span>
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button
+                    onClick={() => {
+                      signOut();
+                      navigate('/');
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left"
+                  >
+                    <LogOut className="h-5 w-5 text-destructive" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Déconnexion' : 'Log Out'}
                     </span>
                   </button>
                 </div>
