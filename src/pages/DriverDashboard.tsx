@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle, Bell, Map } from 'lucide-react';
+import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle, Bell, Map, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -31,6 +31,7 @@ import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
 import montrealDriverBg from '@/assets/montreal-driver-bg.png';
+import { HelpDialog } from '@/components/HelpDialog';
 
 interface RideRequest {
   id: string;
@@ -89,6 +90,7 @@ const DriverDashboard = () => {
   const [todayEarnings, setTodayEarnings] = useState(0);
   const [todayRides, setTodayRides] = useState(0);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const [showGPSNavigation, setShowGPSNavigation] = useState(false);
 
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
@@ -935,7 +937,7 @@ const DriverDashboard = () => {
               </Button>
             )}
 
-            {/* Profile and Inbox Buttons */}
+            {/* Profile, Help and Inbox Buttons */}
             <div className="flex gap-2 mb-4">
               <Button
                 variant="outline"
@@ -944,6 +946,12 @@ const DriverDashboard = () => {
               >
                 <UserCircle className="h-5 w-5 mr-2" />
                 Edit Profile
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setHelpDialogOpen(true)}
+              >
+                <HelpCircle className="h-5 w-5" />
               </Button>
               <DriverInbox />
             </div>
@@ -1271,6 +1279,8 @@ const DriverDashboard = () => {
         open={isProfileModalOpen} 
         onOpenChange={setIsProfileModalOpen} 
       />
+
+      <HelpDialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen} />
 
       {/* PWA Install Prompt for Drivers */}
       <PWAInstallPrompt />
