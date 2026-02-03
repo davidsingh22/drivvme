@@ -1484,16 +1484,8 @@ const RideBooking = () => {
                   <div className="h-px bg-white/10" />
                   <button
                     onClick={() => {
-                      // Reset all booking state and return to input step
-                      setStep('input');
-                      setDropoff(null);
-                      setDropoffAddress('');
-                      setFareEstimate(null);
-                      setCurrentRide(null);
-                      setDriverInfo(null);
-                      setDriverLocation(null);
-                      // Navigate to /ride to ensure fresh start
-                      navigate('/ride');
+                      // Force a full page refresh to reset everything
+                      window.location.href = '/ride';
                     }}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left"
                   >
