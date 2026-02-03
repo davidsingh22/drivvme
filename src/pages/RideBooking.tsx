@@ -28,6 +28,7 @@ import { useRealtimeDriverTracking } from '@/hooks/useRealtimeDriverTracking';
 import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
+import { QuickDestinations } from '@/components/booking/QuickDestinations';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({ default: m.RideDebugBar })));
 const RideLocationHistory = React.lazy(() => import('@/components/RideLocationHistory').then(m => ({ default: m.RideLocationHistory })));
@@ -106,6 +107,9 @@ const RideBooking = () => {
   const paymentGateCheckedRef = useRef<string | null>(null);
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
+  const hasAutoDetectedLocation = useRef(false);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
+  const [showFullInput, setShowFullInput] = useState(false);
 
   // Realtime driver tracking with live ETA
   const isActiveRidePhase = step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress';
@@ -239,6 +243,56 @@ const RideBooking = () => {
       cancelled = true;
     };
   }, [user, authLoading, roles.length, isDriver, navigate]);
+
+  // Auto-detect GPS location on mount and set as default pickup
+  useEffect(() => {
+    if (hasAutoDetectedLocation.current) return;
+    if (!navigator.geolocation) {
+      setIsDetectingLocation(false);
+      return;
+    }
+
+    hasAutoDetectedLocation.current = true;
+    
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        
+        // Try to reverse geocode the location
+        if (mapboxToken) {
+          try {
+            const res = await fetch(
+              `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxToken}&language=${language}`
+            );
+            const data = await res.json();
+            const place = data?.features?.[0];
+            
+            if (place) {
+              const address = place.place_name || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+              setPickupAddress(address);
+              setPickup({ address, lat, lng });
+              setIsDetectingLocation(false);
+              return;
+            }
+          } catch (err) {
+            console.error('[RideBooking] Reverse geocode error:', err);
+          }
+        }
+        
+        // Fallback: use coordinates as address
+        const fallbackAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+        setPickupAddress(fallbackAddress);
+        setPickup({ address: fallbackAddress, lat, lng });
+        setIsDetectingLocation(false);
+      },
+      (error) => {
+        console.log('[RideBooking] GPS auto-detect failed:', error.message);
+        setIsDetectingLocation(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }, [mapboxToken, language]);
 
   // Restore active ride when returning to the app (especially on iOS)
   useEffect(() => {
@@ -1257,7 +1311,190 @@ const RideBooking = () => {
     );
   }
 
-  // DEFAULT BOOKING FLOW
+  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
+  if (step === 'input') {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        
+        <div className="pt-16 h-screen flex flex-col relative">
+          {/* Full-screen Map */}
+          <div className="flex-1 relative">
+            <MapComponent
+              pickup={pickup}
+              dropoff={dropoff}
+              driverLocation={driverLocation}
+              routeMode="pickup-dropoff"
+            />
+            
+            {/* GPS Detection Overlay */}
+            {isDetectingLocation && (
+              <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex items-center justify-center z-20">
+                <div className="bg-card rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4">
+                  <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                  <p className="text-sm font-medium">
+                    {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Current Location Marker Info */}
+            {pickup && !isDetectingLocation && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="absolute top-4 left-4 right-4 z-10"
+              >
+                <div className="bg-card/95 backdrop-blur-md rounded-xl border border-border/50 shadow-lg p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <MapPin className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-muted-foreground">
+                        {language === 'fr' ? 'Point de départ' : 'Pickup location'}
+                      </p>
+                      <p className="font-medium text-sm truncate">{pickupAddress}</p>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => setShowFullInput(true)}
+                      className="text-xs"
+                    >
+                      {language === 'fr' ? 'Modifier' : 'Edit'}
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </div>
+          
+          {/* Bottom Overlay - Destination Selection */}
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="absolute bottom-0 left-0 right-0 z-10"
+          >
+            <div className="bg-card/95 backdrop-blur-md rounded-t-3xl border-t border-border/50 shadow-2xl p-6 pb-8 space-y-4">
+              {/* Greeting */}
+              <GreetingHeader />
+              
+              {/* Destination Input */}
+              <div 
+                onClick={() => setShowFullInput(true)}
+                className="cursor-pointer"
+              >
+                <LocationInput
+                  type="dropoff"
+                  value={dropoffAddress}
+                  onChange={handleDropoffChange}
+                />
+              </div>
+
+              {/* Quick Destinations - Top 2 Most Visited */}
+              {!dropoffAddress && (
+                <QuickDestinations 
+                  onSelectDestination={(dest) => {
+                    handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+                  }}
+                />
+              )}
+
+              {/* Get Estimate Button */}
+              {dropoffAddress && pickup && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                >
+                  <Button
+                    onClick={handleGetEstimate}
+                    className="w-full gradient-primary shadow-button py-6 text-lg"
+                    disabled={!pickupAddress || !dropoffAddress}
+                  >
+                    {t('booking.estimate')}
+                  </Button>
+                </motion.div>
+              )}
+            </div>
+          </motion.div>
+
+          {/* Full Input Modal - for editing pickup or when tapped */}
+          <AnimatePresence>
+            {showFullInput && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-50 bg-background"
+              >
+                <div className="h-full flex flex-col">
+                  {/* Header */}
+                  <div className="flex items-center gap-4 p-4 border-b border-border">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setShowFullInput(false)}
+                    >
+                      <X className="h-5 w-5" />
+                    </Button>
+                    <h2 className="font-semibold">
+                      {language === 'fr' ? 'Où allons-nous?' : 'Where to?'}
+                    </h2>
+                  </div>
+
+                  {/* Location Inputs */}
+                  <div className="p-4 space-y-3">
+                    <LocationInput
+                      type="pickup"
+                      value={pickupAddress}
+                      onChange={handlePickupChange}
+                      onUseCurrentLocation={useCurrentLocation}
+                    />
+                    
+                    <LocationInput
+                      type="dropoff"
+                      value={dropoffAddress}
+                      onChange={handleDropoffChange}
+                    />
+                  </div>
+
+                  {/* Recent Destinations */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    <RecentDestinations 
+                      onSelectDestination={(dest) => {
+                        handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+                        setShowFullInput(false);
+                      }}
+                    />
+                  </div>
+
+                  {/* Action Button */}
+                  <div className="p-4 border-t border-border">
+                    <Button
+                      onClick={() => {
+                        setShowFullInput(false);
+                        if (pickup && dropoff) {
+                          handleGetEstimate();
+                        }
+                      }}
+                      className="w-full gradient-primary shadow-button py-6 text-lg"
+                      disabled={!pickupAddress || !dropoffAddress}
+                    >
+                      {pickup && dropoff ? t('booking.estimate') : (language === 'fr' ? 'Confirmer' : 'Confirm')}
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    );
+  }
+
+  // ESTIMATE, PAYMENT, SEARCHING STEPS (side panel layout)
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -1281,51 +1518,6 @@ const RideBooking = () => {
         >
           <div className="p-6 flex-1 overflow-y-auto">
             <AnimatePresence mode="wait">
-              {/* Input Step */}
-              {step === 'input' && (
-                <motion.div
-                  key="input"
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className="space-y-5"
-                >
-                  {/* Personalized Greeting */}
-                  <GreetingHeader />
-                  
-                  {/* Location Inputs */}
-                  <div className="space-y-3">
-                    <LocationInput
-                      type="pickup"
-                      value={pickupAddress}
-                      onChange={handlePickupChange}
-                      onUseCurrentLocation={useCurrentLocation}
-                    />
-                    
-                    <LocationInput
-                      type="dropoff"
-                      value={dropoffAddress}
-                      onChange={handleDropoffChange}
-                    />
-                  </div>
-
-                  <Button
-                    onClick={handleGetEstimate}
-                    className="w-full gradient-primary shadow-button py-6 text-lg"
-                    disabled={!pickupAddress || !dropoffAddress}
-                  >
-                    {t('booking.estimate')}
-                  </Button>
-
-                  {!dropoffAddress && (
-                    <RecentDestinations 
-                      onSelectDestination={(dest) => {
-                        handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-                      }}
-                    />
-                  )}
-                </motion.div>
-              )}
 
               {/* Estimate Step */}
               {step === 'estimate' && fareEstimate && (
