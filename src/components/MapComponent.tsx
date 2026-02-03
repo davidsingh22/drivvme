@@ -99,7 +99,7 @@ const MapComponent = ({
     }
   }, [showUserLocation]);
 
-  // Initialize map with ultra-luxury immersive 3D effects
+  // Initialize map with rich, luxurious 3D effects
   useEffect(() => {
     if (!token || !mapContainerRef.current || mapRef.current) return;
 
@@ -113,19 +113,19 @@ const MapComponent = ({
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      // Use standard-satellite for photorealistic luxury look
-      style: use3DStyle ? 'mapbox://styles/mapbox/standard-satellite' : 'mapbox://styles/mapbox/dark-v11',
+      // Use standard style for the most realistic, premium look
+      style: use3DStyle ? 'mapbox://styles/mapbox/standard' : 'mapbox://styles/mapbox/dark-v11',
       center: initialCenter as [number, number],
-      zoom: use3DStyle ? 17.5 : 16,
-      pitch: use3DStyle ? 72 : 0, // Maximum dramatic 3D angle
-      bearing: use3DStyle ? -35 : 0,
-      antialias: true,
+      zoom: use3DStyle ? 17 : 16,
+      pitch: use3DStyle ? 62 : 0,
+      bearing: use3DStyle ? -25 : 0,
+      antialias: true, // Smoother edges for premium feel
     });
 
-    // Add terrain for dramatic elevation
+    // Add terrain for realistic elevation
     if (use3DStyle) {
       map.on('style.load', () => {
-        // Add high-resolution terrain for realistic hills
+        // Add terrain source for realistic hills and elevation
         if (!map.getSource('mapbox-dem')) {
           map.addSource('mapbox-dem', {
             'type': 'raster-dem',
@@ -133,8 +133,7 @@ const MapComponent = ({
             'tileSize': 512,
             'maxzoom': 14,
           });
-          // Exaggerate terrain for dramatic effect
-          map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 1.5 });
+          map.setTerrain({ 'source': 'mapbox-dem', 'exaggeration': 1.2 });
         }
       });
     }
@@ -142,37 +141,40 @@ const MapComponent = ({
     // Add map padding for bottom sheet visibility
     if (use3DStyle) {
       const bottomPadding = Math.round(window.innerHeight * 0.55);
-      map.setPadding({ top: 100, bottom: bottomPadding, left: 40, right: 40 });
+      map.setPadding({ top: 80, bottom: bottomPadding, left: 30, right: 30 });
     }
+
+    // Hide navigation controls for cleaner luxury feel
+    // map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
     map.on('load', () => {
       setMapLoaded(true);
       
-      // Add ultra-luxury 3D effects
+      // Add rich, luxurious 3D effects
       if (use3DStyle) {
-        // Configure the standard-satellite style for maximum luxury
+        // Set golden hour lighting for warm, luxurious ambiance
         try {
-          // Night preset for dramatic luxury feel
-          map.setConfigProperty('basemap', 'lightPreset', 'night');
+          map.setConfigProperty('basemap', 'lightPreset', 'dusk');
+          // Enable 3D buildings in standard style
           map.setConfigProperty('basemap', 'showPlaceLabels', true);
           map.setConfigProperty('basemap', 'showRoadLabels', true);
-          map.setConfigProperty('basemap', 'showPointOfInterestLabels', false);
+          map.setConfigProperty('basemap', 'showPointOfInterestLabels', true);
           map.setConfigProperty('basemap', 'showTransitLabels', false);
         } catch (e) {
-          console.log('Standard style config not available');
+          console.log('Standard style config not available, using fallback');
         }
         
-        // Luxurious atmospheric fog - deep rich tones
+        // Premium atmospheric fog with warm golden tones
         map.setFog({
-          'color': 'rgb(20, 15, 30)', // Deep elegant base
-          'high-color': 'rgb(60, 40, 80)', // Rich purple twilight
-          'horizon-blend': 0.15,
-          'space-color': 'rgb(10, 8, 20)', // Deep luxury night
-          'star-intensity': 0.6, // Visible stars for premium night feel
+          'color': 'rgb(45, 35, 55)', // Warm purple-gray base
+          'high-color': 'rgb(80, 50, 90)', // Rich purple-rose sky
+          'horizon-blend': 0.12, // Smooth horizon blend
+          'space-color': 'rgb(25, 15, 35)', // Deep luxurious night sky
+          'star-intensity': 0.25, // Subtle stars
         });
 
-        // Add dramatic 3D building extrusions
-        if (!map.getLayer('3d-buildings-luxury')) {
+        // Add luxurious 3D building extrusions with realistic lighting
+        if (!map.getLayer('3d-buildings')) {
           const layers = map.getStyle().layers;
           let labelLayerId: string | undefined;
           for (let i = 0; i < layers.length; i++) {
@@ -182,138 +184,70 @@ const MapComponent = ({
             }
           }
 
-          // Luxury building layer with dramatic lighting
           map.addLayer(
             {
-              'id': '3d-buildings-luxury',
+              'id': '3d-buildings',
               'source': 'composite',
               'source-layer': 'building',
               'filter': ['==', 'extrude', 'true'],
               'type': 'fill-extrusion',
-              'minzoom': 13,
+              'minzoom': 14,
               'paint': {
-                // Rich gradient from dark base to glowing tops
+                // Realistic building colors with warm evening glow
                 'fill-extrusion-color': [
                   'interpolate',
-                  ['exponential', 1.5],
+                  ['linear'],
                   ['get', 'height'],
-                  0, '#1a1520',     // Dark luxurious base
-                  15, '#2a2535',    // Low buildings
-                  30, '#3a3050',    // Medium rise
-                  60, '#4a3d68',    // Taller buildings
-                  100, '#5a4a80',   // High-rise purple
-                  150, '#6a5795',   // Skyscrapers
-                  200, '#7a64aa',   // Premium towers
-                  300, '#8a71bf',   // Landmark glow
+                  0, '#3d3545',    // Dark base - street level
+                  20, '#4a4052',   // Low-rise warm gray
+                  50, '#5a4d65',   // Mid-rise with purple hint
+                  100, '#6b5878',  // High-rise elegant purple
+                  150, '#7c658a',  // Skyscraper warm lavender
+                  200, '#8d729c',  // Landmark buildings
                 ],
-                'fill-extrusion-height': [
-                  'interpolate', ['linear'], ['zoom'],
-                  14, 0,
-                  14.5, ['get', 'height']
-                ],
-                'fill-extrusion-base': [
-                  'interpolate', ['linear'], ['zoom'],
-                  14, 0,
-                  14.5, ['get', 'min_height']
-                ],
-                'fill-extrusion-opacity': 0.95,
+                'fill-extrusion-height': ['get', 'height'],
+                'fill-extrusion-base': ['get', 'min_height'],
+                'fill-extrusion-opacity': 0.92,
                 'fill-extrusion-vertical-gradient': true,
-                // Deep ambient occlusion for dramatic shadows
-                'fill-extrusion-ambient-occlusion-intensity': 0.6,
-                'fill-extrusion-ambient-occlusion-radius': 5,
-                'fill-extrusion-ambient-occlusion-ground-radius': 3,
+                // Add ambient occlusion for depth
+                'fill-extrusion-ambient-occlusion-intensity': 0.4,
+                'fill-extrusion-ambient-occlusion-radius': 3,
               },
             },
             labelLayerId
           );
-
-          // Add building edge highlights for luxury glass effect
-          map.addLayer(
-            {
-              'id': '3d-buildings-glow',
-              'source': 'composite',
-              'source-layer': 'building',
-              'filter': ['all', ['==', 'extrude', 'true'], ['>', ['get', 'height'], 50]],
-              'type': 'fill-extrusion',
-              'minzoom': 15,
-              'paint': {
-                'fill-extrusion-color': '#a855f7',
-                'fill-extrusion-height': ['get', 'height'],
-                'fill-extrusion-base': ['-', ['get', 'height'], 2],
-                'fill-extrusion-opacity': 0.3,
-              },
-            },
-            '3d-buildings-luxury'
-          );
         }
 
-        // Premium road glow for night driving feel
-        if (!map.getLayer('road-premium-glow')) {
+        // Add subtle road glow layer for premium feel
+        if (!map.getLayer('road-glow')) {
           try {
-            // Outer glow
             map.addLayer({
-              'id': 'road-premium-glow',
+              'id': 'road-glow',
               'type': 'line',
               'source': 'composite',
               'source-layer': 'road',
-              'filter': ['in', 'class', 'motorway', 'trunk', 'primary', 'secondary'],
+              'filter': ['in', 'class', 'motorway', 'trunk', 'primary'],
               'paint': {
-                'line-color': 'rgba(168, 85, 247, 0.08)',
-                'line-width': 20,
-                'line-blur': 12,
+                'line-color': 'rgba(168, 85, 247, 0.15)',
+                'line-width': 12,
+                'line-blur': 8,
               },
-            });
-            // Inner glow
-            map.addLayer({
-              'id': 'road-inner-glow',
-              'type': 'line',
-              'source': 'composite',
-              'source-layer': 'road',
-              'filter': ['in', 'class', 'motorway', 'trunk'],
-              'paint': {
-                'line-color': 'rgba(200, 150, 255, 0.12)',
-                'line-width': 6,
-                'line-blur': 4,
-              },
-            });
+            }, '3d-buildings');
           } catch (e) {
-            // Road layer might not be available in this style
+            // Road layer might not be available
           }
         }
 
-        // Dramatic cinematic camera entrance
+        // Luxurious cinematic camera entrance animation
         setTimeout(() => {
           map.easeTo({
-            pitch: 75, // Maximum immersive angle
-            bearing: map.getBearing() + 25,
-            zoom: map.getZoom() + 0.4,
-            duration: 3000,
-            easing: (t) => 1 - Math.pow(1 - t, 4), // Smooth ease out quart
+            pitch: 68,
+            bearing: map.getBearing() + 20,
+            zoom: map.getZoom() + 0.3,
+            duration: 2500,
+            easing: (t) => 1 - Math.pow(1 - t, 3), // Smooth ease out cubic
           });
-        }, 200);
-
-        // Subtle continuous camera drift for luxury feel
-        let driftAnimation: number;
-        const startDrift = () => {
-          let startTime = performance.now();
-          const drift = (time: number) => {
-            if (!mapRef.current) return;
-            const elapsed = (time - startTime) / 1000;
-            // Very subtle bearing oscillation
-            const newBearing = -35 + Math.sin(elapsed * 0.1) * 3;
-            mapRef.current.setBearing(newBearing);
-            driftAnimation = requestAnimationFrame(drift);
-          };
-          setTimeout(() => {
-            driftAnimation = requestAnimationFrame(drift);
-          }, 3500); // Start after entrance animation
-        };
-        startDrift();
-
-        // Cleanup drift animation
-        map.on('remove', () => {
-          if (driftAnimation) cancelAnimationFrame(driftAnimation);
-        });
+        }, 300);
       }
     });
 
