@@ -115,16 +115,22 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
               lat: dest.lat, 
               lng: dest.lng 
             })}
-            className="flex-1 flex items-center gap-3 px-4 py-3 rounded-2xl bg-background/80 backdrop-blur-md border border-border/50 hover:bg-background/90 hover:border-primary/30 transition-all group"
+            className="flex-1 flex items-center gap-3 px-4 py-3.5 rounded-2xl hover:scale-[1.02] transition-all group"
+            style={{
+              background: 'rgba(30, 30, 40, 0.7)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              border: '1px solid rgba(100, 100, 120, 0.3)',
+            }}
           >
             <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
               <Icon className="h-5 w-5 text-primary" />
             </div>
             <div className="flex-1 text-left min-w-0">
-              <p className="font-semibold text-foreground truncate text-base">
+              <p className="font-semibold text-white truncate text-base">
                 {shortName}
               </p>
-              <p className="text-sm text-muted-foreground truncate">
+              <p className="text-sm text-white/60 truncate">
                 {dest.visit_count}x {language === 'fr' ? 'visite' : 'visited'}
               </p>
             </div>

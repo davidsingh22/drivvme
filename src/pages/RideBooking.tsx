@@ -1374,20 +1374,32 @@ const RideBooking = () => {
             )}
           </div>
           
-          {/* Bottom Overlay - Destination Selection */}
+          {/* Bottom Overlay - Frosted Glass Panel */}
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             className="absolute bottom-0 left-0 right-0 z-10"
           >
-            <div className="bg-card/90 backdrop-blur-xl rounded-t-3xl border-t border-primary/20 shadow-2xl shadow-primary/10 p-6 pb-8 space-y-4">
+            <div 
+              className="rounded-t-3xl border-t border-primary/30 p-6 pb-8 space-y-4"
+              style={{
+                background: 'rgba(120, 60, 200, 0.25)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                boxShadow: '0 -10px 40px rgba(168, 85, 247, 0.2)',
+              }}
+            >
               {/* Greeting */}
               <GreetingHeader />
               
               {/* Current Location Pill - Green navigation icon with Editer button */}
               <div 
                 onClick={() => setShowFullInput(true)}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl bg-background/60 backdrop-blur-md border border-primary/30 cursor-pointer hover:bg-background/80 transition-colors"
+                className="flex items-center gap-3 px-4 py-3.5 rounded-xl cursor-pointer hover:bg-white/5 transition-colors"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(168, 85, 247, 0.4)',
+                }}
               >
                 <Navigation className="h-5 w-5 text-accent flex-shrink-0" />
                 <span className="flex-1 text-foreground font-medium truncate">
@@ -1396,7 +1408,7 @@ const RideBooking = () => {
                     : (language === 'fr' ? 'Votre position' : 'Your location')
                   }
                 </span>
-                <span className="text-primary font-medium text-sm flex-shrink-0">
+                <span className="text-muted-foreground font-medium text-sm flex-shrink-0">
                   {language === 'fr' ? 'Editer' : 'Edit'}
                 </span>
               </div>
