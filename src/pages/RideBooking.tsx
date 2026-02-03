@@ -1317,22 +1317,19 @@ const RideBooking = () => {
   // Time-based dynamic background
   const timeOfDay = useTimeOfDay();
 
-  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN WITH CITYSCAPE BACKGROUND
+  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN WITH MAPBOX MAP OVER CITYSCAPE BACKGROUND
   if (step === 'input') {
-    // Extract short location name for the pin label
-    const locationName = pickupAddress ? pickupAddress.split(',')[0] : '';
-    
     return (
       <div className="min-h-screen bg-background relative overflow-hidden">
         <Navbar />
         
         <div className="pt-16 h-screen flex flex-col relative">
-          {/* Cityscape "Map" Area - Exactly like mockup */}
+          {/* Map Area with Cityscape Background */}
           <div className="flex-1 relative overflow-hidden">
-            {/* Purple Glow Border Frame */}
-            <div className="absolute inset-2 rounded-2xl overflow-hidden z-10 shadow-[0_0_30px_rgba(168,85,247,0.3)] border border-primary/30">
+            {/* Cityscape Background Layer (behind map) */}
+            <div className="absolute inset-0 z-0">
               {/* Day Cityscape */}
-              <motion.div 
+              <div 
                 className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
                 style={{ 
                   opacity: timeOfDay === 'day' ? 1 : 0,
@@ -1340,13 +1337,10 @@ const RideBooking = () => {
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',
                 }}
-                initial={{ scale: 1.05 }}
-                animate={{ scale: 1 }}
-                transition={{ duration: 1.5, ease: 'easeOut' }}
               />
               
               {/* Night Cityscape */}
-              <motion.div 
+              <div 
                 className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
                 style={{ 
                   opacity: timeOfDay === 'night' ? 1 : 0,
@@ -1354,74 +1348,30 @@ const RideBooking = () => {
                   backgroundSize: 'cover',
                   backgroundPosition: 'center',
                 }}
-                initial={{ scale: 1.05 }}
-                animate={{ scale: 1 }}
-                transition={{ duration: 1.5, ease: 'easeOut' }}
               />
-              
-              {/* Subtle Gradient Overlay for depth */}
-              <div className={`absolute inset-0 ${
-                timeOfDay === 'day' 
-                  ? 'bg-gradient-to-t from-black/20 via-transparent to-transparent' 
-                  : 'bg-gradient-to-t from-black/40 via-transparent to-primary/10'
-              }`} />
-              
-              {/* Street Name Overlay at Bottom - like mockup */}
-              <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-black/60 to-transparent flex items-end px-4 pb-1">
-                <span className="text-white/70 text-xs font-medium tracking-wide">
-                  {locationName ? `📍 ${locationName}` : ''}
-                </span>
-              </div>
-              
-              {/* Floating Pin Marker - Centered in the cityscape */}
-              {pickup && !isDetectingLocation && (
-                <motion.div 
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full z-20"
-                  initial={{ scale: 0, y: 20 }}
-                  animate={{ scale: 1, y: 0 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-                >
-                  {/* Pulsing Ring */}
-                  <div className="absolute -inset-3 rounded-full bg-primary/30 animate-ping" />
-                  
-                  {/* Pin Icon */}
-                  <div className="relative">
-                    <svg width="40" height="50" viewBox="0 0 40 50" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path 
-                        d="M20 0C8.954 0 0 8.954 0 20c0 14 20 30 20 30s20-16 20-30C40 8.954 31.046 0 20 0z" 
-                        fill="url(#pin-gradient)"
-                      />
-                      <circle cx="20" cy="18" r="8" fill="white"/>
-                      <defs>
-                        <linearGradient id="pin-gradient" x1="20" y1="0" x2="20" y2="50" gradientUnits="userSpaceOnUse">
-                          <stop stopColor="#a855f7"/>
-                          <stop offset="1" stopColor="#7c3aed"/>
-                        </linearGradient>
-                      </defs>
-                    </svg>
-                  </div>
-                  
-                  {/* Location Label */}
-                  <div className="absolute left-1/2 top-full mt-2 -translate-x-1/2 whitespace-nowrap">
-                    <div className="bg-card/95 backdrop-blur-md px-3 py-1.5 rounded-lg shadow-lg border border-primary/20">
-                      <span className="text-xs font-medium">{locationName || (language === 'fr' ? 'Votre position' : 'Your location')}</span>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-              
-              {/* GPS Detection Overlay */}
-              {isDetectingLocation && (
-                <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-20">
-                  <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-primary/20">
-                    <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                    <p className="text-sm font-medium">
-                      {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-                    </p>
-                  </div>
-                </div>
-              )}
             </div>
+            
+            {/* Interactive Mapbox Map - On Top */}
+            <div className="absolute inset-0 z-10">
+              <MapComponent
+                pickup={pickup}
+                dropoff={dropoff}
+                driverLocation={null}
+                routeMode="pickup-dropoff"
+              />
+            </div>
+            
+            {/* GPS Detection Overlay */}
+            {isDetectingLocation && (
+              <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-20">
+                <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-primary/20">
+                  <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                  <p className="text-sm font-medium">
+                    {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
           
           {/* Bottom Overlay - Destination Selection */}
