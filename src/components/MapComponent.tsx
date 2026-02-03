@@ -99,7 +99,7 @@ const MapComponent = ({
     }
   }, [showUserLocation]);
 
-  // Initialize map
+  // Initialize map with dramatic 3D effects
   useEffect(() => {
     if (!token || !mapContainerRef.current || mapRef.current) return;
 
@@ -113,23 +113,94 @@ const MapComponent = ({
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: use3DStyle ? 'mapbox://styles/mapbox/streets-v12' : 'mapbox://styles/mapbox/dark-v11',
+      // Use standard-satellite for dramatic look, or dark-v11 for non-3D
+      style: use3DStyle ? 'mapbox://styles/mapbox/standard' : 'mapbox://styles/mapbox/dark-v11',
       center: initialCenter as [number, number],
-      zoom: use3DStyle ? 16.2 : 16,
-      pitch: use3DStyle ? 45 : 0,
-      bearing: use3DStyle ? -20 : 0,
+      zoom: use3DStyle ? 16.5 : 16,
+      pitch: use3DStyle ? 60 : 0, // More dramatic pitch
+      bearing: use3DStyle ? -30 : 0, // Dynamic angle
     });
 
-    // Add map padding for bottom sheet visibility (40% of viewport height)
+    // Add map padding for bottom sheet visibility
     if (use3DStyle) {
-      const bottomPadding = Math.round(window.innerHeight * 0.4);
-      map.setPadding({ top: 60, bottom: bottomPadding, left: 20, right: 20 });
+      const bottomPadding = Math.round(window.innerHeight * 0.55);
+      map.setPadding({ top: 80, bottom: bottomPadding, left: 30, right: 30 });
     }
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');
 
     map.on('load', () => {
       setMapLoaded(true);
+      
+      // Add dramatic 3D effects for enhanced style
+      if (use3DStyle) {
+        // Set dramatic lighting - dusk/evening ambiance
+        try {
+          map.setConfigProperty('basemap', 'lightPreset', 'dusk');
+        } catch (e) {
+          // Fallback for older style versions
+          console.log('Standard style config not available');
+        }
+        
+        // Add atmospheric fog for depth
+        map.setFog({
+          'color': 'rgb(40, 20, 60)', // Purple-tinted fog
+          'high-color': 'rgb(80, 40, 120)', // Purple sky gradient
+          'horizon-blend': 0.08,
+          'space-color': 'rgb(20, 10, 40)', // Deep purple space
+          'star-intensity': 0.4,
+        });
+
+        // Add 3D building extrusions with dramatic styling
+        if (!map.getLayer('3d-buildings')) {
+          // Find the first symbol layer to insert buildings below labels
+          const layers = map.getStyle().layers;
+          let labelLayerId: string | undefined;
+          for (let i = 0; i < layers.length; i++) {
+            if (layers[i].type === 'symbol' && (layers[i] as any).layout?.['text-field']) {
+              labelLayerId = layers[i].id;
+              break;
+            }
+          }
+
+          map.addLayer(
+            {
+              'id': '3d-buildings',
+              'source': 'composite',
+              'source-layer': 'building',
+              'filter': ['==', 'extrude', 'true'],
+              'type': 'fill-extrusion',
+              'minzoom': 14,
+              'paint': {
+                'fill-extrusion-color': [
+                  'interpolate',
+                  ['linear'],
+                  ['get', 'height'],
+                  0, '#4a3660',   // Purple-tinted base
+                  50, '#6b4a90',  // Medium buildings
+                  100, '#8b5cb0', // Taller buildings
+                  200, '#a855f7', // Tallest buildings - brand purple
+                ],
+                'fill-extrusion-height': ['get', 'height'],
+                'fill-extrusion-base': ['get', 'min_height'],
+                'fill-extrusion-opacity': 0.85,
+                'fill-extrusion-vertical-gradient': true,
+              },
+            },
+            labelLayerId
+          );
+        }
+
+        // Smooth camera animation on load
+        setTimeout(() => {
+          map.easeTo({
+            pitch: 65,
+            bearing: map.getBearing() + 15,
+            duration: 2000,
+            easing: (t) => t * (2 - t), // Ease out
+          });
+        }, 500);
+      }
     });
 
     map.on('click', (e) => {
