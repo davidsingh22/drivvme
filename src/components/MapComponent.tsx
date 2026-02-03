@@ -109,9 +109,11 @@ const MapComponent = ({
 
     const map = new mapboxgl.Map({
       container: mapContainerRef.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: 'mapbox://styles/mapbox/streets-v12', // Light day style with 3D buildings
       center: initialCenter as [number, number],
       zoom: 16, // Street-level zoom for detailed view
+      pitch: 45, // 3D tilt for building visibility
+      bearing: 0,
     });
 
     map.addControl(new mapboxgl.NavigationControl(), 'top-right');

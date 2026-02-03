@@ -1325,205 +1325,231 @@ const RideBooking = () => {
     return parts[0]?.trim() || pickupAddress;
   };
 
-  // DEFAULT BOOKING FLOW - FULL MAP TOP, FROSTED GLASS BOTTOM PANEL
+  // DEFAULT BOOKING FLOW - MATCHING REFERENCE IMAGE EXACTLY
+  // Two-section layout: Map top (~58vh), Skyline visible bottom (~42vh), Frosted glass panel overlay
   if (step === 'input') {
     return (
-      <div className="min-h-screen bg-background relative overflow-hidden">
-        <Navbar />
-        
-        <div className="pt-16 h-screen flex flex-col relative">
-          {/* Cityscape Background - Visible at bottom through blur */}
-          <div className="absolute inset-0 z-0">
-            {/* Day Cityscape */}
-            <div 
-              className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-              style={{ 
-                opacity: timeOfDay === 'day' ? 1 : 0,
-                backgroundImage: `url(${montrealDayBg})`,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center bottom',
-              }}
-            />
-            
-            {/* Night Cityscape */}
-            <div 
-              className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
-              style={{ 
-                opacity: timeOfDay === 'night' ? 1 : 0,
-                backgroundImage: `url(${montrealNightBg})`,
-                backgroundSize: 'cover',
-                backgroundPosition: 'center bottom',
-              }}
-            />
-          </div>
+      <div className="min-h-screen bg-background flex justify-center">
+        {/* Mobile Frame Container - max 420px */}
+        <div className="w-full max-w-[420px] h-screen relative overflow-hidden">
+          <Navbar />
           
-          {/* Full Opacity Map - Takes up top ~55% */}
-          <div className="relative z-10 flex-1" style={{ minHeight: '55vh' }}>
-            <MapComponent
-              pickup={pickup}
-              dropoff={dropoff}
-              driverLocation={null}
-              routeMode="pickup-dropoff"
-            />
-            
-            {/* GPS Detection Overlay */}
-            {isDetectingLocation && (
-              <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-20">
-                <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-primary/20">
-                  <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-                  <p className="text-sm font-medium">
-                    {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Bottom Frosted Glass Panel */}
-          <motion.div
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="relative z-20"
-          >
-            <div 
-              className="rounded-t-[2rem] p-6 pb-10 space-y-5"
-              style={{
-                background: 'linear-gradient(180deg, hsla(var(--primary) / 0.85) 0%, hsla(var(--primary) / 0.70) 100%)',
-                backdropFilter: 'blur(24px)',
-                WebkitBackdropFilter: 'blur(24px)',
-                boxShadow: '0 -10px 40px hsla(var(--primary) / 0.3)',
-              }}
-            >
-              {/* Greeting - Simple format like reference */}
-              <div>
-                <h1 className="text-2xl font-bold text-primary-foreground">
-                  {language === 'fr' ? 'Bonjour' : 'Hello'}{profile?.first_name ? `, ${profile.first_name}` : ''}
-                </h1>
-                <p className="text-primary-foreground/80 text-sm mt-1">
-                  {language === 'fr' ? 'Où allons-nous aujourd\'hui ?' : 'Where are we headed today?'}
-                </p>
-              </div>
+          <div className="pt-16 h-full flex flex-col relative">
+            {/* TOP SECTION: Map (~58vh) */}
+            <div className="relative z-10" style={{ height: '58vh', minHeight: '58vh' }}>
+              <MapComponent
+                pickup={pickup}
+                dropoff={dropoff}
+                driverLocation={null}
+                routeMode="pickup-dropoff"
+              />
               
-              {/* Pickup Location Row */}
-              <div 
-                onClick={() => setShowFullInput(true)}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
-                style={{
-                  background: 'hsla(var(--background) / 0.15)',
-                  border: '1px solid hsla(var(--primary-foreground) / 0.2)',
-                }}
-              >
-                <Navigation className="h-5 w-5 text-[hsl(142,76%,55%)]" />
-                <span className="flex-1 text-primary-foreground font-medium truncate">
-                  {getShortPickupAddress() || (language === 'fr' ? 'Chargement...' : 'Loading...')}
-                </span>
-                <button 
-                  className="text-primary-foreground/90 font-semibold text-sm px-2 py-1 rounded-lg hover:bg-white/10 transition-colors"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowFullInput(true);
-                  }}
-                >
-                  {language === 'fr' ? 'Éditer' : 'Edit'}
-                </button>
-              </div>
-
-              {/* Quick Destination Buttons */}
-              {!dropoffAddress && (
-                <QuickDestinations 
-                  onSelectDestination={(dest) => {
-                    handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-                  }}
-                />
-              )}
-
-              {/* Get Estimate Button - shown when destination selected */}
-              {dropoffAddress && pickup && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                >
-                  <Button
-                    onClick={handleGetEstimate}
-                    className="w-full py-6 text-lg font-semibold bg-primary-foreground text-primary hover:bg-primary-foreground/90 shadow-lg"
-                    disabled={!pickupAddress || !dropoffAddress}
+              {/* Address Label Pill on Map */}
+              {pickup && pickupAddress && !isDetectingLocation && (
+                <div className="absolute left-1/2 top-1/2 transform -translate-x-1/2 translate-y-4 z-20 pointer-events-none">
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-full shadow-lg"
+                    style={{
+                      background: 'rgba(30, 30, 35, 0.9)',
+                      backdropFilter: 'blur(8px)',
+                    }}
                   >
-                    {t('booking.estimate')}
-                  </Button>
-                </motion.div>
+                    <div className="h-3 w-3 rounded-full bg-primary" />
+                    <span className="text-white text-sm font-medium whitespace-nowrap">
+                      {getShortPickupAddress()}
+                    </span>
+                  </div>
+                </div>
+              )}
+              
+              {/* GPS Detection Overlay */}
+              {isDetectingLocation && (
+                <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-20">
+                  <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-primary/20">
+                    <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                    <p className="text-sm font-medium">
+                      {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+                    </p>
+                  </div>
+                </div>
               )}
             </div>
-          </motion.div>
-
-          {/* Full Input Modal - for editing pickup or when tapped */}
-          <AnimatePresence>
-            {showFullInput && (
+            
+            {/* BOTTOM SECTION: Skyline Background (~42vh) */}
+            <div className="relative flex-1" style={{ minHeight: '42vh' }}>
+              {/* Skyline Background Image - Fully Visible */}
+              <div className="absolute inset-0 z-0">
+                {/* Day Cityscape */}
+                <div 
+                  className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+                  style={{ 
+                    opacity: timeOfDay === 'day' ? 1 : 0,
+                    backgroundImage: `url(${montrealDayBg})`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center top',
+                  }}
+                />
+                
+                {/* Night Cityscape */}
+                <div 
+                  className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+                  style={{ 
+                    opacity: timeOfDay === 'night' ? 1 : 0,
+                    backgroundImage: `url(${montrealNightBg})`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center top',
+                  }}
+                />
+              </div>
+              
+              {/* Frosted Glass Bottom Sheet */}
               <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 z-50 bg-background"
+                initial={{ y: 50, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.2, duration: 0.4 }}
+                className="absolute inset-x-0 top-0 bottom-0 z-10"
               >
-                <div className="h-full flex flex-col">
-                  {/* Header */}
-                  <div className="flex items-center gap-4 p-4 border-b border-border">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowFullInput(false)}
+                <div 
+                  className="h-full rounded-t-[24px] p-6 space-y-5 overflow-hidden"
+                  style={{
+                    background: 'rgba(120, 60, 200, 0.35)',
+                    backdropFilter: 'blur(16px)',
+                    WebkitBackdropFilter: 'blur(16px)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    boxShadow: '0 -8px 32px rgba(168, 85, 247, 0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
+                  }}
+                >
+                  {/* Greeting - Simple format like reference */}
+                  <div>
+                    <h1 className="text-2xl font-bold text-white">
+                      {language === 'fr' ? 'Bonjour' : 'Hello'}{profile?.first_name ? `, ${profile.first_name}` : ''}
+                    </h1>
+                    <p className="text-white/70 text-sm mt-1">
+                      {language === 'fr' ? 'Où allons-nous aujourd\'hui ?' : 'Where are we headed today?'}
+                    </p>
+                  </div>
+                  
+                  {/* Pickup Location Row */}
+                  <div 
+                    onClick={() => setShowFullInput(true)}
+                    className="flex items-center gap-3 px-4 py-3.5 rounded-xl cursor-pointer transition-all hover:bg-white/10"
+                    style={{
+                      background: 'rgba(0, 0, 0, 0.25)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                    }}
+                  >
+                    <Navigation className="h-5 w-5 text-[#4ade80] flex-shrink-0" />
+                    <span className="flex-1 text-white font-medium truncate">
+                      {getShortPickupAddress() || (language === 'fr' ? 'Chargement...' : 'Loading...')}
+                    </span>
+                    <button 
+                      className="text-white/90 font-semibold text-sm px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors flex-shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowFullInput(true);
+                      }}
                     >
-                      <X className="h-5 w-5" />
-                    </Button>
-                    <h2 className="font-semibold">
-                      {language === 'fr' ? 'Où allons-nous?' : 'Where to?'}
-                    </h2>
+                      {language === 'fr' ? 'Éditer' : 'Edit'}
+                    </button>
                   </div>
 
-                  {/* Location Inputs */}
-                  <div className="p-4 space-y-3">
-                    <LocationInput
-                      type="pickup"
-                      value={pickupAddress}
-                      onChange={handlePickupChange}
-                      onUseCurrentLocation={useCurrentLocation}
-                    />
-                    
-                    <LocationInput
-                      type="dropoff"
-                      value={dropoffAddress}
-                      onChange={handleDropoffChange}
-                    />
-                  </div>
-
-                  {/* Recent Destinations */}
-                  <div className="flex-1 overflow-y-auto p-4">
-                    <RecentDestinations 
+                  {/* Quick Destination Buttons */}
+                  {!dropoffAddress && (
+                    <QuickDestinations 
                       onSelectDestination={(dest) => {
                         handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-                        setShowFullInput(false);
                       }}
                     />
-                  </div>
+                  )}
 
-                  {/* Action Button */}
-                  <div className="p-4 border-t border-border">
-                    <Button
-                      onClick={() => {
-                        setShowFullInput(false);
-                        if (pickup && dropoff) {
-                          handleGetEstimate();
-                        }
-                      }}
-                      className="w-full gradient-primary shadow-button py-6 text-lg"
-                      disabled={!pickupAddress || !dropoffAddress}
+                  {/* Get Estimate Button - shown when destination selected */}
+                  {dropoffAddress && pickup && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
                     >
-                      {pickup && dropoff ? t('booking.estimate') : (language === 'fr' ? 'Confirmer' : 'Confirm')}
-                    </Button>
-                  </div>
+                      <Button
+                        onClick={handleGetEstimate}
+                        className="w-full py-6 text-lg font-semibold bg-white text-primary hover:bg-white/90 shadow-lg rounded-xl"
+                        disabled={!pickupAddress || !dropoffAddress}
+                      >
+                        {t('booking.estimate')}
+                      </Button>
+                    </motion.div>
+                  )}
                 </div>
               </motion.div>
-            )}
-          </AnimatePresence>
+            </div>
+
+            {/* Full Input Modal - for editing pickup or when tapped */}
+            <AnimatePresence>
+              {showFullInput && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-50 bg-background"
+                >
+                  <div className="h-full flex flex-col">
+                    {/* Header */}
+                    <div className="flex items-center gap-4 p-4 border-b border-border">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setShowFullInput(false)}
+                      >
+                        <X className="h-5 w-5" />
+                      </Button>
+                      <h2 className="font-semibold">
+                        {language === 'fr' ? 'Où allons-nous?' : 'Where to?'}
+                      </h2>
+                    </div>
+
+                    {/* Location Inputs */}
+                    <div className="p-4 space-y-3">
+                      <LocationInput
+                        type="pickup"
+                        value={pickupAddress}
+                        onChange={handlePickupChange}
+                        onUseCurrentLocation={useCurrentLocation}
+                      />
+                      
+                      <LocationInput
+                        type="dropoff"
+                        value={dropoffAddress}
+                        onChange={handleDropoffChange}
+                      />
+                    </div>
+
+                    {/* Recent Destinations */}
+                    <div className="flex-1 overflow-y-auto p-4">
+                      <RecentDestinations 
+                        onSelectDestination={(dest) => {
+                          handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+                          setShowFullInput(false);
+                        }}
+                      />
+                    </div>
+
+                    {/* Action Button */}
+                    <div className="p-4 border-t border-border">
+                      <Button
+                        onClick={() => {
+                          setShowFullInput(false);
+                          if (pickup && dropoff) {
+                            handleGetEstimate();
+                          }
+                        }}
+                        className="w-full gradient-primary shadow-button py-6 text-lg"
+                        disabled={!pickupAddress || !dropoffAddress}
+                      >
+                        {pickup && dropoff ? t('booking.estimate') : (language === 'fr' ? 'Confirmer' : 'Confirm')}
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
     );
