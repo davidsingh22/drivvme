@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -1438,27 +1438,67 @@ const RideBooking = () => {
               boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
             }}
           >
-            {/* Logo */}
+            {/* Logo with flash animation */}
             <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center">
+              <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center logo-icon-pulse">
                 <Car className="h-4 w-4 text-primary-foreground" />
               </div>
-              <span className="font-display font-bold text-xl text-white">
+              <span className="font-display font-bold text-xl logo-flash">
                 Drivveme
               </span>
             </div>
             
-            {/* Hamburger Menu */}
-            <button 
-              onClick={() => navigate('/')}
-              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              <div className="flex flex-col gap-1">
-                <div className="w-5 h-0.5 bg-white rounded-full" />
-                <div className="w-5 h-0.5 bg-white rounded-full" />
-                <div className="w-5 h-0.5 bg-white rounded-full" />
+            {/* Menu Button with Dropdown */}
+            <div className="relative group">
+              <button 
+                className="p-2 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1"
+              >
+                <div className="flex flex-col gap-1">
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
+                </div>
+              </button>
+              
+              {/* Dropdown Menu */}
+              <div className="absolute right-0 top-full mt-2 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                <div 
+                  className="rounded-xl overflow-hidden"
+                  style={{
+                    background: 'rgba(20, 10, 35, 0.95)',
+                    backdropFilter: 'blur(16px)',
+                    WebkitBackdropFilter: 'blur(16px)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5)',
+                  }}
+                >
+                  <button
+                    onClick={() => navigate('/history')}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left"
+                  >
+                    <History className="h-5 w-5 text-primary" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Mes trajets' : 'Past Rides'}
+                    </span>
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button
+                    onClick={() => {
+                      setStep('input');
+                      setDropoff(null);
+                      setDropoffAddress('');
+                      setFareEstimate(null);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left"
+                  >
+                    <Car className="h-5 w-5 text-accent" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Réserver' : 'Book a Ride'}
+                    </span>
+                  </button>
+                </div>
               </div>
-            </button>
+            </div>
           </div>
         </motion.div>
         
