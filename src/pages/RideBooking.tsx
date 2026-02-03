@@ -1384,16 +1384,21 @@ const RideBooking = () => {
               {/* Greeting */}
               <GreetingHeader />
               
-              {/* Destination Input */}
+              {/* Current Location Pill - Green navigation icon with Editer button */}
               <div 
                 onClick={() => setShowFullInput(true)}
-                className="cursor-pointer"
+                className="flex items-center gap-3 px-4 py-3 rounded-xl bg-background/60 backdrop-blur-md border border-primary/30 cursor-pointer hover:bg-background/80 transition-colors"
               >
-                <LocationInput
-                  type="dropoff"
-                  value={dropoffAddress}
-                  onChange={handleDropoffChange}
-                />
+                <Navigation className="h-5 w-5 text-accent flex-shrink-0" />
+                <span className="flex-1 text-foreground font-medium truncate">
+                  {pickupAddress 
+                    ? pickupAddress.split(',')[0] 
+                    : (language === 'fr' ? 'Votre position' : 'Your location')
+                  }
+                </span>
+                <span className="text-primary font-medium text-sm flex-shrink-0">
+                  {language === 'fr' ? 'Editer' : 'Edit'}
+                </span>
               </div>
 
               {/* Quick Destinations - Top 2 Most Visited */}
