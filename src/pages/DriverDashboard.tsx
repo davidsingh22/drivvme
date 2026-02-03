@@ -30,6 +30,7 @@ import DriverInbox from '@/components/DriverInbox';
 import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
+import montrealDriverBg from '@/assets/montreal-driver-bg.png';
 
 interface RideRequest {
   id: string;
@@ -854,46 +855,56 @@ const DriverDashboard = () => {
           {/* Floating Complete Ride Button removed - buttons now in Active Ride panel */}
         </div>
 
-        {/* Driver Panel */}
+        {/* Driver Panel with Montreal background */}
         <motion.div
           initial={{ x: 100, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
-          className="w-full lg:w-[420px] bg-card border-l border-border flex flex-col"
+          className="w-full lg:w-[420px] border-l border-border flex flex-col relative overflow-hidden"
         >
-          {/* Wake Lock Banner - Keep screen awake while driving */}
-          <div className="pt-4">
-            <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
-            
-            {/* GPS Status Indicator - Always visible during trip/online (DB is source-of-truth) */}
-            {(isOnline || currentRide) && (
-              <DriverGPSStatusIndicator
-                onForceSend={gpsForceWriteWithFeedback}
-                isStreaming={isGPSStreaming}
-                isConnected={isGPSConnected}
-                position={gpsPosition}
-                secondsSinceLastUpdate={gpsSecondsSinceLastUpdate}
-                secondsSinceDbSync={gpsSecondsSinceDbSync}
-                secondsSinceLastGpsFix={gpsSecondsSinceLastGpsFix}
-                retryCount={gpsRetryCount}
-                onRetry={retryGPS}
-                rideId={currentRide?.id ?? null}
-                lastDbWriteError={gpsLastDbWriteError}
-                dbWriteRetryCount={gpsDbWriteRetryCount}
-                isDbSyncing={gpsIsDbSyncing}
-                authStatus={gpsAuthStatus}
-                historyWriteCount={gpsHistoryWriteCount}
+          {/* Background Image */}
+          <div 
+            className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+            style={{ backgroundImage: `url(${montrealDriverBg})` }}
+          />
+          {/* Dark overlay for readability */}
+          <div className="absolute inset-0 bg-gradient-to-b from-background/90 via-background/85 to-background/95" />
+          
+          {/* Content container - relative to appear above background */}
+          <div className="relative z-10 flex flex-col flex-1">
+            {/* Wake Lock Banner - Keep screen awake while driving */}
+            <div className="pt-4">
+              <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
+              
+              {/* GPS Status Indicator - Simplified to just the button */}
+              {(isOnline || currentRide) && (
+                <DriverGPSStatusIndicator
+                  onForceSend={gpsForceWriteWithFeedback}
+                  isStreaming={isGPSStreaming}
+                  isConnected={isGPSConnected}
+                  position={gpsPosition}
+                  secondsSinceLastUpdate={gpsSecondsSinceLastUpdate}
+                  secondsSinceDbSync={gpsSecondsSinceDbSync}
+                  secondsSinceLastGpsFix={gpsSecondsSinceLastGpsFix}
+                  retryCount={gpsRetryCount}
+                  onRetry={retryGPS}
+                  rideId={currentRide?.id ?? null}
+                  lastDbWriteError={gpsLastDbWriteError}
+                  dbWriteRetryCount={gpsDbWriteRetryCount}
+                  isDbSyncing={gpsIsDbSyncing}
+                  authStatus={gpsAuthStatus}
+                  historyWriteCount={gpsHistoryWriteCount}
+                />
+              )}
+              
+              {/* GPS Error Banner - Show when location fails */}
+              <DriverGPSErrorBanner 
+                error={gpsError} 
+                retryCount={gpsRetryCount} 
+                onRetry={retryGPS} 
               />
-            )}
-            
-            {/* GPS Error Banner - Show when location fails */}
-            <DriverGPSErrorBanner 
-              error={gpsError} 
-              retryCount={gpsRetryCount} 
-              onRetry={retryGPS} 
-            />
-          </div>
+            </div>
 
-          <div className="p-6 flex-1 overflow-y-auto">
+            <div className="p-6 flex-1 overflow-y-auto">
 
             {/* ========== DRIVER ACTIVE RIDE PANEL ========== */}
             {/* Always shows Start/End Ride buttons for the assigned driver */}
@@ -1251,6 +1262,7 @@ const DriverDashboard = () => {
               </div>
             )}
           </div>
+          </div> {/* Close content container */}
         </motion.div>
       </div>
 
