@@ -1321,34 +1321,34 @@ const RideBooking = () => {
   if (step === 'input') {
     return (
       <div className="min-h-screen bg-background relative overflow-hidden">
-        {/* Dynamic Time-Based Background */}
-        <div className="absolute inset-0 z-0">
+        {/* Dynamic Time-Based Background - Visible at top */}
+        <div className="absolute inset-0 z-0 pointer-events-none">
           {/* Day Background */}
           <div 
-            className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+            className="absolute inset-x-0 top-0 h-[60vh] transition-opacity duration-1000 ease-in-out"
             style={{ 
               opacity: timeOfDay === 'day' ? 1 : 0,
               backgroundImage: `url(${montrealDayBg})`,
               backgroundSize: 'cover',
-              backgroundPosition: 'center',
+              backgroundPosition: 'center bottom',
             }}
           />
           {/* Night Background */}
           <div 
-            className="absolute inset-0 transition-opacity duration-1000 ease-in-out"
+            className="absolute inset-x-0 top-0 h-[60vh] transition-opacity duration-1000 ease-in-out"
             style={{ 
               opacity: timeOfDay === 'night' ? 1 : 0,
               backgroundImage: `url(${montrealNightBg})`,
               backgroundSize: 'cover',
-              backgroundPosition: 'center',
+              backgroundPosition: 'center bottom',
             }}
           />
-          {/* Purple Overlay for Map Readability */}
+          {/* Gradient Fade to Background */}
           <div 
-            className={`absolute inset-0 transition-all duration-1000 ${
+            className={`absolute inset-x-0 top-0 h-[70vh] transition-all duration-1000 ${
               timeOfDay === 'day' 
-                ? 'bg-gradient-to-b from-primary/20 via-background/40 to-background/80' 
-                : 'bg-gradient-to-b from-primary/30 via-background/60 to-background/90'
+                ? 'bg-gradient-to-b from-transparent via-transparent to-background' 
+                : 'bg-gradient-to-b from-primary/10 via-transparent to-background'
             }`}
           />
         </div>
@@ -1356,14 +1356,35 @@ const RideBooking = () => {
         <Navbar />
         
         <div className="pt-16 h-screen flex flex-col relative z-10">
-          {/* Full-screen Map */}
+          {/* Map Container with Semi-Transparent Background to Show Cityscape */}
           <div className="flex-1 relative">
-            <MapComponent
-              pickup={pickup}
-              dropoff={dropoff}
-              driverLocation={driverLocation}
-              routeMode="pickup-dropoff"
-            />
+            {/* Cityscape Background Bleed-Through Layer */}
+            <div className="absolute inset-0 z-0 overflow-hidden rounded-b-3xl">
+              <div 
+                className="absolute inset-0 transition-opacity duration-1000"
+                style={{ 
+                  opacity: timeOfDay === 'day' ? 0.3 : 0.4,
+                  backgroundImage: `url(${timeOfDay === 'day' ? montrealDayBg : montrealNightBg})`,
+                  backgroundSize: 'cover',
+                  backgroundPosition: 'center',
+                }}
+              />
+              <div className={`absolute inset-0 ${
+                timeOfDay === 'day' 
+                  ? 'bg-background/70' 
+                  : 'bg-background/60'
+              }`} />
+            </div>
+            
+            {/* Actual Map on Top - with slight opacity to blend cityscape */}
+            <div className="absolute inset-0 z-[1]" style={{ opacity: 0.85 }}>
+              <MapComponent
+                pickup={pickup}
+                dropoff={dropoff}
+                driverLocation={driverLocation}
+                routeMode="pickup-dropoff"
+              />
+            </div>
             
             {/* GPS Detection Overlay */}
             {isDetectingLocation && (
