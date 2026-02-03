@@ -1726,7 +1726,7 @@ const RideBooking = () => {
                   className="space-y-6"
                 >
                   <div className="flex items-center justify-between">
-                    <h2 className="font-display text-2xl font-bold">
+                    <h2 className="font-display text-2xl font-bold fare-header-glow">
                       {t('pricing.estimated')}
                     </h2>
                     <Button
@@ -1741,16 +1741,16 @@ const RideBooking = () => {
                   {/* Route Summary */}
                   <div className="space-y-3">
                     <div className="flex items-start gap-3">
-                      <MapPin className="h-5 w-5 text-primary mt-0.5" />
+                      <MapPin className="h-5 w-5 text-primary mt-0.5 animate-pulse" />
                       <div>
-                        <p className="text-sm text-muted-foreground">Pickup</p>
+                        <p className="text-sm fare-label-glow">Pickup</p>
                         <p className="font-medium">{pickup?.address}</p>
                       </div>
                     </div>
                     <div className="flex items-start gap-3">
-                      <Navigation className="h-5 w-5 text-accent mt-0.5" />
+                      <Navigation className="h-5 w-5 text-accent mt-0.5 animate-pulse" />
                       <div>
-                        <p className="text-sm text-muted-foreground">Destination</p>
+                        <p className="text-sm fare-label-glow">Destination</p>
                         <p className="font-medium">{dropoff?.address}</p>
                       </div>
                     </div>
@@ -1804,10 +1804,10 @@ const RideBooking = () => {
                             -7.5%
                           </span>
                         </div>
-                        <p className="text-xs text-primary mb-1 mt-4 font-medium">
+                        <p className="text-xs mb-1 mt-4 font-medium drivveme-brand-glow">
                           {language === 'fr' ? 'Prix Drivveme' : 'Drivveme Price'}
                         </p>
-                        <p className="font-display text-2xl font-bold text-primary">
+                        <p className="font-display text-2xl font-bold text-primary price-flash-glow">
                           {formatCurrency(fareEstimate.total, language)}
                         </p>
                         <p className="text-[10px] text-primary/70 mt-1">
