@@ -1484,10 +1484,16 @@ const RideBooking = () => {
                   <div className="h-px bg-white/10" />
                   <button
                     onClick={() => {
+                      // Reset all booking state and return to input step
                       setStep('input');
                       setDropoff(null);
                       setDropoffAddress('');
                       setFareEstimate(null);
+                      setCurrentRide(null);
+                      setDriverInfo(null);
+                      setDriverLocation(null);
+                      // Navigate to /ride to ensure fresh start
+                      navigate('/ride');
                     }}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left"
                   >
@@ -1538,11 +1544,15 @@ const RideBooking = () => {
               backgroundPosition: 'center',
             }}
           />
+          {/* Animated glow orbs for living background effect */}
+          <div className="bg-glow-orb bg-glow-orb-1" />
+          <div className="bg-glow-orb bg-glow-orb-2" />
+          <div className="bg-glow-orb bg-glow-orb-3" />
           {/* Frosted glass overlay - light tint so city shows through */}
           <div 
             className="absolute inset-0"
             style={{
-              background: 'rgba(60, 30, 90, 0.35)',
+              background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.4) 0%, rgba(30, 15, 60, 0.5) 50%, rgba(60, 30, 100, 0.4) 100%)',
             }}
           />
           {/* Content layer */}
