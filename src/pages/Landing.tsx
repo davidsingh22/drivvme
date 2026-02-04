@@ -151,6 +151,14 @@ const Landing = () => {
       {/* Features Section */}
       <section className="py-20 bg-card">
         <div className="container mx-auto px-4">
+          {/* Canadian Badge */}
+          <div className="flex items-center justify-center gap-2 mb-10">
+            <span className="text-lg">🇨🇦</span>
+            <span className="text-base text-foreground font-medium">
+              Drivveme is a Canadian-owned company.
+            </span>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {features.map((feature, index) => (
               <motion.div
@@ -270,17 +278,6 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* Canadian Badge - Black bar */}
-      <div className="py-4 bg-black">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-center gap-2">
-            <span className="text-lg">🇨🇦</span>
-            <span className="text-base text-white font-medium">
-              Drivveme is a Canadian-owned company.
-            </span>
-          </div>
-        </div>
-      </div>
 
       {/* Footer */}
       <footer className="py-12 bg-card border-t border-border">
