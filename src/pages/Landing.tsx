@@ -152,7 +152,7 @@ const Landing = () => {
               transition={{ duration: 0.6, delay: 0.6 }}
               className="inline-flex items-center gap-2"
             >
-              <span className="text-lg">🍁</span>
+              <span className="text-lg">🇨🇦</span>
               <span className="text-base md:text-lg text-foreground/90 font-medium">
                 Drivveme is a Canadian-owned company.
               </span>
