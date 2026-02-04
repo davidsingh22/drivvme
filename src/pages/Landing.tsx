@@ -148,20 +148,38 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* Features Section */}
-      <section className="py-20 bg-card">
+      {/* Canadian Badge - Positioned Higher */}
+      <section className="pt-6 pb-10 bg-card">
         <div className="container mx-auto px-4">
-          {/* Canadian Badge */}
-          <div className="flex items-center justify-center gap-3 mb-10 px-6 py-3 rounded-full canadian-badge-glow">
-            <div className="h-7 w-7 rounded-lg gradient-primary flex items-center justify-center shadow-button">
-              <Car className="h-4 w-4 text-primary-foreground" />
+          {/* Canadian Pride Badge - Powerful Layout */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="flex items-center justify-center mb-6"
+          >
+            <div className="flex items-center gap-2 px-6 py-4 rounded-2xl canadian-badge-glow bg-gradient-to-r from-black/80 via-black/90 to-black/80 border border-primary/30">
+              {/* Car Icon next to Drivveme */}
+              <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shadow-button flex-shrink-0">
+                <Car className="h-5 w-5 text-primary-foreground" />
+              </div>
+              {/* Text - All on one line with proper spacing */}
+              <span className="text-lg md:text-xl font-bold text-white canadian-pride-strong whitespace-nowrap">
+                Drivveme is a Canadian-owned
+              </span>
+              {/* Flag next to "owned" */}
+              <span className="text-2xl md:text-3xl flag-wave flex-shrink-0">🇨🇦</span>
+              <span className="text-lg md:text-xl font-bold text-white canadian-pride-strong whitespace-nowrap">
+                company.
+              </span>
             </div>
-            <span className="text-lg text-white font-bold canadian-pride tracking-wide">
-              Drivveme is a Canadian-owned company.
-            </span>
-            <span className="text-2xl flag-wave">🇨🇦</span>
-          </div>
+          </motion.div>
+        </div>
+      </section>
 
+      {/* Features Section */}
+      <section className="py-16 bg-card">
+        <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {features.map((feature, index) => (
               <motion.div
