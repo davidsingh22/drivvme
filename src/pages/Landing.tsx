@@ -88,48 +88,32 @@ const Landing = () => {
 
         <div className="container mx-auto px-4 relative">
           <div className="max-w-4xl mx-auto text-center">
-            {/* Main headline with intense glow */}
+            {/* Main headline - elegant subtle glow */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
-              className="mb-8"
+              className="mb-6"
             >
-              <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-6">
-                <span 
-                  className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-primary via-accent to-primary animate-pulse"
-                  style={{
-                    textShadow: '0 0 40px hsl(var(--primary)), 0 0 80px hsl(var(--primary) / 0.5), 0 0 120px hsl(var(--accent) / 0.3)',
-                    filter: 'drop-shadow(0 0 30px hsl(var(--primary) / 0.8))',
-                  }}
-                >
+              <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
+                <span className="text-gradient">
                   Same Ride.
                 </span>
                 <br />
-                <span 
-                  className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-accent via-primary to-accent"
-                  style={{
-                    textShadow: '0 0 40px hsl(var(--accent)), 0 0 80px hsl(var(--accent) / 0.5), 0 0 120px hsl(var(--primary) / 0.3)',
-                    filter: 'drop-shadow(0 0 30px hsl(var(--accent) / 0.8))',
-                  }}
-                >
+                <span className="text-gradient">
                   Less Money.
                 </span>
               </h1>
             </motion.div>
 
-            {/* Subheadline with glow */}
+            {/* Subheadline - clean white, no glow */}
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.2 }}
-              className="text-2xl md:text-3xl font-semibold mb-12 max-w-2xl mx-auto"
-              style={{
-                textShadow: '0 0 20px hsl(var(--primary) / 0.6), 0 0 40px hsl(var(--primary) / 0.3)',
-              }}
+              className="text-xl md:text-2xl text-foreground mb-12 max-w-2xl mx-auto"
             >
-              <span className="text-foreground">Same great rides.</span>{' '}
-              <span className="text-primary">Cheaper than the competition.</span>
+              Cheaper than the competition. Same great rides.
             </motion.p>
 
             <motion.div
@@ -161,26 +145,17 @@ const Landing = () => {
               </Button>
             </motion.div>
 
-            {/* Proudly Canadian badge with glow */}
+            {/* Canadian badge - simple and elegant like reference */}
             <motion.div
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.8, delay: 0.6 }}
-              className="inline-flex items-center gap-3 px-6 py-3 rounded-full border-2 border-red-500/50 bg-background/30 backdrop-blur-sm"
-              style={{
-                boxShadow: '0 0 30px rgba(239, 68, 68, 0.4), 0 0 60px rgba(239, 68, 68, 0.2), inset 0 0 20px rgba(239, 68, 68, 0.1)',
-              }}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.6 }}
+              className="inline-flex items-center gap-2"
             >
-              <span className="text-2xl">🍁</span>
-              <span 
-                className="text-lg md:text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-white to-red-400"
-                style={{
-                  textShadow: '0 0 20px rgba(239, 68, 68, 0.8), 0 0 40px rgba(239, 68, 68, 0.4)',
-                }}
-              >
-                Proudly Canadian Owned
+              <span className="text-lg">🍁</span>
+              <span className="text-base md:text-lg text-foreground/90 font-medium">
+                Drivveme is a Canadian-owned company.
               </span>
-              <span className="text-2xl">🍁</span>
             </motion.div>
           </div>
         </div>
