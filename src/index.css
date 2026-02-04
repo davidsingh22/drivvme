@@ -478,6 +478,89 @@
   animation: subtitleShimmer 4s linear infinite;
 }
 
+/* Canadian Pride Badge Animation */
+@keyframes canadianPride {
+  0%, 100% {
+    text-shadow: 
+      0 0 8px rgba(255, 0, 0, 0.6),
+      0 0 16px rgba(255, 0, 0, 0.4);
+    transform: scale(1);
+  }
+  25% {
+    text-shadow: 
+      0 0 12px rgba(255, 0, 0, 0.8),
+      0 0 24px rgba(255, 0, 0, 0.6),
+      0 0 40px rgba(255, 255, 255, 0.3);
+    transform: scale(1.02);
+  }
+  50% {
+    text-shadow: 
+      0 0 16px rgba(255, 255, 255, 0.9),
+      0 0 32px rgba(255, 0, 0, 0.7),
+      0 0 48px rgba(255, 0, 0, 0.5);
+    transform: scale(1.03);
+  }
+  75% {
+    text-shadow: 
+      0 0 12px rgba(255, 0, 0, 0.8),
+      0 0 24px rgba(255, 255, 255, 0.5),
+      0 0 36px rgba(255, 0, 0, 0.6);
+    transform: scale(1.02);
+  }
+}
+
+@keyframes flagWave {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    filter: drop-shadow(0 0 8px rgba(255, 0, 0, 0.6));
+  }
+  25% {
+    transform: scale(1.15) rotate(-3deg);
+    filter: drop-shadow(0 0 16px rgba(255, 0, 0, 0.9));
+  }
+  50% {
+    transform: scale(1.2) rotate(0deg);
+    filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.8));
+  }
+  75% {
+    transform: scale(1.15) rotate(3deg);
+    filter: drop-shadow(0 0 16px rgba(255, 0, 0, 0.9));
+  }
+}
+
+@keyframes canadianBadgeGlow {
+  0%, 100% {
+    box-shadow: 
+      0 0 10px rgba(255, 0, 0, 0.3),
+      0 0 20px rgba(255, 0, 0, 0.2),
+      inset 0 0 10px rgba(255, 0, 0, 0.1);
+    border-color: rgba(255, 0, 0, 0.4);
+  }
+  50% {
+    box-shadow: 
+      0 0 20px rgba(255, 0, 0, 0.5),
+      0 0 40px rgba(255, 0, 0, 0.3),
+      0 0 60px rgba(255, 255, 255, 0.2),
+      inset 0 0 15px rgba(255, 0, 0, 0.2);
+    border-color: rgba(255, 0, 0, 0.7);
+  }
+}
+
+.canadian-pride {
+  animation: canadianPride 2.5s ease-in-out infinite;
+}
+
+.flag-wave {
+  display: inline-block;
+  animation: flagWave 2s ease-in-out infinite;
+}
+
+.canadian-badge-glow {
+  border: 2px solid rgba(255, 0, 0, 0.4);
+  animation: canadianBadgeGlow 2s ease-in-out infinite;
+  background: linear-gradient(135deg, rgba(255, 0, 0, 0.1), rgba(255, 255, 255, 0.05), rgba(255, 0, 0, 0.1));
+}
+
 /* Animated glowing background overlay */
 @keyframes bgGlowPulse {
   0%, 100% {

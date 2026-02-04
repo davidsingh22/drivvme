@@ -152,9 +152,9 @@ const Landing = () => {
       <section className="py-20 bg-card">
         <div className="container mx-auto px-4">
           {/* Canadian Badge */}
-          <div className="flex items-center justify-center gap-2 mb-10">
-            <span className="text-lg">🇨🇦</span>
-            <span className="text-base text-foreground font-medium">
+          <div className="flex items-center justify-center gap-3 mb-10 px-6 py-3 rounded-full canadian-badge-glow">
+            <span className="text-2xl flag-wave">🇨🇦</span>
+            <span className="text-lg text-white font-bold canadian-pride tracking-wide">
               Drivveme is a Canadian-owned company.
             </span>
           </div>
