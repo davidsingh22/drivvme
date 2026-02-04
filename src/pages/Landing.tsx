@@ -153,10 +153,13 @@ const Landing = () => {
         <div className="container mx-auto px-4">
           {/* Canadian Badge */}
           <div className="flex items-center justify-center gap-3 mb-10 px-6 py-3 rounded-full canadian-badge-glow">
-            <span className="text-2xl flag-wave">🇨🇦</span>
+            <div className="h-7 w-7 rounded-lg gradient-primary flex items-center justify-center shadow-button">
+              <Car className="h-4 w-4 text-primary-foreground" />
+            </div>
             <span className="text-lg text-white font-bold canadian-pride tracking-wide">
               Drivveme is a Canadian-owned company.
             </span>
+            <span className="text-2xl flag-wave">🇨🇦</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
