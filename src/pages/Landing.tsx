@@ -96,7 +96,7 @@ const Landing = () => {
               className="mb-6"
             >
               <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
-                <span className="text-gradient">
+                <span className="text-foreground">
                   Same Ride.
                 </span>
                 <br />
