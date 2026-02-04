@@ -30,7 +30,7 @@ import DriverInbox from '@/components/DriverInbox';
 import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
-import montrealDriverBg from '@/assets/montreal-driver-bg.png';
+import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 
