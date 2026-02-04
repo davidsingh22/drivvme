@@ -124,7 +124,7 @@ const Landing = () => {
               <Button
                 asChild
                 size="lg"
-                className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group btn-purple-glow"
+                className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group btn-dark-glow"
               >
                 <Link to={user ? "/ride" : "/login"}>
                   {t('hero.cta.rider')}
@@ -135,7 +135,7 @@ const Landing = () => {
                 asChild
                 size="lg"
                 variant="outline"
-                className="text-lg px-8 py-6 rounded-xl border-2 hover:bg-primary/10 hover:border-primary btn-dark-glow"
+                className="text-lg px-8 py-6 rounded-xl border-2 hover:bg-primary/10 hover:border-primary btn-purple-glow"
               >
                 <Link to={user && isDriver ? "/driver" : "/login"}>
                   <Car className="mr-2 h-5 w-5" />
