@@ -144,18 +144,6 @@ const Landing = () => {
               </Button>
             </motion.div>
 
-            {/* Canadian badge - simple and elegant like reference */}
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.6 }}
-              className="inline-flex items-center gap-2"
-            >
-              <span className="text-lg">🇨🇦</span>
-              <span className="text-base md:text-lg text-foreground/90 font-medium">
-                Drivveme is a Canadian-owned company.
-              </span>
-            </motion.div>
           </div>
         </div>
       </section>
@@ -281,6 +269,18 @@ const Landing = () => {
           </motion.div>
         </div>
       </section>
+
+      {/* Canadian Badge - Black bar */}
+      <div className="py-4 bg-black">
+        <div className="container mx-auto px-4">
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-lg">🇨🇦</span>
+            <span className="text-base text-white font-medium">
+              Drivveme is a Canadian-owned company.
+            </span>
+          </div>
+        </div>
+      </div>
 
       {/* Footer */}
       <footer className="py-12 bg-card border-t border-border">
