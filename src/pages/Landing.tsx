@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
-import drivemeHeroNew from '@/assets/driveme-hero-new.png';
 import landingBg from '@/assets/landing-cityscape-bg.png';
+
 const features = [
   {
     icon: TrendingDown,
@@ -88,32 +88,55 @@ const Landing = () => {
 
         <div className="container mx-auto px-4 relative">
           <div className="max-w-4xl mx-auto text-center">
+            {/* Main headline with intense glow */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
+              className="mb-8"
             >
-              <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
-                <span className="text-foreground">{t('hero.title')}</span>
+              <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-6">
+                <span 
+                  className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-primary via-accent to-primary animate-pulse"
+                  style={{
+                    textShadow: '0 0 40px hsl(var(--primary)), 0 0 80px hsl(var(--primary) / 0.5), 0 0 120px hsl(var(--accent) / 0.3)',
+                    filter: 'drop-shadow(0 0 30px hsl(var(--primary) / 0.8))',
+                  }}
+                >
+                  Same Ride.
+                </span>
                 <br />
-                <span className="text-gradient">{t('hero.title2')}</span>
+                <span 
+                  className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-accent via-primary to-accent"
+                  style={{
+                    textShadow: '0 0 40px hsl(var(--accent)), 0 0 80px hsl(var(--accent) / 0.5), 0 0 120px hsl(var(--primary) / 0.3)',
+                    filter: 'drop-shadow(0 0 30px hsl(var(--accent) / 0.8))',
+                  }}
+                >
+                  Less Money.
+                </span>
               </h1>
             </motion.div>
 
+            {/* Subheadline with glow */}
             <motion.p
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.2 }}
-              className="text-xl md:text-2xl text-muted-foreground mb-10 max-w-2xl mx-auto"
+              className="text-2xl md:text-3xl font-semibold mb-12 max-w-2xl mx-auto"
+              style={{
+                textShadow: '0 0 20px hsl(var(--primary) / 0.6), 0 0 40px hsl(var(--primary) / 0.3)',
+              }}
             >
-              {t('hero.subtitle')}
+              <span className="text-foreground">Same great rides.</span>{' '}
+              <span className="text-primary">Cheaper than the competition.</span>
             </motion.p>
 
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.4 }}
-              className="flex flex-col sm:flex-row gap-4 justify-center"
+              className="flex flex-col sm:flex-row gap-4 justify-center mb-16"
             >
               <Button
                 asChild
@@ -137,25 +160,29 @@ const Landing = () => {
                 </Link>
               </Button>
             </motion.div>
-          </div>
 
-          {/* Hero Image */}
-          <motion.div
-            className="mt-16 flex justify-center px-4"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.8, delay: 0.6 }}
-          >
-            <div className="relative w-full max-w-2xl">
-              <img 
-                src={drivemeHeroNew}
-                alt="Drivveme - Same Ride, Less Money"
-                className="w-full h-auto max-h-[70vh] object-contain rounded-2xl shadow-glow"
-              />
-              {/* Glow effect */}
-              <div className="absolute inset-0 bg-primary/20 blur-3xl -z-10 rounded-2xl" />
-            </div>
-          </motion.div>
+            {/* Proudly Canadian badge with glow */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.8, delay: 0.6 }}
+              className="inline-flex items-center gap-3 px-6 py-3 rounded-full border-2 border-red-500/50 bg-background/30 backdrop-blur-sm"
+              style={{
+                boxShadow: '0 0 30px rgba(239, 68, 68, 0.4), 0 0 60px rgba(239, 68, 68, 0.2), inset 0 0 20px rgba(239, 68, 68, 0.1)',
+              }}
+            >
+              <span className="text-2xl">🍁</span>
+              <span 
+                className="text-lg md:text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-400 via-white to-red-400"
+                style={{
+                  textShadow: '0 0 20px rgba(239, 68, 68, 0.8), 0 0 40px rgba(239, 68, 68, 0.4)',
+                }}
+              >
+                Proudly Canadian Owned
+              </span>
+              <span className="text-2xl">🍁</span>
+            </motion.div>
+          </div>
         </div>
       </section>
 
@@ -218,7 +245,7 @@ const Landing = () => {
               {
                 step: '03',
                 title: 'Enjoy the ride',
-                desc: 'Sit back and save 15%',
+                desc: 'Sit back and save money',
                 icon: TrendingDown,
               },
             ].map((item, index) => (
