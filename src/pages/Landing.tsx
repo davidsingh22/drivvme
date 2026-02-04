@@ -50,8 +50,7 @@ const Landing = () => {
           backgroundRepeat: 'no-repeat',
         }}
       >
-        {/* Dark overlay for readability */}
-        <div className="absolute inset-0 bg-background/70" />
+      {/* No overlay - full brightness */}
       </div>
       <div className="relative z-10">
         <Navbar />
