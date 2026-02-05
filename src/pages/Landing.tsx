@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
-import landingBg from '@/assets/landing-cityscape-bg.png';
 
 const features = [
   {
@@ -40,23 +39,33 @@ const Landing = () => {
 
   return (
     <div className="min-h-screen bg-background relative">
-      {/* Full-page background image */}
+      {/* Full-page background image - Crystal clear, no blur */}
       <div 
         className="fixed inset-0 z-0"
         style={{
-          backgroundImage: `url(${landingBg})`,
+          backgroundImage: `linear-gradient(to bottom, rgba(20, 5, 40, 0.15), rgba(20, 5, 40, 0.55)), url('/hero-2048.png')`,
           backgroundSize: 'cover',
-          backgroundPosition: 'center',
+          backgroundPosition: 'center bottom',
           backgroundRepeat: 'no-repeat',
+          transform: 'translateZ(0)',
+          backfaceVisibility: 'hidden',
+          imageRendering: 'auto',
+          WebkitFontSmoothing: 'antialiased',
         }}
-      >
-      {/* No overlay - full brightness */}
-      </div>
+      />
       <div className="relative z-10">
         <Navbar />
 
       {/* Hero Section */}
-      <section className="relative z-10 pt-32 pb-20 overflow-hidden">
+      {/* Hero Section - Mobile optimized with crisp rendering */}
+      <section 
+        className="relative z-10 overflow-hidden"
+        style={{
+          minHeight: '100vh',
+          padding: 'clamp(24px, 6vw, 64px)',
+          paddingTop: 'clamp(100px, 15vh, 160px)',
+        }}
+      >
         {/* Animated background elements */}
         <div className="absolute inset-0 overflow-hidden">
           <motion.div
