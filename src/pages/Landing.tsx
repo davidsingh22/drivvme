@@ -6,50 +6,44 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
 import landingBg from '@/assets/landing-cityscape-bg.png';
-
-const features = [
-  {
-    icon: TrendingDown,
-    key: 'savings',
-    color: 'text-accent',
-    bgColor: 'bg-accent/10',
-  },
-  {
-    icon: Clock,
-    key: 'fast',
-    color: 'text-primary',
-    bgColor: 'bg-primary/10',
-  },
-  {
-    icon: Shield,
-    key: 'safe',
-    color: 'text-success',
-    bgColor: 'bg-success/10',
-  },
-  {
-    icon: Headphones,
-    key: 'support',
-    color: 'text-warning',
-    bgColor: 'bg-warning/10',
-  },
-];
-
+const features = [{
+  icon: TrendingDown,
+  key: 'savings',
+  color: 'text-accent',
+  bgColor: 'bg-accent/10'
+}, {
+  icon: Clock,
+  key: 'fast',
+  color: 'text-primary',
+  bgColor: 'bg-primary/10'
+}, {
+  icon: Shield,
+  key: 'safe',
+  color: 'text-success',
+  bgColor: 'bg-success/10'
+}, {
+  icon: Headphones,
+  key: 'support',
+  color: 'text-warning',
+  bgColor: 'bg-warning/10'
+}];
 const Landing = () => {
-  const { t } = useLanguage();
-  const { user, isRider, isDriver } = useAuth();
-
-  return (
-    <div className="min-h-screen bg-background relative">
+  const {
+    t
+  } = useLanguage();
+  const {
+    user,
+    isRider,
+    isDriver
+  } = useAuth();
+  return <div className="min-h-screen bg-background relative">
       {/* Full-page background image */}
-      <div 
-        className="fixed inset-0 z-0"
-        style={{
-          backgroundImage: `url(${landingBg})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-        }}
-      >
+      <div className="fixed inset-0 z-0" style={{
+      backgroundImage: `url(${landingBg})`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundRepeat: 'no-repeat'
+    }}>
       {/* No overlay - full brightness */}
       </div>
       <div className="relative z-10">
@@ -59,41 +53,36 @@ const Landing = () => {
       <section className="relative z-10 pt-32 pb-20 overflow-hidden">
         {/* Animated background elements */}
         <div className="absolute inset-0 overflow-hidden">
-          <motion.div
-            className="absolute -top-1/2 -right-1/4 w-[800px] h-[800px] rounded-full bg-primary/5 blur-3xl"
-            animate={{
-              scale: [1, 1.2, 1],
-              opacity: [0.3, 0.5, 0.3],
-            }}
-            transition={{
-              duration: 8,
-              repeat: Infinity,
-              ease: 'easeInOut',
-            }}
-          />
-          <motion.div
-            className="absolute -bottom-1/2 -left-1/4 w-[600px] h-[600px] rounded-full bg-accent/5 blur-3xl"
-            animate={{
-              scale: [1.2, 1, 1.2],
-              opacity: [0.3, 0.5, 0.3],
-            }}
-            transition={{
-              duration: 10,
-              repeat: Infinity,
-              ease: 'easeInOut',
-            }}
-          />
+          <motion.div className="absolute -top-1/2 -right-1/4 w-[800px] h-[800px] rounded-full bg-primary/5 blur-3xl" animate={{
+            scale: [1, 1.2, 1],
+            opacity: [0.3, 0.5, 0.3]
+          }} transition={{
+            duration: 8,
+            repeat: Infinity,
+            ease: 'easeInOut'
+          }} />
+          <motion.div className="absolute -bottom-1/2 -left-1/4 w-[600px] h-[600px] rounded-full bg-accent/5 blur-3xl" animate={{
+            scale: [1.2, 1, 1.2],
+            opacity: [0.3, 0.5, 0.3]
+          }} transition={{
+            duration: 10,
+            repeat: Infinity,
+            ease: 'easeInOut'
+          }} />
         </div>
 
         <div className="container mx-auto px-4 relative">
           <div className="max-w-4xl mx-auto text-center">
             {/* Main headline - elegant subtle glow */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-              className="mb-6"
-            >
+            <motion.div initial={{
+              opacity: 0,
+              y: 20
+            }} animate={{
+              opacity: 1,
+              y: 0
+            }} transition={{
+              duration: 0.6
+            }} className="mb-6">
               <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
                 <span className="text-foreground">
                   Same Ride.
@@ -106,37 +95,36 @@ const Landing = () => {
             </motion.div>
 
             {/* Subheadline - clean white, no glow */}
-            <motion.p
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className="text-xl md:text-2xl text-foreground mb-12 max-w-2xl mx-auto"
-            >
+            <motion.p initial={{
+              opacity: 0,
+              y: 20
+            }} animate={{
+              opacity: 1,
+              y: 0
+            }} transition={{
+              duration: 0.6,
+              delay: 0.2
+            }} className="text-xl md:text-2xl text-foreground mb-12 max-w-2xl mx-auto">
               Cheaper than the competition. Same great rides.
             </motion.p>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.4 }}
-              className="flex flex-col sm:flex-row gap-4 justify-center mb-16"
-            >
-              <Button
-                asChild
-                size="lg"
-                className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group btn-dark-glow"
-              >
+            <motion.div initial={{
+              opacity: 0,
+              y: 20
+            }} animate={{
+              opacity: 1,
+              y: 0
+            }} transition={{
+              duration: 0.6,
+              delay: 0.4
+            }} className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
+              <Button asChild size="lg" className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group btn-dark-glow">
                 <Link to={user ? "/ride" : "/login"}>
                   {t('hero.cta.rider')}
                   <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
                 </Link>
               </Button>
-              <Button
-                asChild
-                size="lg"
-                variant="outline"
-                className="text-lg px-8 py-6 rounded-xl border-2 hover:bg-primary/10 hover:border-primary btn-purple-glow"
-              >
+              <Button asChild size="lg" variant="outline" className="text-lg px-8 py-6 rounded-xl border-2 hover:bg-primary/10 hover:border-primary btn-purple-glow">
                 <Link to={user && isDriver ? "/driver" : "/login"}>
                   <Car className="mr-2 h-5 w-5" />
                   Driver Login
@@ -152,27 +140,16 @@ const Landing = () => {
       <section className="pt-6 pb-10 bg-card">
         <div className="container mx-auto px-4">
           {/* Canadian Pride Badge - Powerful Layout */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="flex items-center justify-center mb-6"
-          >
-            <div className="flex items-center gap-2 px-6 py-4 rounded-2xl canadian-badge-glow bg-gradient-to-r from-black/80 via-black/90 to-black/80 border border-primary/30">
-              {/* Car Icon next to Drivveme */}
-              <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shadow-button flex-shrink-0">
-                <Car className="h-5 w-5 text-primary-foreground" />
-              </div>
-              {/* Text - All on one line with proper spacing */}
-              <span className="text-lg md:text-xl font-bold text-white canadian-pride-strong whitespace-nowrap">
-                Drivveme is a Canadian-owned
-              </span>
-              {/* Flag next to "owned" */}
-              <span className="text-2xl md:text-3xl flag-wave flex-shrink-0">🇨🇦</span>
-              <span className="text-lg md:text-xl font-bold text-white canadian-pride-strong whitespace-nowrap">
-                company.
-              </span>
-            </div>
+          <motion.div initial={{
+            opacity: 0,
+            y: 20
+          }} whileInView={{
+            opacity: 1,
+            y: 0
+          }} viewport={{
+            once: true
+          }} className="flex items-center justify-center mb-6">
+            
           </motion.div>
         </div>
       </section>
@@ -181,15 +158,18 @@ const Landing = () => {
       <section className="py-16 bg-card">
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {features.map((feature, index) => (
-              <motion.div
-                key={feature.key}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: index * 0.1 }}
-                className="p-6 rounded-2xl bg-background border border-border hover:border-primary/50 transition-colors group"
-              >
+            {features.map((feature, index) => <motion.div key={feature.key} initial={{
+              opacity: 0,
+              y: 20
+            }} whileInView={{
+              opacity: 1,
+              y: 0
+            }} viewport={{
+              once: true
+            }} transition={{
+              duration: 0.5,
+              delay: index * 0.1
+            }} className="p-6 rounded-2xl bg-background border border-border hover:border-primary/50 transition-colors group">
                 <div className={`w-14 h-14 rounded-xl ${feature.bgColor} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform`}>
                   <feature.icon className={`w-7 h-7 ${feature.color}`} />
                 </div>
@@ -199,8 +179,7 @@ const Landing = () => {
                 <p className="text-muted-foreground">
                   {t(`features.${feature.key}.desc`)}
                 </p>
-              </motion.div>
-            ))}
+              </motion.div>)}
           </div>
         </div>
       </section>
@@ -208,46 +187,48 @@ const Landing = () => {
       {/* How it works Section */}
       <section className="py-20">
         <div className="container mx-auto px-4">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            className="text-center mb-16"
-          >
+          <motion.div initial={{
+            opacity: 0,
+            y: 20
+          }} whileInView={{
+            opacity: 1,
+            y: 0
+          }} viewport={{
+            once: true
+          }} className="text-center mb-16">
             <h2 className="font-display text-4xl md:text-5xl font-bold mb-4">
               How it <span className="text-gradient">works</span>
             </h2>
           </motion.div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
-            {[
-              {
-                step: '01',
-                title: 'Enter destination',
-                desc: 'Tell us where you want to go',
-                icon: MapPin,
-              },
-              {
-                step: '02',
-                title: 'Get matched',
-                desc: 'We find you the nearest driver',
-                icon: Car,
-              },
-              {
-                step: '03',
-                title: 'Enjoy the ride',
-                desc: 'Sit back and save money',
-                icon: TrendingDown,
-              },
-            ].map((item, index) => (
-              <motion.div
-                key={item.step}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: index * 0.15 }}
-                className="text-center"
-              >
+            {[{
+              step: '01',
+              title: 'Enter destination',
+              desc: 'Tell us where you want to go',
+              icon: MapPin
+            }, {
+              step: '02',
+              title: 'Get matched',
+              desc: 'We find you the nearest driver',
+              icon: Car
+            }, {
+              step: '03',
+              title: 'Enjoy the ride',
+              desc: 'Sit back and save money',
+              icon: TrendingDown
+            }].map((item, index) => <motion.div key={item.step} initial={{
+              opacity: 0,
+              y: 20
+            }} whileInView={{
+              opacity: 1,
+              y: 0
+            }} viewport={{
+              once: true
+            }} transition={{
+              duration: 0.5,
+              delay: index * 0.15
+            }} className="text-center">
                 <div className="relative inline-block mb-6">
                   <span className="font-display text-8xl font-bold text-primary/10">
                     {item.step}
@@ -264,8 +245,7 @@ const Landing = () => {
                 <p className="text-muted-foreground">
                   {item.desc}
                 </p>
-              </motion.div>
-            ))}
+              </motion.div>)}
           </div>
         </div>
       </section>
@@ -273,23 +253,22 @@ const Landing = () => {
       {/* CTA Section */}
       <section className="py-20 gradient-primary">
         <div className="container mx-auto px-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            whileInView={{ opacity: 1, scale: 1 }}
-            viewport={{ once: true }}
-            className="text-center max-w-3xl mx-auto"
-          >
+          <motion.div initial={{
+            opacity: 0,
+            scale: 0.95
+          }} whileInView={{
+            opacity: 1,
+            scale: 1
+          }} viewport={{
+            once: true
+          }} className="text-center max-w-3xl mx-auto">
             <h2 className="font-display text-4xl md:text-5xl font-bold text-primary-foreground mb-6">
               Ready to save on every ride?
             </h2>
             <p className="text-xl text-primary-foreground/80 mb-8">
               Join thousands of riders already saving money with Drivveme
             </p>
-            <Button
-              asChild
-              size="lg"
-              className="bg-background text-foreground hover:bg-background/90 text-lg px-8 py-6 rounded-xl"
-            >
+            <Button asChild size="lg" className="bg-background text-foreground hover:bg-background/90 text-lg px-8 py-6 rounded-xl">
               <Link to="/signup">
                 Get Started Free
                 <ArrowRight className="ml-2 h-5 w-5" />
@@ -317,8 +296,6 @@ const Landing = () => {
         </div>
       </footer>
       </div>
-    </div>
-  );
+    </div>;
 };
-
 export default Landing;
