@@ -158,18 +158,18 @@ const Landing = () => {
             viewport={{ once: true }}
             className="flex items-center justify-center mb-6"
           >
-            <div className="flex flex-wrap items-center justify-center gap-2 px-4 py-3 md:px-6 md:py-4 rounded-2xl canadian-badge-glow bg-gradient-to-r from-black/80 via-black/90 to-black/80 border border-primary/30 max-w-[95vw]">
+            <div className="flex items-center gap-2 px-6 py-4 rounded-2xl canadian-badge-glow bg-gradient-to-r from-black/80 via-black/90 to-black/80 border border-primary/30">
               {/* Car Icon next to Drivveme */}
-              <div className="h-7 w-7 md:h-8 md:w-8 rounded-lg gradient-primary flex items-center justify-center shadow-button flex-shrink-0">
-                <Car className="h-4 w-4 md:h-5 md:w-5 text-primary-foreground" />
+              <div className="h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shadow-button flex-shrink-0">
+                <Car className="h-5 w-5 text-primary-foreground" />
               </div>
-              {/* Text - Wraps on mobile */}
-              <span className="text-base md:text-xl font-bold text-white canadian-pride-strong">
+              {/* Text - All on one line with proper spacing */}
+              <span className="text-lg md:text-xl font-bold text-white canadian-pride-strong whitespace-nowrap">
                 Drivveme is a Canadian-owned
               </span>
-              {/* Flag */}
-              <span className="text-xl md:text-3xl flag-wave flex-shrink-0">🇨🇦</span>
-              <span className="text-base md:text-xl font-bold text-white canadian-pride-strong">
+              {/* Flag next to "owned" */}
+              <span className="text-2xl md:text-3xl flag-wave flex-shrink-0">🇨🇦</span>
+              <span className="text-lg md:text-xl font-bold text-white canadian-pride-strong whitespace-nowrap">
                 company.
               </span>
             </div>
