@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Car, Clock, Shield, Headphones, TrendingDown, MapPin, ArrowRight } from 'lucide-react';
@@ -5,7 +6,9 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
+import PasscodeGate from '@/components/signup/PasscodeGate';
 import landingBg from '@/assets/landing-cityscape-bg.png';
+
 const features = [{
   icon: TrendingDown,
   key: 'savings',
@@ -27,7 +30,9 @@ const features = [{
   color: 'text-warning',
   bgColor: 'bg-warning/10'
 }];
+
 const Landing = () => {
+  const [isUnlocked, setIsUnlocked] = useState(false);
   const {
     t
   } = useLanguage();
@@ -36,6 +41,11 @@ const Landing = () => {
     isRider,
     isDriver
   } = useAuth();
+
+  if (!isUnlocked) {
+    return <PasscodeGate onUnlock={() => setIsUnlocked(true)} />;
+  }
+
   return <div className="min-h-screen bg-background relative">
       {/* Full-page background image */}
       <div className="fixed inset-0 z-0" style={{

@@ -19,13 +19,11 @@ import ApplicationReviewPage from '@/components/signup/ApplicationReviewPage';
 import RiderDisclosure from '@/components/signup/RiderDisclosure';
 import RiderMarketingPanel from '@/components/signup/RiderMarketingPanel';
 import DriverMarketingPanel from '@/components/signup/DriverMarketingPanel';
-import PasscodeGate from '@/components/signup/PasscodeGate';
 import { useToast } from '@/hooks/use-toast';
 
 type DriverSignupStep = 'info' | 'agreement' | 'review';
 
 const Signup = () => {
-  const [isUnlocked, setIsUnlocked] = useState(false);
   const { t } = useLanguage();
   const { signUp, isLoading } = useAuth();
   const navigate = useNavigate();
@@ -365,10 +363,6 @@ const Signup = () => {
     setError('');
   }, [role]);
 
-  // Render passcode gate if not unlocked
-  if (!isUnlocked) {
-    return <PasscodeGate onUnlock={() => setIsUnlocked(true)} />;
-  }
 
   // Render driver agreement step
   if (role === 'driver' && driverStep === 'agreement') {
