@@ -50,7 +50,7 @@ const TEST_ACCOUNTS = ['alsenesa@hotmail.com'];
 
 // Limited test accounts - bypass payment for a limited number of rides
 const LIMITED_TEST_ACCOUNTS: Record<string, number> = {
-  // No limited test accounts currently configured
+  'sean.mcturk@outlook.com': 3,
 };
 
 // Get remaining free rides for a limited test account
