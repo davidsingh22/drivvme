@@ -432,14 +432,13 @@ const Signup = () => {
         <LanguageToggle />
       </div>
 
-      {/* Main Content - Side by Side Layout */}
-      <div className="flex-1 flex items-stretch justify-center p-4 gap-0 lg:gap-1 xl:gap-2">
-        {/* Marketing Panel - Hidden on mobile, shown on lg+ */}
+      {/* Main Content - Responsive Layout */}
+      <div className="flex-1 flex flex-col lg:flex-row items-center lg:items-stretch justify-center p-4 gap-4 lg:gap-6 xl:gap-8">
+        {/* Marketing Panel - Shown on ALL screens */}
         <motion.div
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="hidden lg:flex lg:w-[520px] xl:w-[580px] flex-shrink-0 my-auto"
-          style={{ minHeight: '600px' }}
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md lg:max-w-none lg:w-[480px] xl:w-[520px] flex-shrink-0"
         >
           {role === 'rider' ? <RiderMarketingPanel /> : <DriverMarketingPanel />}
         </motion.div>
@@ -448,7 +447,7 @@ const Signup = () => {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-md flex-shrink-0 my-auto"
+          className="w-full max-w-md flex-shrink-0"
         >
           <div className="bg-card rounded-2xl p-8 shadow-card border border-border">
             <h1 className="font-display text-3xl font-bold text-center mb-2">
