@@ -57,6 +57,12 @@
     --gradient-card: linear-gradient(180deg, hsl(240, 10%, 8%), hsl(240, 10%, 4%));
     --gradient-hero: linear-gradient(135deg, hsl(271, 91%, 15%), hsl(240, 10%, 3.9%));
 
+    /* Signup marketing panel */
+    --signup-panel-top: 271 65% 12%;
+    --signup-panel-mid: 271 55% 20%;
+    --signup-panel-bottom: 271 50% 32%;
+    --signup-panel-sparkle: 0 0% 100%;
+
     /* Shadows */
     --shadow-glow: 0 0 40px hsl(271 91% 65% / 0.3);
     --shadow-card: 0 4px 24px hsl(0 0% 0% / 0.4);
@@ -159,6 +165,24 @@
 
   .gradient-hero {
     background: var(--gradient-hero);
+  }
+
+  .signup-panel-bg {
+    background:
+      radial-gradient(900px 380px at 18% 14%, hsl(var(--primary) / 0.20), transparent 60%),
+      radial-gradient(700px 300px at 90% 30%, hsl(var(--accent) / 0.08), transparent 62%),
+      linear-gradient(180deg, hsl(var(--signup-panel-top)), hsl(var(--signup-panel-mid)) 55%, hsl(var(--signup-panel-bottom)));
+  }
+
+  .signup-panel-sparkles {
+    background-image:
+      radial-gradient(1px 1px at 10% 20%, hsl(var(--signup-panel-sparkle) / 0.85), transparent),
+      radial-gradient(1px 1px at 30% 40%, hsl(var(--signup-panel-sparkle) / 0.65), transparent),
+      radial-gradient(2px 2px at 50% 10%, hsl(var(--signup-panel-sparkle) / 0.45), transparent),
+      radial-gradient(1px 1px at 70% 60%, hsl(var(--signup-panel-sparkle) / 0.75), transparent),
+      radial-gradient(1px 1px at 90% 30%, hsl(var(--signup-panel-sparkle) / 0.55), transparent),
+      radial-gradient(2px 2px at 15% 80%, hsl(var(--signup-panel-sparkle) / 0.35), transparent),
+      radial-gradient(1px 1px at 85% 85%, hsl(var(--signup-panel-sparkle) / 0.65), transparent);
   }
 
   .shadow-glow {
