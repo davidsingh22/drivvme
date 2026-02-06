@@ -17,6 +17,8 @@ import CriminalRecordQuestion from '@/components/signup/CriminalRecordQuestion';
 import DriverAgreement from '@/components/signup/DriverAgreement';
 import ApplicationReviewPage from '@/components/signup/ApplicationReviewPage';
 import RiderDisclosure from '@/components/signup/RiderDisclosure';
+import RiderMarketingPanel from '@/components/signup/RiderMarketingPanel';
+import DriverMarketingPanel from '@/components/signup/DriverMarketingPanel';
 import { useToast } from '@/hooks/use-toast';
 
 type DriverSignupStep = 'info' | 'agreement' | 'review';
@@ -430,12 +432,22 @@ const Signup = () => {
         <LanguageToggle />
       </div>
 
-      {/* Form */}
-      <div className="flex-1 flex items-center justify-center p-4">
+      {/* Main Content - Side by Side Layout */}
+      <div className="flex-1 flex items-stretch justify-center p-4 gap-6 lg:px-12 xl:px-24">
+        {/* Marketing Panel - Hidden on mobile, shown on lg+ */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          className="hidden lg:block lg:w-[500px] xl:w-[550px] flex-shrink-0"
+        >
+          {role === 'rider' ? <RiderMarketingPanel /> : <DriverMarketingPanel />}
+        </motion.div>
+
+        {/* Form */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="w-full max-w-md"
+          className="w-full max-w-md flex-shrink-0"
         >
           <div className="bg-card rounded-2xl p-8 shadow-card border border-border">
             <h1 className="font-display text-3xl font-bold text-center mb-2">
@@ -665,6 +677,25 @@ const Signup = () => {
           </div>
         </motion.div>
       </div>
+
+      {/* Driver tagline footer - only on desktop when driver selected */}
+      {role === 'driver' && (
+        <div className="hidden lg:block text-center pb-6">
+          <p className="text-lg text-muted-foreground">
+            {t('auth.driversAreIndependent') || 'Drivers Are'}{' '}
+            <span className="text-primary font-semibold">{t('auth.independentContractors') || 'Independent'}</span>{' '}
+            {t('auth.contractorsNotEmployees') || 'Contractors, Not Employees.'}
+          </p>
+          <p className="text-xl font-bold mt-2">
+            {t('auth.driveWithConfidence') || 'Drive With'}{' '}
+            <span className="text-primary">{t('auth.confidence') || 'Confidence.'}</span>
+          </p>
+          <p className="text-xl font-bold">
+            {t('auth.driveWithRespect') || 'Drive With'}{' '}
+            <span className="text-primary">{t('auth.respect') || 'Respect.'}</span>
+          </p>
+        </div>
+      )}
     </div>
   );
 };
