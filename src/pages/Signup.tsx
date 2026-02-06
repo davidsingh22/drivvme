@@ -433,12 +433,12 @@ const Signup = () => {
       </div>
 
       {/* Main Content - Side by Side Layout */}
-      <div className="flex-1 flex items-stretch justify-center p-4 gap-6 lg:px-12 xl:px-24">
-        {/* Marketing Panel - Hidden on mobile, shown on lg+ */}
+      <div className="flex-1 flex items-stretch justify-center p-4 gap-6 md:px-8 lg:px-12 xl:px-24">
+        {/* Marketing Panel - Hidden on mobile, shown on md+ */}
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="hidden lg:block lg:w-[500px] xl:w-[550px] flex-shrink-0"
+          className="hidden md:block md:w-[400px] lg:w-[500px] xl:w-[550px] flex-shrink-0"
         >
           {role === 'rider' ? <RiderMarketingPanel /> : <DriverMarketingPanel />}
         </motion.div>
