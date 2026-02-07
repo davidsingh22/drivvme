@@ -9,12 +9,45 @@ type AlertSoundOptions = {
   loopInterval?: number;
 };
 
+// Tiny WAV beep as base64 data-URI — guaranteed to play without user gesture on most browsers
+const BEEP_WAV_URI = (() => {
+  // Generate a simple 440Hz beep WAV (0.15s, 8kHz mono 8-bit)
+  const sampleRate = 8000;
+  const duration = 0.15;
+  const numSamples = Math.floor(sampleRate * duration);
+  const dataSize = numSamples;
+  const fileSize = 44 + dataSize;
+  const buf = new ArrayBuffer(fileSize);
+  const view = new DataView(buf);
+  const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, fileSize - 8, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true); // 8-bit
+  writeStr(36, 'data');
+  view.setUint32(40, dataSize, true);
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    const sample = Math.sin(2 * Math.PI * 880 * t) * 0.8; // 880Hz
+    view.setUint8(44 + i, Math.floor((sample + 1) * 127.5));
+  }
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return 'data:audio/wav;base64,' + btoa(binary);
+})();
+
 /**
  * LOUD alert sound using WebAudio (no asset files).
- * Designed to be attention-grabbing for driver notifications.
+ * Falls back to HTML5 Audio with inline WAV when WebAudio is blocked (no user gesture).
  * Supports looping for persistent alerts that require user action to dismiss.
- *
- * startBeep() / stopBeep() guarantee exactly one interval at a time.
  */
 export function useAlertSound(options: AlertSoundOptions = {}) {
   const volume = options.volume ?? 0.8;
@@ -25,18 +58,15 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   const unlockedRef = useRef(false);
   const loopingRef = useRef(false);
   const loopIntervalIdRef = useRef<number | null>(null);
+  // HTML5 Audio fallback pool for when WebAudio is blocked
+  const fallbackAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const getOrCreateContext = useCallback(() => {
     if (ctxRef.current) return ctxRef.current;
-
     const AudioContextCtor = (window.AudioContext || (window as any).webkitAudioContext) as
       | (new () => AudioContext)
       | undefined;
-    if (!AudioContextCtor) {
-      console.warn('[AlertSound] WebAudio not supported');
-      return null;
-    }
-
+    if (!AudioContextCtor) return null;
     ctxRef.current = new AudioContextCtor();
     return ctxRef.current;
   }, []);
@@ -44,14 +74,8 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   const unlock = useCallback(async () => {
     const ctx = getOrCreateContext();
     if (!ctx) return false;
-
     try {
-      // Always attempt resume — iOS may suspend at any time
-      if (ctx.state === "suspended") {
-        await ctx.resume();
-      }
-
-      // Play a silent tone to fully unlock the audio pipeline on iOS
+      if (ctx.state === "suspended") await ctx.resume();
       if (ctx.state === "running") {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -62,7 +86,6 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
         osc.stop(ctx.currentTime + 0.01);
         unlockedRef.current = true;
       }
-
       return unlockedRef.current;
     } catch {
       return false;
@@ -79,7 +102,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     };
   }, [unlock]);
 
-  // Hard cleanup on unmount — kill any running interval
+  // Hard cleanup on unmount
   useEffect(() => {
     return () => {
       loopingRef.current = false;
@@ -87,26 +110,33 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
         clearInterval(loopIntervalIdRef.current);
         loopIntervalIdRef.current = null;
       }
+      if (fallbackAudioRef.current) {
+        try { fallbackAudioRef.current.pause(); } catch {}
+        fallbackAudioRef.current = null;
+      }
     };
   }, []);
 
-  const playOnce = useCallback(async () => {
-    // Always try to unlock + resume before playing
+  /** Play using HTML5 Audio fallback (works without user gesture on many mobile browsers) */
+  const playFallbackBeep = useCallback(() => {
+    try {
+      const audio = new Audio(BEEP_WAV_URI);
+      audio.volume = Math.min(volume, 1);
+      fallbackAudioRef.current = audio;
+      audio.play().catch(() => {
+        // Even fallback blocked — nothing more we can do
+        console.warn('[AlertSound] Fallback audio also blocked');
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [volume]);
+
+  const playWebAudio = useCallback(async () => {
     await unlock();
-
     const ctx = ctxRef.current;
-    if (!ctx) return false;
-
-    // Aggressive resume: try multiple times on iOS
-    if (ctx.state === "suspended") {
-      try { await ctx.resume(); } catch { /* */ }
-    }
-    if (ctx.state === "suspended") {
-      // Second attempt after a micro-delay
-      await new Promise(r => setTimeout(r, 50));
-      try { await ctx.resume(); } catch { /* */ }
-    }
-    if (ctx.state !== "running") return false;
+    if (!ctx || ctx.state !== "running") return false;
 
     const now = ctx.currentTime;
     const master = ctx.createGain();
@@ -137,16 +167,25 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     return true;
   }, [unlock, volume]);
 
+  /** Play once — tries WebAudio first, falls back to HTML5 Audio */
+  const playOnce = useCallback(async () => {
+    const webAudioOk = await playWebAudio();
+    if (!webAudioOk) {
+      // WebAudio blocked (no user gesture) — use HTML5 Audio fallback
+      playFallbackBeep();
+    }
+    return true;
+  }, [playWebAudio, playFallbackBeep]);
+
   /** Start beeping. Kills any existing beep first. */
   const play = useCallback(async () => {
-    // Always kill existing loop first
     loopingRef.current = false;
     if (loopIntervalIdRef.current) {
       clearInterval(loopIntervalIdRef.current);
       loopIntervalIdRef.current = null;
     }
 
-    const result = await playOnce();
+    await playOnce();
 
     if (loop) {
       loopingRef.current = true;
@@ -162,7 +201,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
       }, loopInterval);
     }
 
-    return result;
+    return true;
   }, [playOnce, loop, loopInterval]);
 
   /** Stop beeping immediately. Safe to call multiple times. */
@@ -171,6 +210,11 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     if (loopIntervalIdRef.current) {
       clearInterval(loopIntervalIdRef.current);
       loopIntervalIdRef.current = null;
+    }
+    // Also kill any fallback audio
+    if (fallbackAudioRef.current) {
+      try { fallbackAudioRef.current.pause(); } catch {}
+      fallbackAudioRef.current = null;
     }
   }, []);
 
