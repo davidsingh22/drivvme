@@ -537,10 +537,9 @@ const DriverNavigationMap = ({
           <p className="text-xs text-white truncate flex-1">{destination.address}</p>
         </div>
 
-        {/* Action buttons - status-aware, always clickable */}
+        {/* Action buttons - ALL 4 always visible and clickable */}
         <div className="space-y-2">
-          {/* I've Arrived - when driver_assigned or driver_en_route */}
-          {onArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
+          {onArrived && (
             <Button
               className="w-full h-12 text-base font-bold text-white touch-manipulation"
               style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
@@ -551,8 +550,7 @@ const DriverNavigationMap = ({
             </Button>
           )}
 
-          {/* Start Ride - when arrived */}
-          {onStartRide && rideStatus === 'arrived' && (
+          {onStartRide && (
             <Button
               className="w-full h-12 text-base font-bold bg-green-600 hover:bg-green-700 text-white touch-manipulation"
               onClick={onStartRide}
@@ -562,8 +560,7 @@ const DriverNavigationMap = ({
             </Button>
           )}
 
-          {/* Complete Ride - when in_progress */}
-          {onCompleteRide && rideStatus === 'in_progress' && (
+          {onCompleteRide && (
             <Button
               className="w-full h-12 text-base font-bold bg-green-600 hover:bg-green-700 text-white touch-manipulation"
               onClick={onCompleteRide}
@@ -571,34 +568,6 @@ const DriverNavigationMap = ({
               <CheckCircle className="h-5 w-5 mr-2" />
               {language === 'fr' ? "Terminer la course" : "Complete Ride"}
             </Button>
-          )}
-
-          {/* Fallback: show all if status is unexpected */}
-          {onArrived && onStartRide && onCompleteRide && !['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(rideStatus || '') && (
-            <>
-              <Button
-                className="w-full h-12 text-base font-bold text-white touch-manipulation"
-                style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
-                onClick={onArrived}
-              >
-                <MapPin className="h-5 w-5 mr-2" />
-                {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
-              </Button>
-              <Button
-                className="w-full h-12 text-base font-bold bg-green-600 hover:bg-green-700 text-white touch-manipulation"
-                onClick={onStartRide}
-              >
-                <PlayCircle className="h-5 w-5 mr-2" />
-                {language === 'fr' ? "Démarrer la course" : "Start Ride"}
-              </Button>
-              <Button
-                className="w-full h-12 text-base font-bold bg-green-600 hover:bg-green-700 text-white touch-manipulation"
-                onClick={onCompleteRide}
-              >
-                <CheckCircle className="h-5 w-5 mr-2" />
-                {language === 'fr' ? "Terminer la course" : "Complete Ride"}
-              </Button>
-            </>
           )}
 
           {/* Exit + Mute + Recenter row */}
@@ -632,7 +601,6 @@ const DriverNavigationMap = ({
             )}
           </div>
 
-          {/* Cancel Ride - always visible */}
           {onCancelRide && (
             <Button
               variant="destructive"
