@@ -85,6 +85,54 @@ const RiderLocationTracker = () => {
   return null;
 };
 
+// /driver is a driver screen. Riders should always be redirected to /ride.
+const DriverRoute = () => {
+  const { session, authLoading, isDriver } = useAuth();
+  const navigate = useNavigate();
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!session?.user?.id) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        // Fast path: context already knows
+        if (isDriver) {
+          if (!cancelled) setChecked(true);
+          return;
+        }
+
+        // Hard guarantee: backend role check
+        const { data } = await supabase.rpc('is_driver', { _user_id: session.user.id });
+        if (cancelled) return;
+        if (!data) {
+          navigate('/ride', { replace: true });
+          return;
+        }
+      } finally {
+        if (!cancelled) setChecked(true);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [authLoading, session?.user?.id, isDriver, navigate]);
+
+  if (authLoading || (session?.user?.id && !checked)) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Loading…</div>
+      </div>
+    );
+  }
+
+  return <DriverDashboard />;
+};
+
 // Wrapped inside BrowserRouter AND AuthProvider to ensure context is available.
 const AppRoutes = () => {
   return (
@@ -101,7 +149,7 @@ const AppRoutes = () => {
           path="/driver"
           element={
             <RouteErrorBoundary title="Driver dashboard error">
-              <DriverDashboard />
+              <DriverRoute />
             </RouteErrorBoundary>
           }
         />
