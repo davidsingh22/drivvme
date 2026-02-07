@@ -815,7 +815,7 @@ const DriverDashboard = () => {
       <RideOfferModal
         open={newRideAlertOpen}
         ride={alertRide}
-        countdownSeconds={45}
+        countdownSeconds={30}
         driverLocation={driverLocation}
         onDecline={() => {
           setNewRideAlertOpen(false);
