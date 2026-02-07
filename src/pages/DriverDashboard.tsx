@@ -15,7 +15,7 @@ import DriverProfileModal from '@/components/DriverProfileModal';
 import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
-import { useDriverIncomingRideBeep } from '@/hooks/useDriverIncomingRideBeep';
+import DriverBeepFix from '@/components/DriverBeepFix';
 import { RideOfferModal } from '@/components/RideOfferModal';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { DriverWakeLockBanner } from '@/components/DriverWakeLockBanner';
@@ -146,8 +146,6 @@ const DriverDashboard = () => {
   // Sync GPS position to local state for map
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
   
-  // Beep is driven entirely by whether newRideAlertRideId is set
-  const { stopBeep } = useDriverIncomingRideBeep(newRideAlertOpen ? newRideAlertRideId : null);
   const alertStartTimeRef = useRef<number | null>(null);
 
   // Helper function for distance calculation (must be defined before any hooks that call it)
@@ -627,7 +625,6 @@ const DriverDashboard = () => {
   const updateRideStatus = async (status: string) => {
     if (!currentRide || !user || busyAction) return;
 
-    stopBeep();
     setBusyAction(status);
 
     // Optimistic update — instant UI feedback
@@ -691,7 +688,7 @@ const DriverDashboard = () => {
   const cancelRide = async () => {
     if (!currentRide || !user || busyAction) return;
 
-    stopBeep();
+    // Beep stops automatically when newRideAlertOpen is cleared
     setBusyAction('cancel');
 
     // Optimistic: clear ride immediately
@@ -730,7 +727,7 @@ const DriverDashboard = () => {
     }
   };
 
-  // No unlock needed — the beep hook handles playback directly
+  // Beep is handled by DriverBeepFix component in render
 
   // Use subtotal_before_tax for fee calculation (excludes taxes which riders pay)
   const currentRideFareForFee = currentRide ? (currentRide.subtotal_before_tax ?? currentRide.estimated_fare) : 0;
@@ -785,6 +782,17 @@ const DriverDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
+
+      <DriverBeepFix
+        incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
+        onTimeout={() => {
+          setNewRideAlertOpen(false);
+          setCachedAlertRide(null);
+          setNewRideAlertRideId(null);
+          alertStartTimeRef.current = null;
+        }}
+        timeoutSeconds={25}
+      />
 
       <RideOfferModal
         open={newRideAlertOpen}
