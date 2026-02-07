@@ -321,12 +321,11 @@ const DriverDashboard = () => {
     return () => clearTimeout(timer);
   }, [session?.user?.id]);
 
-  // Initialize driver status
+  // Initialize driver status — always start offline on login/load
   useEffect(() => {
-    if (driverProfile) {
-      setIsOnline(driverProfile.is_online);
-    }
-  }, [driverProfile]);
+    // Don't sync from DB; driver must manually go online each session
+    setIsOnline(false);
+  }, []);
 
   // Restore active ride on page load (critical for iOS resume / page refresh)
   // NOTE: use the session user id (more reliable than the derived `user` field in edge cases)
@@ -831,24 +830,6 @@ const DriverDashboard = () => {
               followDriver={!!currentRide}
           />
           
-          {/* Online/Offline Toggle Overlay */}
-          <div className="absolute top-4 left-4 right-4">
-            <Card className={`p-4 flex items-center justify-between ${isOnline ? 'border-success/50 bg-success/5' : 'border-muted'}`}>
-              <div className="flex items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-success animate-pulse' : 'bg-muted-foreground'}`} />
-                <span className="font-medium">
-                  {isOnline ? t('driver.goOffline') : t('driver.goOnline')}
-                </span>
-              </div>
-              <Switch
-                checked={isOnline}
-                onCheckedChange={async () => {
-                  await toggleOnlineStatus();
-                }}
-                className="data-[state=checked]:bg-success"
-              />
-            </Card>
-          </div>
 
           {/* Floating Complete Ride Button removed - buttons now in Active Ride panel */}
         </div>
