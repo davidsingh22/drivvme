@@ -55,6 +55,8 @@ export function RideOfferModal({
   const [timeLeft, setTimeLeft] = useState(countdownSeconds);
   const [showUberShimmer, setShowUberShimmer] = useState(true);
   const timerRef = useRef<number | null>(null);
+  const onDeclineRef = useRef(onDecline);
+  onDeclineRef.current = onDecline;
 
   // Calculate distance from driver to pickup using passed driverLocation
   const driverDistanceKm = useMemo(() => {
@@ -77,7 +79,7 @@ export function RideOfferModal({
     }
   }, [open, ride?.id, countdownSeconds]);
 
-  // Countdown timer
+  // Countdown timer — use ref for onDecline to avoid restarting interval on every render
   useEffect(() => {
     if (!open) return;
 
@@ -85,7 +87,7 @@ export function RideOfferModal({
       setTimeLeft((prev) => {
         if (prev <= 1) {
           if (timerRef.current) clearInterval(timerRef.current);
-          onDecline();
+          onDeclineRef.current();
           return 0;
         }
         return prev - 1;
@@ -95,7 +97,7 @@ export function RideOfferModal({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [open, onDecline]);
+  }, [open]);
 
   // Uber shimmer only twice then remove class
   useEffect(() => {
