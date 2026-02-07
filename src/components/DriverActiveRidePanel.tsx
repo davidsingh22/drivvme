@@ -585,30 +585,61 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           </span>
         </div>
 
-        {/* ===== 3 ACTION BUTTONS ===== */}
+        {/* ===== STATUS-AWARE ACTION BUTTONS ===== */}
         <div className="space-y-3">
-          {/* 1. Start Navigation - Purple */}
+          {/* Open GPS Navigation - Always available */}
           <Button
             className="w-full py-6 text-lg font-bold bg-primary hover:bg-primary/90 rounded-xl"
             onClick={() => setShowNavigation(true)}
           >
             <Map className="h-6 w-6 mr-2" />
-            {language === 'fr' ? 'Démarrer Navigation' : 'Start Navigation'}
+            {language === 'fr' ? 'Ouvrir Navigation GPS' : 'Open GPS Navigation'}
           </Button>
 
-          {/* 2. Complete Ride - Green */}
-          <Button
-            className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl"
-            onClick={endRide}
-            disabled={isUpdating}
-          >
-            <CheckCircle className="h-6 w-6 mr-2" />
-            {isUpdating 
-              ? (language === 'fr' ? 'Finalisation...' : 'Completing...') 
-              : (language === 'fr' ? 'Terminer la course' : 'Complete Ride')}
-          </Button>
+          {/* I've Arrived - Show when driver_assigned or driver_en_route */}
+          {(activeRide.status === 'driver_assigned' || activeRide.status === 'driver_en_route') && (
+            <Button
+              className="w-full py-6 text-lg font-bold rounded-xl"
+              style={{ backgroundColor: 'hsl(45, 93%, 47%)', color: 'hsl(0, 0%, 10%)' }}
+              onClick={markArrived}
+              disabled={isUpdating}
+            >
+              <CheckCircle className="h-6 w-6 mr-2" />
+              {isUpdating
+                ? (language === 'fr' ? 'Mise à jour...' : 'Updating...')
+                : (language === 'fr' ? 'Je suis arrivé' : "I've Arrived")}
+            </Button>
+          )}
 
-          {/* 3. Cancel Ride - Yellow-Green */}
+          {/* Start Ride - Show when arrived */}
+          {activeRide.status === 'arrived' && (
+            <Button
+              className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl"
+              onClick={startRide}
+              disabled={isUpdating}
+            >
+              <PlayCircle className="h-6 w-6 mr-2" />
+              {isUpdating
+                ? (language === 'fr' ? 'Démarrage...' : 'Starting...')
+                : (language === 'fr' ? 'Démarrer la course' : 'Start Ride')}
+            </Button>
+          )}
+
+          {/* Complete Ride - Show when in_progress */}
+          {activeRide.status === 'in_progress' && (
+            <Button
+              className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl"
+              onClick={endRide}
+              disabled={isUpdating}
+            >
+              <CheckCircle className="h-6 w-6 mr-2" />
+              {isUpdating 
+                ? (language === 'fr' ? 'Finalisation...' : 'Completing...') 
+                : (language === 'fr' ? 'Terminer la course' : 'Complete Ride')}
+            </Button>
+          )}
+
+          {/* Cancel Ride - Always available */}
           <Button
             className="w-full py-6 text-lg font-bold rounded-xl"
             style={{ backgroundColor: 'hsl(75, 80%, 50%)', color: 'hsl(0, 0%, 10%)' }}
