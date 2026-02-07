@@ -182,60 +182,67 @@ const Navbar = () => {
           </button>
         </div>
 
-        {/* Mobile Navigation */}
-        {isOpen && <motion.div initial={{
-        opacity: 0,
-        height: 0
-      }} animate={{
-        opacity: 1,
-        height: 'auto'
-      }} exit={{
-        opacity: 0,
-        height: 0
-      }} className="md:hidden py-4 border-t border-border">
-            <div className="flex flex-col gap-4">
+        {/* Mobile Navigation - Full screen overlay to capture all touches */}
+        {isOpen && <>
+          {/* Backdrop to close menu */}
+          <div 
+            className="fixed inset-0 z-40 bg-black/50 md:hidden" 
+            onClick={() => setIsOpen(false)}
+            onTouchEnd={(e) => { e.preventDefault(); setIsOpen(false); }}
+          />
+          <motion.div initial={{
+            opacity: 0,
+            height: 0
+          }} animate={{
+            opacity: 1,
+            height: 'auto'
+          }} exit={{
+            opacity: 0,
+            height: 0
+          }} className="md:hidden py-4 border-t border-border relative z-50 bg-background/95 backdrop-blur-lg">
+            <div className="flex flex-col gap-1">
               {user ? <>
-                  {isRider && <Link to="/ride" className="px-4 py-2 text-muted-foreground hover:text-foreground" onClick={() => setIsOpen(false)}>
+                  {isRider && <Link to="/ride" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
                       {t('nav.ride')}
                     </Link>}
                   {isDriver && <>
-                      <Link to="/driver" className="px-4 py-2 text-muted-foreground hover:text-foreground" onClick={() => setIsOpen(false)}>
+                      <Link to="/driver" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
                         {t('nav.availableRides')}
                       </Link>
-                      <Link to="/earnings" className="px-4 py-2 text-muted-foreground hover:text-foreground" onClick={() => setIsOpen(false)}>
+                      <Link to="/earnings" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
                         {t('nav.earnings')}
                       </Link>
                     </>}
-                  <Link to="/history" className="px-4 py-2 text-muted-foreground hover:text-foreground" onClick={() => setIsOpen(false)}>
+                  <Link to="/history" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
                     {t('nav.history')}
                   </Link>
 
                   {/* Driver Messages (required: directly under My Rides) */}
-                  {isDriver && <Link to={activeDriverRideId ? `/driver/messages?rideId=${activeDriverRideId}` : '/driver/messages'} className="px-4 py-2 text-muted-foreground hover:text-foreground flex items-center gap-2" onClick={() => setIsOpen(false)}>
+                  {isDriver && <Link to={activeDriverRideId ? `/driver/messages?rideId=${activeDriverRideId}` : '/driver/messages'} className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation flex items-center gap-2" onClick={() => setIsOpen(false)}>
                       <MessageSquare className="h-4 w-4" />
                       {language === 'fr' ? 'Messages' : 'Messages'}
                     </Link>}
-                  {isAdmin && <Link to="/admin" className="px-4 py-2 text-muted-foreground hover:text-foreground flex items-center gap-2" onClick={() => setIsOpen(false)}>
+                  {isAdmin && <Link to="/admin" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation flex items-center gap-2" onClick={() => setIsOpen(false)}>
                       <Shield className="h-4 w-4" />
                       Admin Dashboard
                     </Link>}
                   <button onClick={() => {
               setProfileModalOpen(true);
               setIsOpen(false);
-            }} className="px-4 py-2 text-left text-muted-foreground hover:text-foreground w-full">
+            }} className="block px-4 py-3 text-left text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation w-full">
                     {t('nav.profile')}
                   </button>
                   <button onClick={() => {
               handleSignOut();
               setIsOpen(false);
-            }} className="px-4 py-2 text-left text-destructive">
+            }} className="block px-4 py-3 text-left text-destructive active:bg-destructive/10 touch-manipulation w-full">
                     {t('nav.logout')}
                   </button>
                 </> : <>
-                  <Link to="/ride" className="px-4 py-2 text-muted-foreground hover:text-foreground" onClick={() => setIsOpen(false)}>
+                  <Link to="/ride" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
                     {t('nav.ride')}
                   </Link>
-                  <Link to="/drive" className="px-4 py-2 text-muted-foreground hover:text-foreground" onClick={() => setIsOpen(false)}>
+                  <Link to="/drive" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
                     {t('nav.drive')}
                   </Link>
                   <div className="px-4 flex gap-2">
@@ -251,11 +258,12 @@ const Navbar = () => {
                     </Button>
                   </div>
                 </>}
-              <div className="px-4">
+              <div className="px-4 pt-2">
                 <LanguageToggle />
               </div>
             </div>
-          </motion.div>}
+          </motion.div>
+        </>}
       </div>
       
       {/* Rider Profile Modal */}
