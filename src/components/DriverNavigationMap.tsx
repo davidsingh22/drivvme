@@ -370,7 +370,48 @@ const DriverNavigationMap = ({
     return (
       <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center p-4">
         <AlertCircle className="h-10 w-10 text-destructive mb-4" />
-        <p className="text-center text-muted-foreground">{error}</p>
+        <p className="text-center text-muted-foreground mb-6">{error}</p>
+        
+        {/* Still show action buttons so driver can proceed */}
+        <div className="w-full max-w-sm space-y-3">
+          {destinationType === 'pickup' && onArrived && !hasArrived && (
+            <Button
+              className="w-full h-14 text-lg font-bold bg-amber-500 hover:bg-amber-600 text-white"
+              onClick={onArrived}
+            >
+              <MapPin className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
+            </Button>
+          )}
+          {destinationType === 'pickup' && onStartRide && hasArrived && (
+            <Button
+              className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700 text-white"
+              onClick={onStartRide}
+            >
+              <PlayCircle className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Démarrer la course" : "Start Ride"}
+            </Button>
+          )}
+          {onClose && (
+            <Button variant="destructive" className="w-full h-12" onClick={onClose}>
+              {language === 'fr' ? 'Fermer Navigation' : 'Exit Navigation'}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => {
+              // Clear cache and reload
+              import('@/hooks/useMapboxToken').then(m => {
+                m.clearMapboxTokenCache();
+                window.location.reload();
+              });
+            }}
+          >
+            <RotateCcw className="h-4 w-4 mr-2" />
+            {language === 'fr' ? 'Réessayer' : 'Retry'}
+          </Button>
+        </div>
       </div>
     );
   }

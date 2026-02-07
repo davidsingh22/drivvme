@@ -71,10 +71,15 @@ const fetchTokenInternal = async (): Promise<string | null> => {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         // Check if user is authenticated before making the call
-        const { data: { session } } = await supabase.auth.getSession();
+        let { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-          console.log('[useMapboxToken] No session, skipping token fetch');
-          return null;
+          // Try refreshing the session first (handles expired tokens on mobile)
+          const { data: refreshData } = await supabase.auth.refreshSession();
+          session = refreshData?.session ?? null;
+          if (!session) {
+            console.log('[useMapboxToken] No session after refresh, skipping token fetch');
+            return null;
+          }
         }
 
         const { data, error } = await supabase.functions.invoke('get-mapbox-token');
