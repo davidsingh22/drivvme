@@ -167,13 +167,12 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     return true;
   }, [unlock, volume]);
 
-  /** Play once — tries WebAudio first, falls back to HTML5 Audio */
+  /** Play once — always plays HTML5 fallback for reliability, plus WebAudio if unlocked */
   const playOnce = useCallback(async () => {
-    const webAudioOk = await playWebAudio();
-    if (!webAudioOk) {
-      // WebAudio blocked (no user gesture) — use HTML5 Audio fallback
-      playFallbackBeep();
-    }
+    // Always fire HTML5 Audio — it's the most reliable on mobile without user gesture
+    playFallbackBeep();
+    // Also try WebAudio for richer sound (will layer on top if both work)
+    try { await playWebAudio(); } catch {}
     return true;
   }, [playWebAudio, playFallbackBeep]);
 
