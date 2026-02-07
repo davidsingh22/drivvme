@@ -585,11 +585,13 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           </span>
         </div>
 
-        {/* ===== STATUS-AWARE ACTION BUTTONS ===== */}
-        <div className="space-y-3">
+      </Card>
+
+        {/* ===== STATUS-AWARE ACTION BUTTONS - Outside card, always visible ===== */}
+        <div className="space-y-3 mt-4 pb-4">
           {/* Open GPS Navigation - Always available */}
           <Button
-            className="w-full py-6 text-lg font-bold bg-primary hover:bg-primary/90 rounded-xl"
+            className="w-full py-6 text-lg font-bold bg-primary hover:bg-primary/90 rounded-xl touch-manipulation"
             onClick={() => setShowNavigation(true)}
           >
             <Map className="h-6 w-6 mr-2" />
@@ -599,7 +601,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           {/* I've Arrived - Show when driver_assigned or driver_en_route */}
           {(activeRide.status === 'driver_assigned' || activeRide.status === 'driver_en_route') && (
             <Button
-              className="w-full py-6 text-lg font-bold rounded-xl"
+              className="w-full py-6 text-lg font-bold rounded-xl touch-manipulation"
               style={{ backgroundColor: 'hsl(45, 93%, 47%)', color: 'hsl(0, 0%, 10%)' }}
               onClick={markArrived}
               disabled={isUpdating}
@@ -614,7 +616,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           {/* Start Ride - Show when arrived */}
           {activeRide.status === 'arrived' && (
             <Button
-              className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl"
+              className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl touch-manipulation"
               onClick={startRide}
               disabled={isUpdating}
             >
@@ -628,7 +630,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           {/* Complete Ride - Show when in_progress */}
           {activeRide.status === 'in_progress' && (
             <Button
-              className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl"
+              className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl touch-manipulation"
               onClick={endRide}
               disabled={isUpdating}
             >
@@ -641,7 +643,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
 
           {/* Cancel Ride - Always available */}
           <Button
-            className="w-full py-6 text-lg font-bold rounded-xl"
+            className="w-full py-6 text-lg font-bold rounded-xl touch-manipulation"
             style={{ backgroundColor: 'hsl(75, 80%, 50%)', color: 'hsl(0, 0%, 10%)' }}
             onClick={cancelRide}
             disabled={isUpdating}
@@ -652,7 +654,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
               : (language === 'fr' ? 'Annuler la course' : 'Cancel Ride')}
           </Button>
         </div>
-      </Card>
 
       {/* Fullscreen GPS Navigation Map */}
       {showNavigation && activeRide && (
