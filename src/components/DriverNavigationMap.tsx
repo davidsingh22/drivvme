@@ -487,7 +487,7 @@ const DriverNavigationMap = ({
       <div ref={mapContainerRef} className="flex-1 w-full" />
 
       {/* Bottom controls */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 p-4 bg-gradient-to-t from-black/80 to-transparent">
+      <div className="absolute bottom-0 left-0 right-0 z-10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-black via-black/90 to-transparent">
         {/* Destination address */}
         <Card className="p-3 bg-black/90 border-primary/30 backdrop-blur-sm mb-3">
           <div className="flex items-center gap-3">
@@ -512,7 +512,7 @@ const DriverNavigationMap = ({
         </Card>
 
         {/* I've Arrived button (before arrival, en route to pickup) */}
-        {onArrived && !hasArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
+        {onArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
           <Button
             className="w-full h-14 mb-3 text-lg font-bold text-white touch-manipulation"
             style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
