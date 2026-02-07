@@ -53,6 +53,7 @@ const LIMITED_TEST_ACCOUNTS: Record<string, number> = {
   'sean.mcturk@outlook.com': 3,
   'patsy@hotmail.com': 999,
   'rymcturk@gmail.com': 3,
+  'kissmebaby@hotmail.com': 999,
 };
 
 // Get remaining free rides for a limited test account
