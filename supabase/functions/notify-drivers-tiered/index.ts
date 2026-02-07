@@ -323,12 +323,12 @@ serve(async (req) => {
       }
     }
 
-    // Tier configuration - TEST MODE: all tiers set to 100km for testing
+    // Tier configuration — expanding radius, small batch dispatch
     const tierConfig = {
-      1: { maxDistanceKm: 100, maxEta: 60, description: "TEST MODE - 100km radius" },
-      2: { maxDistanceKm: 100, maxEta: 60, description: "TEST MODE - 100km radius" },
-      3: { maxDistanceKm: 100, maxEta: 60, description: "TEST MODE - 100km radius" },
-      4: { maxDistanceKm: 100, maxEta: 60, description: "TEST MODE - Top 3 drivers" },
+      1: { maxDistanceKm: 3, maxEta: 10, maxDrivers: 2, description: "3km radius, max 2 drivers" },
+      2: { maxDistanceKm: 5, maxEta: 15, maxDrivers: 3, description: "5km radius, max 3 drivers" },
+      3: { maxDistanceKm: 8, maxEta: 20, maxDrivers: 3, description: "8km radius, max 3 drivers" },
+      4: { maxDistanceKm: 12, maxEta: 30, maxDrivers: 3, description: "12km radius, max 3 drivers" },
     };
 
     const config = tierConfig[tier as keyof typeof tierConfig] || tierConfig[1];
@@ -385,14 +385,11 @@ serve(async (req) => {
         
         let distance = Infinity;
         if (dropoffLocation) {
-          // TEST MODE: Notify all busy drivers regardless of dropoff distance
           distance = calculateDistanceKm(pickupLat, pickupLng, dropoffLocation.lat, dropoffLocation.lng);
         } else if (driver.current_lat && driver.current_lng) {
           distance = calculateDistanceKm(pickupLat, pickupLng, driver.current_lat, driver.current_lng);
-        } else {
-          // TEST MODE: Include all drivers without location by assuming they're very close
-          distance = 1; // 1km - ensures they pass ETA filter
         }
+        // Drivers without location are excluded (distance stays Infinity)
 
         const isPriority = driver.priority_driver_until && 
           new Date(driver.priority_driver_until) > new Date();
@@ -415,8 +412,8 @@ serve(async (req) => {
         return a.distance_km - b.distance_km;
       });
 
-    // For tier 4, only take top 3 drivers
-    const nearbyDrivers = tier === 4 ? driversWithDistance.slice(0, 3) : driversWithDistance;
+    // Limit batch size per tier config
+    const nearbyDrivers = driversWithDistance.slice(0, config.maxDrivers);
 
     console.log(`Tier ${tier}: Found ${nearbyDrivers.length} eligible drivers (${config.description})`);
 

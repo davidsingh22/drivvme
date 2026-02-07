@@ -192,7 +192,7 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Route Info */}
+                {/* Route Info — dropoff masked to zone only */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
                   <div className="flex items-start gap-3">
                     <div className="mt-1 h-3 w-3 rounded-full bg-success flex-shrink-0" />
@@ -200,7 +200,12 @@ export function RideOfferModal({
                   </div>
                   <div className="flex items-start gap-3">
                     <div className="mt-1 h-3 w-3 rounded-full bg-destructive flex-shrink-0" />
-                    <p className="text-white font-medium line-clamp-1">{ride.dropoff_address}</p>
+                    <p className="text-white font-medium line-clamp-1">
+                      {/* Show only neighbourhood/zone, not exact address */}
+                      {ride.dropoff_address
+                        ? ride.dropoff_address.split(',').slice(-2).join(',').trim() || ride.dropoff_address
+                        : 'Destination area'}
+                    </p>
                   </div>
                   <div className="flex items-center gap-4 pt-2 text-white/70 text-sm">
                     <span>⏱️ {ride.estimated_duration_minutes || '--'} min</span>
