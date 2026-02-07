@@ -1128,82 +1128,123 @@ const DriverDashboard = () => {
 
             {/* Available Rides Section - Always visible when online */}
             {isOnline && (
-              <div className={currentRide ? 'mt-8 pt-6 border-t border-border' : ''}>
-                <h2 className="font-display text-xl font-bold mb-4">
-                  {currentRide ? 'Other Available Rides' : 'Available Rides'}
-                </h2>
+              <div id="available-rides" className={currentRide ? 'mt-8 pt-6 border-t border-border' : ''}>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-display text-xl font-bold flex items-center gap-2">
+                    <Navigation className="h-5 w-5 text-primary" />
+                    {currentRide ? 'Other Available Rides' : 'Available Rides'}
+                  </h2>
+                  {availableRides.length > 0 && (
+                    <span className="bg-primary text-primary-foreground text-xs font-bold px-2.5 py-1 rounded-full">
+                      {availableRides.length}
+                    </span>
+                  )}
+                </div>
 
                 {availableRides.length === 0 && (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Navigation className="h-10 w-10 mx-auto mb-3 opacity-50" />
-                    <p>No rides available nearby</p>
-                    <p className="text-sm">New requests will appear here</p>
-                  </div>
+                  <Card className="p-8 text-center border-dashed border-2 border-muted-foreground/20">
+                    <Navigation className="h-12 w-12 mx-auto mb-3 text-muted-foreground/40" />
+                    <p className="font-medium text-muted-foreground">No rides available nearby</p>
+                    <p className="text-sm text-muted-foreground/70 mt-1">New requests will appear here automatically</p>
+                  </Card>
                 )}
 
                 <div className="space-y-4">
-                  {availableRides.map((ride) => (
-                    <motion.div
-                      key={ride.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                    >
-                      <Card className="p-4 border-primary/20 hover:border-primary/50 transition-colors">
-                        <div className="space-y-3 mb-4">
-                          <div className="flex items-start gap-2">
-                            <MapPin className="h-4 w-4 text-primary mt-1" />
-                            <p className="text-sm line-clamp-1">{ride.pickup_address}</p>
-                          </div>
-                          <div className="flex items-start gap-2">
-                            <Navigation className="h-4 w-4 text-accent mt-1" />
-                            <p className="text-sm line-clamp-1">{ride.dropoff_address}</p>
-                          </div>
-                        </div>
+                  {availableRides.map((ride, index) => {
+                    // Calculate pickup distance from driver
+                    let pickupDistanceKm: number | undefined;
+                    if (driverLocation && typeof ride.pickup_lat === 'number' && typeof ride.pickup_lng === 'number') {
+                      pickupDistanceKm = calculateDistanceKm(
+                        driverLocation.lat, driverLocation.lng,
+                        ride.pickup_lat, ride.pickup_lng
+                      );
+                    }
+                    const driverEarnings = Number(ride.estimated_fare) - calculatePlatformFee(Number(ride.estimated_fare));
 
-                        <div className="flex items-center justify-between mb-4">
-                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                            <span>{formatDistance(Number(ride.distance_km), language)}</span>
-                            <span>{formatDuration(ride.estimated_duration_minutes, language)}</span>
+                    return (
+                      <motion.div
+                        key={ride.id}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                      >
+                        <Card className="p-4 border-primary/20 hover:border-primary/40 transition-all hover:shadow-md">
+                          {/* Earnings highlight */}
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                              {pickupDistanceKm !== undefined
+                                ? `${pickupDistanceKm.toFixed(1)} km away`
+                                : 'Ride Request'}
+                            </span>
+                            <span className="text-lg font-bold text-accent">
+                              {formatCurrency(driverEarnings, language)}
+                            </span>
                           </div>
-                        </div>
 
-                        {/* Earnings breakdown */}
-                        <div className="p-3 bg-muted/50 rounded-lg mb-4">
-                          <div className="flex justify-between text-sm mb-1">
-                            <span>Fare</span>
-                            <span>{formatCurrency(Number(ride.estimated_fare), language)}</span>
+                          {/* Route */}
+                          <div className="space-y-2 mb-3">
+                            <div className="flex items-start gap-2">
+                              <div className="mt-1.5 h-2.5 w-2.5 rounded-full bg-primary flex-shrink-0" />
+                              <p className="text-sm font-medium line-clamp-1">{ride.pickup_address}</p>
+                            </div>
+                            <div className="ml-[5px] border-l-2 border-dashed border-muted-foreground/30 h-3" />
+                            <div className="flex items-start gap-2">
+                              <div className="mt-1.5 h-2.5 w-2.5 rounded-sm bg-accent flex-shrink-0" />
+                              <p className="text-sm font-medium line-clamp-1">{ride.dropoff_address}</p>
+                            </div>
                           </div>
-                          <div className="flex justify-between text-sm text-destructive mb-1">
-                            <span>{t('driver.platformFee')}</span>
-                            <span>-{formatCurrency(calculatePlatformFee(Number(ride.estimated_fare)), language)}</span>
-                          </div>
-                          <div className="flex justify-between font-bold text-accent pt-2 border-t border-border">
-                            <span>{t('driver.yourEarnings')}</span>
-                            <span>{formatCurrency(Number(ride.estimated_fare) - calculatePlatformFee(Number(ride.estimated_fare)), language)}</span>
-                          </div>
-                        </div>
 
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            variant="outline"
-                            className="text-destructive border-destructive/50"
-                            onClick={() => setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id))}
-                          >
-                            <XCircle className="h-4 w-4 mr-2" />
-                            {t('driver.decline')}
-                          </Button>
-                          <Button
-                            className="gradient-primary"
-                            onClick={() => acceptRide(ride)}
-                            disabled={!!currentRide}
-                          >
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                            {t('driver.accept')}
-                          </Button>
-                        </div>
-                      </Card>
-                    </motion.div>
-                  ))}
+                          {/* Trip details */}
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground mb-3">
+                            <span className="flex items-center gap-1">
+                              <MapPin className="h-3 w-3" />
+                              {formatDistance(Number(ride.distance_km), language)}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              {formatDuration(ride.estimated_duration_minutes, language)}
+                            </span>
+                          </div>
+
+                          {/* Earnings breakdown */}
+                          <div className="p-3 bg-muted/50 rounded-lg mb-4 text-sm">
+                            <div className="flex justify-between mb-1">
+                              <span className="text-muted-foreground">Fare</span>
+                              <span>{formatCurrency(Number(ride.estimated_fare), language)}</span>
+                            </div>
+                            <div className="flex justify-between text-destructive mb-1">
+                              <span>{t('driver.platformFee')}</span>
+                              <span>-{formatCurrency(calculatePlatformFee(Number(ride.estimated_fare)), language)}</span>
+                            </div>
+                            <div className="flex justify-between font-bold text-accent pt-2 border-t border-border">
+                              <span>{t('driver.yourEarnings')}</span>
+                              <span>{formatCurrency(driverEarnings, language)}</span>
+                            </div>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button
+                              variant="outline"
+                              className="text-destructive border-destructive/50 hover:bg-destructive/10"
+                              onClick={() => setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id))}
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              {t('driver.decline')}
+                            </Button>
+                            <Button
+                              className="gradient-primary"
+                              onClick={() => acceptRide(ride)}
+                              disabled={!!currentRide}
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              {t('driver.accept')}
+                            </Button>
+                          </div>
+                        </Card>
+                      </motion.div>
+                    );
+                  })}
                 </div>
               </div>
             )}

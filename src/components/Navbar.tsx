@@ -98,7 +98,9 @@ const Navbar = () => {
                     {t('nav.ride')}
                   </Link>}
                 {isDriver && <>
-                    <Link to="/driver" className="text-muted-foreground hover:text-foreground transition-colors">
+                    <Link to="/driver" className="text-muted-foreground hover:text-foreground transition-colors" onClick={() => {
+                      setTimeout(() => document.getElementById('available-rides')?.scrollIntoView({ behavior: 'smooth' }), 100);
+                    }}>
                       {t('nav.availableRides')}
                     </Link>
                     <Link to="/earnings" className="text-muted-foreground hover:text-foreground transition-colors">
@@ -206,7 +208,10 @@ const Navbar = () => {
                       {t('nav.ride')}
                     </Link>}
                   {isDriver && <>
-                      <Link to="/driver" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
+                      <Link to="/driver" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => {
+                        setIsOpen(false);
+                        setTimeout(() => document.getElementById('available-rides')?.scrollIntoView({ behavior: 'smooth' }), 100);
+                      }}>
                         {t('nav.availableRides')}
                       </Link>
                       <Link to="/earnings" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
