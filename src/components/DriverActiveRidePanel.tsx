@@ -665,9 +665,9 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           destinationType={activeRide.status === 'in_progress' ? 'dropoff' : 'pickup'}
           rideStatus={activeRide.status}
           onClose={() => setShowNavigation(false)}
-          onArrived={(activeRide.status === 'driver_assigned' || activeRide.status === 'driver_en_route') ? markArrived : undefined}
-          onStartRide={activeRide.status === 'arrived' ? startRide : undefined}
-          onCompleteRide={activeRide.status === 'in_progress' ? endRide : undefined}
+          onArrived={markArrived}
+          onStartRide={startRide}
+          onCompleteRide={endRide}
           onCancelRide={cancelRide}
           hasArrived={activeRide.status === 'arrived'}
         />
