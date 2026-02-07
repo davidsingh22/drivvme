@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Phone, Star, Shield, ChevronUp, ChevronDown, 
   DollarSign, Clock, Route, Share2, 
-  CreditCard, CheckCircle2 
+  CreditCard, CheckCircle2, X 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -38,6 +38,7 @@ interface InRideDriverCardProps {
   minutesAway: number | null;
   onShareTrip: () => void;
   onSafetyPress: () => void;
+  onCancelRide?: () => void;
 }
 
 const InRideDriverCard = ({
@@ -54,6 +55,7 @@ const InRideDriverCard = ({
   minutesAway,
   onShareTrip,
   onSafetyPress,
+  onCancelRide,
 }: InRideDriverCardProps) => {
   const { language } = useLanguage();
   const { toast } = useToast();
@@ -289,6 +291,18 @@ const InRideDriverCard = ({
                   <span>{language === 'fr' ? 'ID du trajet' : 'Ride ID'}</span>
                   <span className="font-mono">{rideId.slice(0, 8).toUpperCase()}</span>
                 </div>
+
+                {/* Cancel Ride Button */}
+                {onCancelRide && (
+                  <Button
+                    variant="outline"
+                    onClick={onCancelRide}
+                    className="w-full mt-3 text-destructive border-destructive/50 hover:bg-destructive/10"
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
+                  </Button>
+                )}
               </div>
             </motion.div>
           )}
