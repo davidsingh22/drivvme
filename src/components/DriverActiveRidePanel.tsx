@@ -185,25 +185,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     fetchActiveRide();
   }, [fetchActiveRide]);
 
-  // Track driver's current GPS location
-  useEffect(() => {
-    if (!activeRide) return;
-
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        setDriverLocation({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        });
-      },
-      (err) => {
-        console.error('[DriverActiveRidePanel] GPS error:', err);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 2000 }
-    );
-
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [activeRide?.id]);
+  // Driver location is tracked by the parent (DriverDashboard's useDriverGPSStreaming)
+  // No duplicate watchPosition here — use the driverLocation passed or fetched from map
 
   // Subscribe to ride updates
   useEffect(() => {
