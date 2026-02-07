@@ -674,20 +674,36 @@ const DriverDashboard = () => {
   const updateRideStatus = async (status: string) => {
     if (!currentRide || !user) return;
 
+    // Optimistic update — instant UI feedback
+    const prev = { ...currentRide };
+    if (status === 'completed') {
+      const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
+      const fee = calculatePlatformFee(fareForFee);
+      toast({
+        title: 'Ride completed!',
+        description: `You earned ${formatCurrency(fareForFee - fee, language)}`,
+      });
+      setCurrentRide(null);
+      setRiderInfo(null);
+      setShowGPSNavigation(false);
+    } else {
+      setCurrentRide((r) => r ? { ...r, status } : null);
+      if (status === 'arrived') {
+        toast({ title: language === 'fr' ? 'Arrivé!' : 'Arrived!' });
+      } else if (status === 'in_progress') {
+        toast({ title: language === 'fr' ? 'Course démarrée!' : 'Ride started!' });
+      }
+    }
+
     try {
       const updates: any = { status };
-
-      if (status === 'driver_en_route') {
-        // Already set when accepting
-      } else if (status === 'arrived') {
-        // Driver arrived at pickup
-      } else if (status === 'in_progress') {
+      if (status === 'in_progress') {
         updates.pickup_at = new Date().toISOString();
       } else if (status === 'completed') {
         updates.dropoff_at = new Date().toISOString();
-        const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
+        const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
         const fee = calculatePlatformFee(fareForFee);
-        updates.actual_fare = currentRide.estimated_fare;
+        updates.actual_fare = prev.estimated_fare;
         updates.platform_fee = fee;
         updates.driver_earnings = fareForFee - fee;
       }
@@ -695,38 +711,33 @@ const DriverDashboard = () => {
       const { error } = await supabase
         .from('rides')
         .update(updates)
-        .eq('id', currentRide.id);
+        .eq('id', prev.id);
 
       if (error) {
-        toast({
-          title: 'Error',
-          description: error.message,
-          variant: 'destructive',
-        });
+        // Rollback
+        setCurrentRide(prev);
+        toast({ title: 'Error', description: error.message, variant: 'destructive' });
         return;
       }
 
       if (status === 'completed') {
-        const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
-        const fee = calculatePlatformFee(fareForFee);
-        toast({
-          title: 'Ride completed!',
-          description: `You earned ${formatCurrency(fareForFee - fee, language)}`,
-        });
-        setCurrentRide(null);
-        setRiderInfo(null);
-        await refreshDriverProfile();
-      } else {
-        setCurrentRide((prev) => prev ? { ...prev, status } : null);
+        void refreshDriverProfile();
       }
     } catch (error) {
+      setCurrentRide(prev);
       console.error('[DriverDashboard] updateRideStatus error:', error);
-      toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
     }
   };
 
   const cancelRide = async () => {
     if (!currentRide || !user) return;
+
+    // Optimistic: clear ride immediately
+    const prev = currentRide;
+    setCurrentRide(null);
+    setRiderInfo(null);
+    toast({ title: 'Ride cancelled' });
 
     try {
       const { error } = await supabase
@@ -738,23 +749,17 @@ const DriverDashboard = () => {
           cancellation_reason: 'Cancelled by driver',
           driver_id: null,
         })
-        .eq('id', currentRide.id);
+        .eq('id', prev.id);
 
       if (error) {
-        toast({
-          title: 'Error',
-          description: error.message,
-          variant: 'destructive',
-        });
-        return;
+        // Rollback
+        setCurrentRide(prev);
+        toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
-
-      toast({ title: 'Ride cancelled' });
-      setCurrentRide(null);
-      setRiderInfo(null);
     } catch (error) {
+      setCurrentRide(prev);
       console.error('[DriverDashboard] cancelRide error:', error);
-      toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
     }
   };
 
