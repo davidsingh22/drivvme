@@ -242,7 +242,16 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const startRide = async () => {
     if (!activeRide || !driverId) return;
     
-    setIsUpdating(true);
+    // Optimistic update - instant UI response
+    const previousRide = { ...activeRide };
+    setActiveRide({ ...activeRide, status: 'in_progress', pickup_at: new Date().toISOString() });
+    onRideUpdated?.({ ...activeRide, status: 'in_progress', pickup_at: new Date().toISOString() });
+    
+    toast({
+      title: language === 'fr' ? 'Course démarrée!' : 'Ride started!',
+      description: language === 'fr' ? 'En route vers la destination.' : 'Heading to the destination.',
+    });
+
     try {
       const { error } = await supabase
         .from('rides')
@@ -254,23 +263,16 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         .eq('driver_id', driverId);
 
       if (error) {
-        toast({
-          title: 'Error',
-          description: error.message,
-          variant: 'destructive',
-        });
-        return;
+        // Rollback on failure
+        setActiveRide(previousRide);
+        onRideUpdated?.(previousRide);
+        toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
-
-      toast({
-        title: language === 'fr' ? 'Course démarrée!' : 'Ride started!',
-        description: language === 'fr' ? 'En route vers la destination.' : 'Heading to the destination.',
-      });
-
-      // Refetch to update local state
-      await fetchActiveRide();
-    } finally {
-      setIsUpdating(false);
+    } catch (err) {
+      setActiveRide(previousRide);
+      onRideUpdated?.(previousRide);
+      console.error('[DriverActiveRidePanel] startRide error:', err);
+      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
     }
   };
 
@@ -278,10 +280,21 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const endRide = async () => {
     if (!activeRide || !driverId) return;
     
-    setIsUpdating(true);
+    const driverEarnings = activeRide.estimated_fare - PLATFORM_FEE;
+    
+    // Optimistic update - clear ride immediately
+    setActiveRide(null);
+    setRiderInfo(null);
+    onRideCompleted?.();
+    
+    toast({
+      title: language === 'fr' ? 'Course terminée!' : 'Ride completed!',
+      description: language === 'fr' 
+        ? `Vous avez gagné ${formatCurrency(driverEarnings, language)}`
+        : `You earned ${formatCurrency(driverEarnings, language)}`,
+    });
+
     try {
-      const driverEarnings = activeRide.estimated_fare - PLATFORM_FEE;
-      
       const { error } = await supabase
         .from('rides')
         .update({
@@ -294,26 +307,14 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         .eq('driver_id', driverId);
 
       if (error) {
-        toast({
-          title: 'Error',
-          description: error.message,
-          variant: 'destructive',
-        });
-        return;
+        // Rollback - restore the ride
+        setActiveRide(activeRide);
+        toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
-
-      toast({
-        title: language === 'fr' ? 'Course terminée!' : 'Ride completed!',
-        description: language === 'fr' 
-          ? `Vous avez gagné ${formatCurrency(driverEarnings, language)}`
-          : `You earned ${formatCurrency(driverEarnings, language)}`,
-      });
-
-      setActiveRide(null);
-      setRiderInfo(null);
-      onRideCompleted?.();
-    } finally {
-      setIsUpdating(false);
+    } catch (err) {
+      setActiveRide(activeRide);
+      console.error('[DriverActiveRidePanel] endRide error:', err);
+      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
     }
   };
 
@@ -321,7 +322,18 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const cancelRide = async () => {
     if (!activeRide || !driverId) return;
     
-    setIsUpdating(true);
+    // Optimistic update - clear ride immediately
+    const previousRide = { ...activeRide };
+    setActiveRide(null);
+    setRiderInfo(null);
+    onRideCompleted?.();
+    
+    toast({
+      title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+      description: language === 'fr' ? 'La course a été annulée.' : 'The ride has been cancelled.',
+      variant: 'destructive',
+    });
+
     try {
       const { error } = await supabase
         .from('rides')
@@ -335,27 +347,13 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         .eq('driver_id', driverId);
 
       if (error) {
-        toast({
-          title: 'Error',
-          description: error.message,
-          variant: 'destructive',
-        });
-        return;
+        setActiveRide(previousRide);
+        toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
-
-      toast({
-        title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-        description: language === 'fr' 
-          ? 'La course a été annulée.' 
-          : 'The ride has been cancelled.',
-        variant: 'destructive',
-      });
-
-      setActiveRide(null);
-      setRiderInfo(null);
-      onRideCompleted?.();
-    } finally {
-      setIsUpdating(false);
+    } catch (err) {
+      setActiveRide(previousRide);
+      console.error('[DriverActiveRidePanel] cancelRide error:', err);
+      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
     }
   };
 
@@ -363,36 +361,36 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const markArrived = async () => {
     if (!activeRide || !driverId) return;
     
-    setIsUpdating(true);
+    // Optimistic update - instant UI response
+    const previousRide = { ...activeRide };
+    setActiveRide({ ...activeRide, status: 'arrived' });
+    onRideUpdated?.({ ...activeRide, status: 'arrived' });
+    setShowNavigation(false);
+    
+    toast({
+      title: language === 'fr' ? 'Arrivé!' : 'Arrived!',
+      description: language === 'fr' 
+        ? 'Le passager a été notifié de votre arrivée.' 
+        : 'The rider has been notified of your arrival.',
+    });
+
     try {
       const { error } = await supabase
         .from('rides')
-        .update({
-          status: 'arrived',
-        })
+        .update({ status: 'arrived' })
         .eq('id', activeRide.id)
         .eq('driver_id', driverId);
 
       if (error) {
-        toast({
-          title: 'Error',
-          description: error.message,
-          variant: 'destructive',
-        });
-        return;
+        setActiveRide(previousRide);
+        onRideUpdated?.(previousRide);
+        toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
-
-      toast({
-        title: language === 'fr' ? 'Arrivé!' : 'Arrived!',
-        description: language === 'fr' 
-          ? 'Le passager a été notifié de votre arrivée.' 
-          : 'The rider has been notified of your arrival.',
-      });
-
-      setShowNavigation(false);
-      await fetchActiveRide();
-    } finally {
-      setIsUpdating(false);
+    } catch (err) {
+      setActiveRide(previousRide);
+      onRideUpdated?.(previousRide);
+      console.error('[DriverActiveRidePanel] markArrived error:', err);
+      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
     }
   };
 
