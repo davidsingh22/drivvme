@@ -21,6 +21,7 @@ interface DriverNavigationMapProps {
   destination: { lat: number; lng: number; address: string };
   destinationType: 'pickup' | 'dropoff';
   rideStatus?: string;
+  hideDestination?: boolean;
   onClose?: () => void;
   onArrived?: () => void;
   onStartRide?: () => void;
@@ -34,6 +35,7 @@ const DriverNavigationMap = ({
   destination,
   destinationType,
   rideStatus,
+  hideDestination,
   onClose,
   onArrived,
   onStartRide,
@@ -470,10 +472,14 @@ const DriverNavigationMap = ({
       {isMapReady && (
         <div className="absolute bottom-0 left-0 right-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-black via-black/95 to-transparent">
           <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-lg bg-black/80 border border-white/10">
-            <MapPin className={`h-4 w-4 shrink-0 ${
+             <MapPin className={`h-4 w-4 shrink-0 ${
               destinationType === 'pickup' ? 'text-primary' : 'text-green-400'
             }`} />
-            <p className="text-xs text-white truncate flex-1">{destination.address}</p>
+            <p className="text-xs text-white truncate flex-1">
+              {hideDestination 
+                ? (language === 'fr' ? 'Destination révélée au démarrage' : 'Destination revealed at start')
+                : destination.address}
+            </p>
           </div>
 
           <div className="space-y-2">

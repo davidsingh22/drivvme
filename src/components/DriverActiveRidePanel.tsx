@@ -538,12 +538,12 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           )}
         </Button>
 
-        {/* Route Details */}
+        {/* Route Details — destination hidden until ride started */}
         <div className="space-y-2 mb-4">
           <div className="flex items-start gap-2">
             <MapPin className="h-4 w-4 text-primary mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground">Pickup</p>
+              <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Ramassage' : 'Pickup'}</p>
               <p className="text-sm font-medium truncate">{activeRide.pickup_address}</p>
             </div>
             <Button
@@ -555,37 +555,53 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
               <ExternalLink className="h-4 w-4" />
             </Button>
           </div>
-          <div className="flex items-start gap-2">
-            <Navigation className="h-4 w-4 text-accent mt-0.5 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground">Dropoff</p>
-              <p className="text-sm font-medium truncate">{activeRide.dropoff_address}</p>
+          {activeRide.status === 'in_progress' && (
+            <div className="flex items-start gap-2">
+              <Navigation className="h-4 w-4 text-accent mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Destination' : 'Dropoff'}</p>
+                <p className="text-sm font-medium truncate">{activeRide.dropoff_address}</p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="shrink-0"
+                onClick={() => openInMaps(activeRide.dropoff_lat, activeRide.dropoff_lng, 'Dropoff')}
+              >
+                <ExternalLink className="h-4 w-4" />
+              </Button>
             </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="shrink-0"
-              onClick={() => openInMaps(activeRide.dropoff_lat, activeRide.dropoff_lng, 'Dropoff')}
-            >
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-          </div>
+          )}
+          {activeRide.status !== 'in_progress' && (
+            <div className="flex items-center gap-2 p-2 rounded-lg bg-muted/30 border border-dashed border-muted-foreground/30">
+              <Navigation className="h-4 w-4 text-muted-foreground shrink-0" />
+              <p className="text-xs text-muted-foreground italic">
+                {language === 'fr' 
+                  ? 'Destination révélée après le démarrage de la course'
+                  : 'Destination revealed after starting the ride'}
+              </p>
+            </div>
+          )}
         </div>
 
-        {/* Distance + Duration + Earnings */}
+        {/* Earnings — always visible; distance/duration only after ride started */}
         <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-          <span className="flex items-center gap-1">
-            <Navigation className="h-4 w-4" />
-            {formatDistance(Number(activeRide.distance_km), language)}
-          </span>
-          <span className="flex items-center gap-1">
-            <Clock className="h-4 w-4" />
-            {formatDuration(activeRide.estimated_duration_minutes, language)}
-          </span>
           <span className="flex items-center gap-1 text-accent font-semibold">
             <DollarSign className="h-4 w-4" />
             {formatCurrency(driverEarnings, language)}
           </span>
+          {activeRide.status === 'in_progress' && (
+            <>
+              <span className="flex items-center gap-1">
+                <Navigation className="h-4 w-4" />
+                {formatDistance(Number(activeRide.distance_km), language)}
+              </span>
+              <span className="flex items-center gap-1">
+                <Clock className="h-4 w-4" />
+                {formatDuration(activeRide.estimated_duration_minutes, language)}
+              </span>
+            </>
+          )}
         </div>
 
       </Card>
@@ -665,6 +681,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           }
           destinationType={activeRide.status === 'in_progress' ? 'dropoff' : 'pickup'}
           rideStatus={activeRide.status}
+          hideDestination={activeRide.status !== 'in_progress'}
           onClose={() => setShowNavigation(false)}
           onArrived={markArrived}
           onStartRide={startRide}

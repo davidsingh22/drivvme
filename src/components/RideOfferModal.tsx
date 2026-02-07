@@ -48,7 +48,7 @@ export function RideOfferModal({
   ride,
   onDecline,
   onAccept,
-  countdownSeconds = 30,
+  countdownSeconds = 15,
   driverLocation,
 }: RideOfferModalProps) {
   const { language } = useLanguage();
@@ -192,24 +192,14 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Route Info — dropoff masked to zone only */}
+                {/* Route Info — pickup only, no destination revealed */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
                   <div className="flex items-start gap-3">
                     <div className="mt-1 h-3 w-3 rounded-full bg-success flex-shrink-0" />
-                    <p className="text-white font-medium line-clamp-1">{ride.pickup_address}</p>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <div className="mt-1 h-3 w-3 rounded-full bg-destructive flex-shrink-0" />
-                    <p className="text-white font-medium line-clamp-1">
-                      {/* Show only neighbourhood/zone, not exact address */}
-                      {ride.dropoff_address
-                        ? ride.dropoff_address.split(',').slice(-2).join(',').trim() || ride.dropoff_address
-                        : 'Destination area'}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-4 pt-2 text-white/70 text-sm">
-                    <span>⏱️ {ride.estimated_duration_minutes || '--'} min</span>
-                    <span>📍 {ride.distance_km?.toFixed(1) || '--'} km</span>
+                    <div>
+                      <p className="text-white/60 text-xs mb-0.5">{language === 'fr' ? 'Ramassage' : 'Pickup'}</p>
+                      <p className="text-white font-medium line-clamp-2">{ride.pickup_address}</p>
+                    </div>
                   </div>
                 </div>
 
