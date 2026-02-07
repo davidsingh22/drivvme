@@ -547,29 +547,34 @@ const DriverDashboard = () => {
   const toggleOnlineStatus = async () => {
     if (!user) return;
 
-    const newStatus = !isOnline;
-    
-    const { error } = await supabase
-      .from('driver_profiles')
-      .update({ is_online: newStatus })
-      .eq('user_id', user.id);
+    try {
+      const newStatus = !isOnline;
+      
+      const { error } = await supabase
+        .from('driver_profiles')
+        .update({ is_online: newStatus })
+        .eq('user_id', user.id);
 
-    if (error) {
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      setIsOnline(newStatus);
+      await refreshDriverProfile();
+
       toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
+        title: newStatus ? 'You are now online' : 'You are now offline',
+        description: newStatus ? 'You will receive ride requests' : 'You will not receive ride requests',
       });
-      return;
+    } catch (error) {
+      console.error('[DriverDashboard] toggleOnlineStatus error:', error);
+      toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
     }
-
-    setIsOnline(newStatus);
-    await refreshDriverProfile();
-
-    toast({
-      title: newStatus ? 'You are now online' : 'You are now offline',
-      description: newStatus ? 'You will receive ride requests' : 'You will not receive ride requests',
-    });
   };
 
   const fetchRiderInfo = useCallback(async (riderId: string) => {
@@ -590,157 +595,167 @@ const DriverDashboard = () => {
   const acceptRide = async (ride: RideRequest) => {
     if (!user) return;
 
-    // Stop the alert sound immediately and clear cached ride
-    stopAlertSound();
-    setNewRideAlertOpen(false);
-    setCachedAlertRide(null);
-    setNewRideAlertRideId(null);
+    try {
+      // Stop the alert sound immediately and clear cached ride
+      stopAlertSound();
+      setNewRideAlertOpen(false);
+      setCachedAlertRide(null);
+      setNewRideAlertRideId(null);
 
-    // Calculate acceptance time for priority driver reward
-    const acceptanceTimeSeconds = alertStartTimeRef.current 
-      ? Math.floor((Date.now() - alertStartTimeRef.current) / 1000)
-      : null;
+      // Calculate acceptance time for priority driver reward
+      const acceptanceTimeSeconds = alertStartTimeRef.current 
+        ? Math.floor((Date.now() - alertStartTimeRef.current) / 1000)
+        : null;
 
-    const { error } = await supabase
-      .from('rides')
-      .update({
-        driver_id: user.id,
-        status: 'driver_assigned',
-        accepted_at: new Date().toISOString(),
-        acceptance_time_seconds: acceptanceTimeSeconds,
-      })
-      .eq('id', ride.id)
-      .eq('status', 'searching');
+      const { error } = await supabase
+        .from('rides')
+        .update({
+          driver_id: user.id,
+          status: 'driver_assigned',
+          accepted_at: new Date().toISOString(),
+          acceptance_time_seconds: acceptanceTimeSeconds,
+        })
+        .eq('id', ride.id)
+        .eq('status', 'searching');
 
-    if (error) {
-      toast({
-        title: 'Error',
-        description: 'This ride is no longer available',
-        variant: 'destructive',
-      });
-      return;
+      if (error) {
+        toast({
+          title: 'Error',
+          description: 'This ride is no longer available',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Grant Priority Driver status if accepted within 5 seconds
+      if (acceptanceTimeSeconds !== null && acceptanceTimeSeconds <= 5) {
+        const priorityUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        await supabase
+          .from('driver_profiles')
+          .update({ priority_driver_until: priorityUntil })
+          .eq('user_id', user.id);
+
+        toast({
+          title: '⚡ Priority Driver Activated!',
+          description: 'You get priority for the next 30 minutes for accepting fast!',
+        });
+      }
+
+      // Update UI immediately
+      setCurrentRide({ ...ride, status: 'driver_assigned' });
+      setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id));
+      
+      if (!acceptanceTimeSeconds || acceptanceTimeSeconds > 5) {
+        toast({
+          title: 'Ride accepted!',
+          description: 'Navigate to pickup location',
+        });
+      }
+
+      // Reset alert tracking
+      alertStartTimeRef.current = null;
+
+      // Background: fetch rider info + send notifications
+      fetchRiderInfo(ride.rider_id);
+
+      supabase.from('notifications').insert({
+        user_id: ride.rider_id,
+        ride_id: ride.id,
+        type: 'driver_assigned',
+        title: 'Driver Found! 🚗',
+        message: 'Your driver is on the way to pick you up.',
+      }).then(() => {});
+    } catch (error) {
+      console.error('[DriverDashboard] acceptRide error:', error);
+      toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
     }
-
-    // Grant Priority Driver status if accepted within 5 seconds
-    if (acceptanceTimeSeconds !== null && acceptanceTimeSeconds <= 5) {
-      const priorityUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes
-      await supabase
-        .from('driver_profiles')
-        .update({ priority_driver_until: priorityUntil })
-        .eq('user_id', user.id);
-
-      toast({
-        title: '⚡ Priority Driver Activated!',
-        description: 'You get priority for the next 30 minutes for accepting fast!',
-      });
-    }
-
-    // Update UI immediately
-    setCurrentRide({ ...ride, status: 'driver_assigned' });
-    setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id));
-    
-    if (!acceptanceTimeSeconds || acceptanceTimeSeconds > 5) {
-      toast({
-        title: 'Ride accepted!',
-        description: 'Navigate to pickup location',
-      });
-    }
-
-    // Reset alert tracking
-    alertStartTimeRef.current = null;
-
-    // Background: fetch rider info + send notifications
-    fetchRiderInfo(ride.rider_id);
-
-    supabase.from('notifications').insert({
-      user_id: ride.rider_id,
-      ride_id: ride.id,
-      type: 'driver_assigned',
-      title: 'Driver Found! 🚗',
-      message: 'Your driver is on the way to pick you up.',
-    }).then(() => {});
-
-    // Push notification is handled server-side via database triggers
   };
 
   const updateRideStatus = async (status: string) => {
     if (!currentRide || !user) return;
 
-    const updates: any = { status };
+    try {
+      const updates: any = { status };
 
-    if (status === 'driver_en_route') {
-      // Already set when accepting
-    } else if (status === 'arrived') {
-      // Driver arrived at pickup
-    } else if (status === 'in_progress') {
-      updates.pickup_at = new Date().toISOString();
-    } else if (status === 'completed') {
-      updates.dropoff_at = new Date().toISOString();
-      // Use subtotal_before_tax if available (new billing), otherwise fall back to estimated_fare
-      const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
-      const fee = calculatePlatformFee(fareForFee);
-      updates.actual_fare = currentRide.estimated_fare;
-      updates.platform_fee = fee;
-      updates.driver_earnings = fareForFee - fee;
-    }
+      if (status === 'driver_en_route') {
+        // Already set when accepting
+      } else if (status === 'arrived') {
+        // Driver arrived at pickup
+      } else if (status === 'in_progress') {
+        updates.pickup_at = new Date().toISOString();
+      } else if (status === 'completed') {
+        updates.dropoff_at = new Date().toISOString();
+        const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
+        const fee = calculatePlatformFee(fareForFee);
+        updates.actual_fare = currentRide.estimated_fare;
+        updates.platform_fee = fee;
+        updates.driver_earnings = fareForFee - fee;
+      }
 
-    const { error } = await supabase
-      .from('rides')
-      .update(updates)
-      .eq('id', currentRide.id);
+      const { error } = await supabase
+        .from('rides')
+        .update(updates)
+        .eq('id', currentRide.id);
 
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-      return;
-    }
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return;
+      }
 
-    // Push notifications are handled server-side via database triggers
-
-    if (status === 'completed') {
-      const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
-      const fee = calculatePlatformFee(fareForFee);
-      toast({
-        title: 'Ride completed!',
-        description: `You earned ${formatCurrency(fareForFee - fee, language)}`,
-      });
-      setCurrentRide(null);
-      setRiderInfo(null);
-      await refreshDriverProfile();
-    } else {
-      setCurrentRide((prev) => prev ? { ...prev, status } : null);
+      if (status === 'completed') {
+        const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
+        const fee = calculatePlatformFee(fareForFee);
+        toast({
+          title: 'Ride completed!',
+          description: `You earned ${formatCurrency(fareForFee - fee, language)}`,
+        });
+        setCurrentRide(null);
+        setRiderInfo(null);
+        await refreshDriverProfile();
+      } else {
+        setCurrentRide((prev) => prev ? { ...prev, status } : null);
+      }
+    } catch (error) {
+      console.error('[DriverDashboard] updateRideStatus error:', error);
+      toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
     }
   };
 
   const cancelRide = async () => {
     if (!currentRide || !user) return;
 
-    const { error } = await supabase
-      .from('rides')
-      .update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        cancelled_by: user.id,
-        cancellation_reason: 'Cancelled by driver',
-        driver_id: null,
-      })
-      .eq('id', currentRide.id);
+    try {
+      const { error } = await supabase
+        .from('rides')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: user.id,
+          cancellation_reason: 'Cancelled by driver',
+          driver_id: null,
+        })
+        .eq('id', currentRide.id);
 
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
-      return;
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      toast({ title: 'Ride cancelled' });
+      setCurrentRide(null);
+      setRiderInfo(null);
+    } catch (error) {
+      console.error('[DriverDashboard] cancelRide error:', error);
+      toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
     }
-
-    toast({ title: 'Ride cancelled' });
-    setCurrentRide(null);
-    setRiderInfo(null);
   };
 
   // Use subtotal_before_tax for fee calculation (excludes taxes which riders pay)
