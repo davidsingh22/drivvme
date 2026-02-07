@@ -93,7 +93,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
         unlockedRef.current = true;
       }
       return unlockedRef.current;
-    } catch {
+    } catch (_e) {
       return false;
     }
   }, [getCtx]);
@@ -122,7 +122,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
       audio.play().catch(() => {
         console.warn("[AlertSound] Fallback audio blocked");
       });
-    } catch {}
+    } catch (_e) {}
   }, []);
 
   // Play WebAudio beep — reads volume from ref
@@ -169,7 +169,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     playFallbackBeep();
     try {
       void playWebAudio();
-    } catch {}
+    } catch (_e) {}
   }, [playFallbackBeep, playWebAudio]);
 
   // Clear any running loop interval
@@ -187,7 +187,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     if (fallbackAudioRef.current) {
       try {
         fallbackAudioRef.current.pause();
-      } catch {}
+      } catch (_e) {}
       fallbackAudioRef.current = null;
     }
   }, [clearLoop]);
@@ -221,7 +221,7 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
       if (fallbackAudioRef.current) {
         try {
           fallbackAudioRef.current.pause();
-        } catch {}
+        } catch (_e) {}
         fallbackAudioRef.current = null;
       }
     };
