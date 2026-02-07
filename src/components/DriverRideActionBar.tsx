@@ -1,7 +1,8 @@
 import { MapPin, PlayCircle, CheckCircle, XCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
+import { useCallback, useRef } from 'react';
+import { cn } from '@/lib/utils';
 
 interface DriverRideActionBarProps {
   rideStatus?: string;
@@ -14,9 +15,60 @@ interface DriverRideActionBarProps {
   compact?: boolean;
 }
 
+/** Tap-safe button: fires once per gesture via onPointerUp/onTouchEnd/onClick */
+function TapButton({
+  children,
+  disabled,
+  className,
+  style,
+  onTap,
+}: {
+  children: React.ReactNode;
+  disabled?: boolean;
+  className?: string;
+  style?: React.CSSProperties;
+  onTap: () => void;
+}) {
+  const firedRef = useRef<number>(0);
+
+  const fireOnce = useCallback(() => {
+    const now = Date.now();
+    if (now - firedRef.current < 600) return;
+    firedRef.current = now;
+    onTap();
+  }, [onTap]);
+
+  const handle = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!disabled) fireOnce();
+  };
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      className={className}
+      style={{
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        WebkitTapHighlightColor: 'transparent',
+        touchAction: 'manipulation',
+        ...style,
+      }}
+      onPointerUp={handle}
+      onTouchEnd={handle}
+      onClick={handle}
+    >
+      {children}
+    </button>
+  );
+}
+
 /**
  * Reusable ride action bar — renders all 4 buttons ALWAYS.
  * Buttons that don't apply to the current status are disabled (never hidden).
+ * Uses tap-safe buttons to prevent iOS triple-tap issues.
  */
 const DriverRideActionBar = ({
   rideStatus,
@@ -41,66 +93,77 @@ const DriverRideActionBar = ({
   };
 
   return (
-    <div className="space-y-2">
+    <div
+      className="space-y-2"
+      onPointerDown={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
+    >
       {/* I've Arrived */}
-      <Button
-        className={`w-full ${btnH} font-bold text-white rounded-xl touch-manipulation`}
-        style={{ backgroundColor: arrivedEnabled ? 'hsl(45, 93%, 47%)' : 'hsl(45, 20%, 55%)', color: 'hsl(0, 0%, 10%)' }}
+      <TapButton
+        className={cn('w-full font-bold rounded-xl flex items-center justify-center gap-2', btnH)}
+        style={{
+          backgroundColor: arrivedEnabled ? 'hsl(45, 93%, 47%)' : 'hsl(45, 20%, 55%)',
+          color: 'hsl(0, 0%, 10%)',
+        }}
         disabled={isUpdating || !arrivedEnabled}
-        onClick={arrivedEnabled ? onArrived : () => handleDisabledClick(
+        onTap={arrivedEnabled ? onArrived : () => handleDisabledClick(
           language === 'fr' ? 'Non disponible dans ce statut' : 'Not available at this stage'
         )}
       >
-        <MapPin className="h-5 w-5 mr-2" />
+        <MapPin className="h-5 w-5" />
         {isUpdating && arrivedEnabled
           ? (language === 'fr' ? 'Mise à jour...' : 'Updating...')
           : (language === 'fr' ? 'Je suis arrivé' : "I've Arrived")}
-      </Button>
+      </TapButton>
 
       {/* Start Ride */}
-      <Button
-        className={`w-full ${btnH} font-bold rounded-xl touch-manipulation ${
+      <TapButton
+        className={cn(
+          'w-full font-bold rounded-xl flex items-center justify-center gap-2',
+          btnH,
           startEnabled ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-green-600/30 text-white/50'
-        }`}
+        )}
         disabled={isUpdating || !startEnabled}
-        onClick={startEnabled ? onStartRide : () => handleDisabledClick(
-          language === 'fr' ? 'Arrivez d\'abord au point de ramassage' : 'Arrive at pickup first'
+        onTap={startEnabled ? onStartRide : () => handleDisabledClick(
+          language === 'fr' ? "Arrivez d'abord au point de ramassage" : 'Arrive at pickup first'
         )}
       >
-        <PlayCircle className="h-5 w-5 mr-2" />
+        <PlayCircle className="h-5 w-5" />
         {isUpdating && startEnabled
           ? (language === 'fr' ? 'Démarrage...' : 'Starting...')
           : (language === 'fr' ? 'Démarrer la course' : 'Start Ride')}
-      </Button>
+      </TapButton>
 
       {/* Complete Ride */}
-      <Button
-        className={`w-full ${btnH} font-bold rounded-xl touch-manipulation ${
+      <TapButton
+        className={cn(
+          'w-full font-bold rounded-xl flex items-center justify-center gap-2',
+          btnH,
           completeEnabled ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-green-600/30 text-white/50'
-        }`}
+        )}
         disabled={isUpdating || !completeEnabled}
-        onClick={completeEnabled ? onCompleteRide : () => handleDisabledClick(
-          language === 'fr' ? 'Démarrez la course d\'abord' : 'Start the ride first'
+        onTap={completeEnabled ? onCompleteRide : () => handleDisabledClick(
+          language === 'fr' ? "Démarrez la course d'abord" : 'Start the ride first'
         )}
       >
-        <CheckCircle className="h-5 w-5 mr-2" />
+        <CheckCircle className="h-5 w-5" />
         {isUpdating && completeEnabled
           ? (language === 'fr' ? 'Finalisation...' : 'Completing...')
           : (language === 'fr' ? 'Terminer la course' : 'Complete Ride')}
-      </Button>
+      </TapButton>
 
       {/* Cancel Ride - always enabled */}
-      <Button
-        className={`w-full ${btnH} font-bold rounded-xl touch-manipulation`}
+      <TapButton
+        className={cn('w-full font-bold rounded-xl flex items-center justify-center gap-2', btnH)}
         style={{ backgroundColor: 'hsl(75, 80%, 50%)', color: 'hsl(0, 0%, 10%)' }}
         disabled={isUpdating}
-        onClick={onCancelRide}
+        onTap={onCancelRide}
       >
-        <XCircle className="h-5 w-5 mr-2" />
+        <XCircle className="h-5 w-5" />
         {isUpdating
           ? (language === 'fr' ? 'Annulation...' : 'Cancelling...')
           : (language === 'fr' ? 'Annuler la course' : 'Cancel Ride')}
-      </Button>
+      </TapButton>
     </div>
   );
 };
