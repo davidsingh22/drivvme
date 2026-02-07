@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Navigation } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+// Button replaced with native button for capture-phase tap support
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -101,14 +101,34 @@ export default function DriverFloatingGPSButton() {
 
   return (
     <>
-      {/* Floating GPS Button - Fixed at bottom right */}
-      <Button
-        onClick={() => setShowNavigation(true)}
-        className="fixed bottom-24 right-4 z-50 h-16 w-16 rounded-full shadow-2xl bg-primary hover:bg-primary/90 animate-pulse"
-        size="icon"
+      {/* Floating GPS Button - Fixed at bottom right, capture-phase tap for mobile */}
+      <button
+        type="button"
+        className="fixed bottom-24 right-4 z-50 h-16 w-16 rounded-full shadow-2xl bg-primary hover:bg-primary/90 animate-pulse flex items-center justify-center text-primary-foreground"
+        style={{
+          touchAction: 'manipulation',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          WebkitTapHighlightColor: 'transparent',
+        }}
+        onPointerDownCapture={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowNavigation(true);
+        }}
+        onTouchStartCapture={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowNavigation(true);
+        }}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setShowNavigation(true);
+        }}
       >
         <Navigation className="h-8 w-8" />
-      </Button>
+      </button>
 
       {/* Fullscreen Navigation Map */}
       {showNavigation && (

@@ -788,6 +788,16 @@ const DriverDashboard = () => {
     }
   };
 
+  // Pre-unlock audio on ANY user interaction so beep can play when ride arrives
+  useEffect(() => {
+    const handler = () => void unlockAlertSound();
+    const events = ['pointerdown', 'touchstart', 'click', 'scroll'];
+    events.forEach(e => window.addEventListener(e, handler, { passive: true, once: false }));
+    return () => {
+      events.forEach(e => window.removeEventListener(e, handler));
+    };
+  }, [unlockAlertSound]);
+
   // Use subtotal_before_tax for fee calculation (excludes taxes which riders pay)
   const currentRideFareForFee = currentRide ? (currentRide.subtotal_before_tax ?? currentRide.estimated_fare) : 0;
   const currentRideFee = currentRide ? calculatePlatformFee(currentRideFareForFee) : 0;
@@ -819,7 +829,7 @@ const DriverDashboard = () => {
         <Card className="w-full max-w-sm p-6 text-center">
           <div className="font-medium">Reconnecting…</div>
           <div className="mt-2 text-sm text-muted-foreground">
-            We’re keeping you signed in while we reload your driver account.
+            We're keeping you signed in while we reload your driver account.
           </div>
           <div className="mt-5 flex flex-col gap-3">
             <Button
@@ -840,7 +850,7 @@ const DriverDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background" onPointerDown={() => void unlockAlertSound()}>
 
       <RideOfferModal
         open={newRideAlertOpen}
@@ -975,13 +985,34 @@ const DriverDashboard = () => {
 
             {/* GPS Navigation Button - Prominent when there's an active ride */}
             {currentRide && ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(currentRide.status) && (
-              <Button
-                className="w-full mb-4 py-6 text-lg font-bold bg-primary hover:bg-primary/90"
-                onClick={() => setShowGPSNavigation(true)}
+              <button
+                type="button"
+                className="w-full mb-4 py-6 text-lg font-bold bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl flex items-center justify-center gap-3"
+                style={{
+                  touchAction: 'manipulation',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  WebkitTapHighlightColor: 'transparent',
+                }}
+                onPointerDownCapture={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowGPSNavigation(true);
+                }}
+                onTouchStartCapture={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowGPSNavigation(true);
+                }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowGPSNavigation(true);
+                }}
               >
-                <Map className="h-6 w-6 mr-3" />
+                <Map className="h-6 w-6" />
                 {language === 'fr' ? 'Ouvrir Navigation GPS' : 'Open GPS Navigation'}
-              </Button>
+              </button>
             )}
 
             {/* Profile, Help and Inbox Buttons */}

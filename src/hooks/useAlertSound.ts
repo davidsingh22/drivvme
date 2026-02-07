@@ -46,11 +46,13 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     if (!ctx) return false;
 
     try {
+      // Always attempt resume — iOS may suspend at any time
       if (ctx.state === "suspended") {
         await ctx.resume();
       }
 
-      if (!unlockedRef.current && ctx.state === "running") {
+      // Play a silent tone to fully unlock the audio pipeline on iOS
+      if (ctx.state === "running") {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         gain.gain.value = 0.001;
@@ -58,9 +60,9 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
         gain.connect(ctx.destination);
         osc.start();
         osc.stop(ctx.currentTime + 0.01);
+        unlockedRef.current = true;
       }
 
-      unlockedRef.current = ctx.state === "running";
       return unlockedRef.current;
     } catch {
       return false;
@@ -89,12 +91,19 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
   }, []);
 
   const playOnce = useCallback(async () => {
+    // Always try to unlock + resume before playing
     await unlock();
 
     const ctx = ctxRef.current;
     if (!ctx) return false;
 
+    // Aggressive resume: try multiple times on iOS
     if (ctx.state === "suspended") {
+      try { await ctx.resume(); } catch { /* */ }
+    }
+    if (ctx.state === "suspended") {
+      // Second attempt after a micro-delay
+      await new Promise(r => setTimeout(r, 50));
       try { await ctx.resume(); } catch { /* */ }
     }
     if (ctx.state !== "running") return false;
