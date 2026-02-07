@@ -588,6 +588,27 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
 
         {/* ===== RIDE ACTION BUTTONS - Outside card, always visible ===== */}
         <div className="mt-4 pb-4 space-y-3">
+          {/* GPS Navigation Instruction Banner */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex items-center gap-3 p-4 rounded-xl border-2 border-primary bg-primary/10"
+          >
+            <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 animate-pulse">
+              <Map className="h-5 w-5 text-primary" />
+            </div>
+            <div className="flex-1">
+              <p className="font-bold text-sm text-primary">
+                {language === 'fr' ? 'Ouvrir la navigation GPS' : 'Open GPS Navigation'}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {language === 'fr' 
+                  ? 'Appuyez ci-dessous pour démarrer la navigation vers le passager' 
+                  : 'Tap below to start navigating to the rider'}
+              </p>
+            </div>
+          </motion.div>
+
           {/* Open GPS Navigation - Always available */}
           <Button
             className="w-full py-6 text-lg font-bold bg-primary hover:bg-primary/90 rounded-xl touch-manipulation"

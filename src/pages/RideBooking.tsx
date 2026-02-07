@@ -328,14 +328,13 @@ const RideBooking = () => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         
-        // Wait for mapboxToken if not available yet
-        if (!mapboxToken) {
-          // Store coords and wait for token
-          const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
-          setPickupAddress(tempAddress);
-          setPickup({ address: tempAddress, lat, lng });
-          return;
-        }
+        // Always store coords immediately so pickup is never null
+        const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
+        setPickup({ address: tempAddress, lat, lng });
+        setPickupAddress(tempAddress);
+        
+        // Wait for mapboxToken if not available yet - effect below will resolve
+        if (!mapboxToken) return;
         
         await attemptReverseGeocode(lat, lng);
       },
@@ -345,6 +344,13 @@ const RideBooking = () => {
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
+    
+    // Safety timeout: never show detecting overlay for more than 6 seconds
+    const safetyTimer = setTimeout(() => {
+      setIsDetectingLocation(false);
+    }, 6000);
+    
+    return () => clearTimeout(safetyTimer);
   }, [mapboxToken, language, reverseGeocode]);
   
   // Effect to resolve address when pickup has coords but generic address
@@ -1308,6 +1314,7 @@ const RideBooking = () => {
             minutesAway={minutesAway}
             onShareTrip={handleShareTrip}
             onSafetyPress={() => setSafetySheetOpen(true)}
+            onCancelRide={handleCancelRide}
           />
         ) : (
           <div className="absolute bottom-0 left-0 right-0 z-10">
@@ -1340,22 +1347,7 @@ const RideBooking = () => {
           onShareLocation={handleShareTrip}
         />
 
-        {/* Cancel button for early phases */}
-        {(step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress') && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="absolute bottom-[280px] left-4 right-4 z-10"
-          >
-            <Button
-              variant="outline"
-              onClick={handleCancelRide}
-              className="w-full bg-background/80 backdrop-blur-sm text-destructive border-destructive/50 hover:bg-destructive/10"
-            >
-              {t('common.cancel')} Ride
-            </Button>
-          </motion.div>
-        )}
+        {/* Cancel button is now inside InRideDriverCard trip details */}
       </div>
     );
   }
