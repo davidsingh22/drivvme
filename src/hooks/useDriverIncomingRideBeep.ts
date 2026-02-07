@@ -3,74 +3,110 @@ import { useEffect, useRef, useCallback } from "react";
 /**
  * DRIVER INCOMING RIDE BEEP
  *
+ * Uses Web Audio API OscillatorNode to generate a real audible tone.
+ * This bypasses file-loading issues AND works better on mobile than
+ * HTMLAudioElement (which gets blocked outside user-gesture contexts).
+ *
+ * The AudioContext is "unlocked" on the very first user interaction
+ * (tap/click anywhere) so that subsequent programmatic plays work
+ * even from realtime-callback contexts.
+ *
  * RULES:
  * - Beep starts when incomingRideId is truthy (ride OFFER)
  * - Beep stops when incomingRideId becomes null/undefined
  * - Beep NEVER depends on active/accepted ride state
- * - Uses inline base64 WAV so there is zero file-loading risk
  */
 
-// Tiny base64-encoded 200ms 880Hz beep WAV
-const BEEP_WAV =
-  "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQ4AAAD/" +
-  "/wAA//8AAP//AAD//w==";
+// Singleton AudioContext – created once, reused forever
+let _audioCtx: AudioContext | null = null;
+let _unlocked = false;
 
-function createBeepAudio(): HTMLAudioElement {
-  const a = new Audio(BEEP_WAV);
-  a.volume = 1.0;
-  return a;
+function getAudioContext(): AudioContext {
+  if (!_audioCtx) {
+    _audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  }
+  return _audioCtx;
+}
+
+// Unlock AudioContext on first user gesture (required by Safari / iOS)
+function ensureUnlockListeners() {
+  if (_unlocked) return;
+  const unlock = () => {
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+    // Play a silent buffer to fully unlock
+    try {
+      const buf = ctx.createBuffer(1, 1, 22050);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch (_e) {
+      /* ignore */
+    }
+    _unlocked = true;
+    document.removeEventListener("pointerdown", unlock, true);
+    document.removeEventListener("click", unlock, true);
+    document.removeEventListener("touchstart", unlock, true);
+  };
+  document.addEventListener("pointerdown", unlock, true);
+  document.addEventListener("click", unlock, true);
+  document.addEventListener("touchstart", unlock, true);
+}
+
+// Call once at module load
+ensureUnlockListeners();
+
+/** Play a single 200ms 880Hz beep using OscillatorNode */
+function playBeepTone() {
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.value = 880;
+    gain.gain.value = 0.5;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.2);
+  } catch (_e) {
+    /* AudioContext not available */
+  }
 }
 
 export function useDriverIncomingRideBeep(
   incomingRideId: string | null | undefined
 ) {
   const intervalRef = useRef<number | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const stopBeep = useCallback(() => {
     if (intervalRef.current !== null) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    if (audioRef.current) {
-      try {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-      } catch (_e) {
-        /* ignore */
-      }
-      audioRef.current = null;
-    }
   }, []);
 
   const startBeep = useCallback(() => {
     stopBeep();
 
-    audioRef.current = createBeepAudio();
-
     // Play once immediately
-    try {
-      audioRef.current.currentTime = 0;
-      audioRef.current.play().catch(() => {});
-    } catch (_e) {
-      /* blocked */
-    }
+    playBeepTone();
 
     // Then repeat every 1.2s
     intervalRef.current = window.setInterval(() => {
-      const a = audioRef.current;
-      if (!a) return;
-      try {
-        a.currentTime = 0;
-        a.play().catch(() => {});
-      } catch (_e) {
-        /* blocked */
-      }
+      playBeepTone();
     }, 1200);
   }, [stopBeep]);
 
   useEffect(() => {
     if (incomingRideId) {
+      console.log("[BeepHook] ▶ Starting beep for ride:", incomingRideId);
       startBeep();
     } else {
       stopBeep();
@@ -78,6 +114,5 @@ export function useDriverIncomingRideBeep(
     return () => stopBeep();
   }, [incomingRideId, startBeep, stopBeep]);
 
-  // Expose stop so callers can force-stop if needed
   return { stopBeep };
 }
