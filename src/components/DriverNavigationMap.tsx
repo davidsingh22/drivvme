@@ -537,40 +537,72 @@ const DriverNavigationMap = ({
           <p className="text-xs text-white truncate flex-1">{destination.address}</p>
         </div>
 
-        {/* Action buttons - stacked vertically, compact */}
+        {/* Action buttons - ALWAYS visible, status determines which is active */}
         <div className="space-y-2">
-          {/* I've Arrived button */}
-          {onArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
+          {/* Primary action button based on ride status */}
+          {(rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
             <Button
               className="w-full h-12 text-base font-bold text-white touch-manipulation"
               style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
               onClick={onArrived}
+              disabled={!onArrived}
             >
               <MapPin className="h-5 w-5 mr-2" />
               {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
             </Button>
           )}
 
-          {/* Start Ride button */}
-          {onStartRide && rideStatus === 'arrived' && (
+          {rideStatus === 'arrived' && (
             <Button
               className="w-full h-12 text-base font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
               onClick={onStartRide}
+              disabled={!onStartRide}
             >
               <PlayCircle className="h-5 w-5 mr-2" />
               {language === 'fr' ? "Démarrer la course" : "Start Ride"}
             </Button>
           )}
 
-          {/* Complete Ride button */}
-          {onCompleteRide && rideStatus === 'in_progress' && (
+          {rideStatus === 'in_progress' && (
             <Button
               className="w-full h-12 text-base font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
               onClick={onCompleteRide}
+              disabled={!onCompleteRide}
             >
               <CheckCircle className="h-5 w-5 mr-2" />
               {language === 'fr' ? "Terminer la course" : "Complete Ride"}
             </Button>
+          )}
+
+          {/* Fallback: if no status matched above, show all buttons */}
+          {!['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'].includes(rideStatus || '') && (
+            <>
+              <Button
+                className="w-full h-12 text-base font-bold text-white touch-manipulation"
+                style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
+                onClick={onArrived}
+                disabled={!onArrived}
+              >
+                <MapPin className="h-5 w-5 mr-2" />
+                {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
+              </Button>
+              <Button
+                className="w-full h-12 text-base font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
+                onClick={onStartRide}
+                disabled={!onStartRide}
+              >
+                <PlayCircle className="h-5 w-5 mr-2" />
+                {language === 'fr' ? "Démarrer la course" : "Start Ride"}
+              </Button>
+              <Button
+                className="w-full h-12 text-base font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
+                onClick={onCompleteRide}
+                disabled={!onCompleteRide}
+              >
+                <CheckCircle className="h-5 w-5 mr-2" />
+                {language === 'fr' ? "Terminer la course" : "Complete Ride"}
+              </Button>
+            </>
           )}
 
           {/* Exit + Mute + Recenter row */}
@@ -604,17 +636,16 @@ const DriverNavigationMap = ({
             )}
           </div>
 
-          {/* Cancel Ride - always available */}
-          {onCancelRide && (
-            <Button
-              variant="destructive"
-              className="w-full h-10 text-sm font-bold touch-manipulation"
-              onClick={onCancelRide}
-            >
-              <XCircle className="h-4 w-4 mr-2" />
-              {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
-            </Button>
-          )}
+          {/* Cancel Ride - always visible */}
+          <Button
+            variant="destructive"
+            className="w-full h-10 text-sm font-bold touch-manipulation"
+            onClick={onCancelRide}
+            disabled={!onCancelRide}
+          >
+            <XCircle className="h-4 w-4 mr-2" />
+            {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
+          </Button>
         </div>
       </div>
 
