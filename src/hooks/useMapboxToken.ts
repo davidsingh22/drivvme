@@ -52,7 +52,7 @@ const setSessionCache = (token: string) => {
 
 // Fetch token function that can be called early
 const fetchTokenInternal = async (): Promise<string | null> => {
-  // Check cache first
+  // Check cache first — instant, no network
   const cached = cachedToken || getSessionCache();
   if (cached) {
     cachedToken = cached;
@@ -66,21 +66,23 @@ const fetchTokenInternal = async (): Promise<string | null> => {
 
   // Start new fetch with retry logic
   tokenFetchPromise = (async () => {
-    const maxRetries = 2;
+    const maxRetries = 1;
     
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        // Always refresh session first to ensure fresh JWT (prevents "Auth session missing" on mobile)
-        const { data: refreshData } = await supabase.auth.refreshSession();
-        let session = refreshData?.session ?? null;
+        // Try existing session first (instant, no network call)
+        const { data: { session: existingSession } } = await supabase.auth.getSession();
+        let session = existingSession;
+        
+        // Only refresh if no session or token is about to expire (< 60s)
+        if (!session || (session.expires_at && session.expires_at * 1000 - Date.now() < 60000)) {
+          const { data: refreshData } = await supabase.auth.refreshSession();
+          session = refreshData?.session ?? null;
+        }
+        
         if (!session) {
-          // Fallback: check existing session
-          const { data: { session: existingSession } } = await supabase.auth.getSession();
-          session = existingSession;
-          if (!session) {
-            console.log('[useMapboxToken] No session available, skipping token fetch');
-            return null;
-          }
+          console.log('[useMapboxToken] No session available, skipping token fetch');
+          return null;
         }
 
         const { data, error } = await supabase.functions.invoke('get-mapbox-token');
@@ -88,7 +90,7 @@ const fetchTokenInternal = async (): Promise<string | null> => {
         if (error) {
           console.error(`Mapbox token fetch error (attempt ${attempt + 1}):`, error.message);
           if (attempt < maxRetries) {
-            await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+            await new Promise(r => setTimeout(r, 300));
             continue;
           }
           return null;
@@ -110,7 +112,7 @@ const fetchTokenInternal = async (): Promise<string | null> => {
       } catch (err: any) {
         console.error(`Mapbox token fetch failed (attempt ${attempt + 1}):`, err.message);
         if (attempt < maxRetries) {
-          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+          await new Promise(r => setTimeout(r, 300));
           continue;
         }
         return null;
