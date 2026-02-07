@@ -117,15 +117,17 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     };
   }, []);
 
-  /** Play using HTML5 Audio fallback (works without user gesture on many mobile browsers) */
+  /** Play using HTML5 Audio fallback — reuses same element for reliability */
   const playFallbackBeep = useCallback(() => {
     try {
-      const audio = new Audio(BEEP_WAV_URI);
+      if (!fallbackAudioRef.current) {
+        fallbackAudioRef.current = new Audio(BEEP_WAV_URI);
+      }
+      const audio = fallbackAudioRef.current;
       audio.volume = Math.min(volume, 1);
-      fallbackAudioRef.current = audio;
+      audio.currentTime = 0;
       audio.play().catch(() => {
-        // Even fallback blocked — nothing more we can do
-        console.warn('[AlertSound] Fallback audio also blocked');
+        console.warn('[AlertSound] Fallback audio blocked');
       });
       return true;
     } catch {
