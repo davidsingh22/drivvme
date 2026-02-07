@@ -15,7 +15,7 @@ import DriverProfileModal from '@/components/DriverProfileModal';
 import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
-import { useAlertSound } from '@/hooks/useAlertSound';
+import { useDriverIncomingRideBeep } from '@/hooks/useDriverIncomingRideBeep';
 import { RideOfferModal } from '@/components/RideOfferModal';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { DriverWakeLockBanner } from '@/components/DriverWakeLockBanner';
@@ -146,11 +146,8 @@ const DriverDashboard = () => {
   // Sync GPS position to local state for map
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
   
-  const { play: playAlertSound, stop: stopAlertSound, unlock: unlockAlertSound } = useAlertSound({
-    volume: 1.0,  // MAXIMUM volume
-    loop: true, 
-    loopInterval: 1500  // Faster loop - every 1.5 seconds
-  });
+  // Beep is driven entirely by whether newRideAlertRideId is set
+  const { stopBeep } = useDriverIncomingRideBeep(newRideAlertOpen ? newRideAlertRideId : null);
   const alertStartTimeRef = useRef<number | null>(null);
 
   // Helper function for distance calculation (must be defined before any hooks that call it)
@@ -411,7 +408,6 @@ const DriverDashboard = () => {
             setNewRideAlertRideId(ride.id);
             setNewRideAlertOpen(true);
             alertStartTimeRef.current = Date.now();
-            void playAlertSound();
 
             toast({
               title: '🚗 NEW RIDE REQUEST!',
@@ -545,8 +541,7 @@ const DriverDashboard = () => {
   const acceptRide = async (ride: RideRequest) => {
     if (!user || busyAction) return;
 
-    // Stop the alert sound immediately and clear cached ride
-    stopAlertSound();
+    // Stop the beep immediately and clear cached ride
     setNewRideAlertOpen(false);
     setCachedAlertRide(null);
     setNewRideAlertRideId(null);
@@ -632,7 +627,7 @@ const DriverDashboard = () => {
   const updateRideStatus = async (status: string) => {
     if (!currentRide || !user || busyAction) return;
 
-    stopAlertSound();
+    stopBeep();
     setBusyAction(status);
 
     // Optimistic update — instant UI feedback
@@ -696,7 +691,7 @@ const DriverDashboard = () => {
   const cancelRide = async () => {
     if (!currentRide || !user || busyAction) return;
 
-    stopAlertSound();
+    stopBeep();
     setBusyAction('cancel');
 
     // Optimistic: clear ride immediately
@@ -735,15 +730,7 @@ const DriverDashboard = () => {
     }
   };
 
-  // Pre-unlock audio on ANY user interaction so beep can play when ride arrives
-  useEffect(() => {
-    const handler = () => void unlockAlertSound();
-    const events = ['pointerdown', 'touchstart', 'click', 'scroll'];
-    events.forEach(e => window.addEventListener(e, handler, { passive: true, once: false }));
-    return () => {
-      events.forEach(e => window.removeEventListener(e, handler));
-    };
-  }, [unlockAlertSound]);
+  // No unlock needed — the beep hook handles playback directly
 
   // Use subtotal_before_tax for fee calculation (excludes taxes which riders pay)
   const currentRideFareForFee = currentRide ? (currentRide.subtotal_before_tax ?? currentRide.estimated_fare) : 0;
@@ -797,7 +784,7 @@ const DriverDashboard = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background" onPointerDown={() => void unlockAlertSound()}>
+    <div className="min-h-screen bg-background">
 
       <RideOfferModal
         open={newRideAlertOpen}
@@ -808,7 +795,6 @@ const DriverDashboard = () => {
           setNewRideAlertOpen(false);
           setCachedAlertRide(null);
           setNewRideAlertRideId(null);
-          stopAlertSound();
           alertStartTimeRef.current = null;
         }}
         onAccept={() => {
@@ -849,8 +835,6 @@ const DriverDashboard = () => {
               <Switch
                 checked={isOnline}
                 onCheckedChange={async () => {
-                  // Unlock audio (browser gesture) so subsequent alerts can play sound.
-                  await unlockAlertSound();
                   await toggleOnlineStatus();
                 }}
                 className="data-[state=checked]:bg-success"
@@ -1044,7 +1028,6 @@ const DriverDashboard = () => {
             {/* Go Online/Offline Button */}
             <Button
                 onClick={async () => {
-                  await unlockAlertSound();
                   await toggleOnlineStatus();
                 }}
               className={`w-full h-16 text-lg font-bold mb-6 transition-all ${
