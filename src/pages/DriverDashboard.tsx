@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, CheckCircle, XCircle, UserCircle, Bell, Map, HelpCircle } from 'lucide-react';
+import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, UserCircle, Bell, Map, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
+import { formatCurrency } from '@/lib/pricing';
 import Navbar from '@/components/Navbar';
 import MapComponent from '@/components/MapComponent';
 import DriverProfileModal from '@/components/DriverProfileModal';
@@ -86,7 +86,7 @@ const DriverDashboard = () => {
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
   const [isOnline, setIsOnline] = useState(false);
-  const [availableRides, setAvailableRides] = useState<RideRequest[]>([]);
+  // availableRides removed — push-only dispatch, no feed
   const [currentRide, setCurrentRide] = useState<RideRequest | null>(null);
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
   const [todayEarnings, setTodayEarnings] = useState(0);
@@ -101,7 +101,7 @@ const DriverDashboard = () => {
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
   // Cache the full ride data when alert opens so it persists even if ride is taken/cancelled
   const [cachedAlertRide, setCachedAlertRide] = useState<RideRequest | null>(null);
-  const prevRideIdsRef = useRef<Set<string>>(new Set());
+  
   
   // GPS Streaming for live driver location (continuous foreground tracking)
   const {
@@ -372,109 +372,57 @@ const DriverDashboard = () => {
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
-  // Track whether this is the first fetch (to show alert for already-existing rides)
-  const isFirstFetchRef = useRef(true);
-
-  // Fetch available rides when online
+  // Push-based ride offer listener — no polling, no feed.
+  // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
   useEffect(() => {
     if (!isOnline || !user || !session) return;
-    
-    // Reset first fetch flag when going online
-    isFirstFetchRef.current = true;
-    prevRideIdsRef.current = new Set();
 
-    const fetchRides = async () => {
-      // Avoid forcing refreshSession here (can cause unexpected auth churn on flaky connections)
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) return;
-
-      const { data, error } = await supabase
-        .from('rides')
-        .select('*')
-        .eq('status', 'searching')
-        .order('requested_at', { ascending: true });
-
-      if (!error && data) {
-        try {
-          // Detect newly-added rides (to trigger big in-app alert + sound).
-          // Defensive: filter out any malformed rides to prevent crashes
-          const validRides = data.filter((r) => 
-            r && 
-            typeof r.id === 'string' && 
-            typeof r.pickup_lat === 'number' && 
-            typeof r.pickup_lng === 'number'
-          );
-
-          const nextIds = new Set(validRides.map((r) => r.id));
-          const prevIds = prevRideIdsRef.current;
-          const isFirstFetch = isFirstFetchRef.current;
-          
-          // On first fetch, show alert for the most recent waiting ride
-          // On subsequent fetches, only show alert for truly new rides
-          let rideToAlert: RideRequest | null = null;
-          
-          if (isFirstFetch && validRides.length > 0) {
-            // First fetch: show the most recent ride that's waiting
-            rideToAlert = validRides[validRides.length - 1]; // Most recent by requested_at
-            isFirstFetchRef.current = false;
-          } else if (!isFirstFetch) {
-            // Subsequent fetch: only show newly added rides
-            rideToAlert = validRides.find((r) => !prevIds.has(r.id)) ?? null;
-          }
-          
-          prevRideIdsRef.current = nextIds;
-          setAvailableRides(validRides);
-
-          if (rideToAlert && !currentRide && !newRideAlertOpen) {
-            // Cache the full ride data so it persists even if ride is cancelled/taken
-            setCachedAlertRide(rideToAlert);
-            setNewRideAlertRideId(rideToAlert.id);
-            setNewRideAlertOpen(true);
-            alertStartTimeRef.current = Date.now();
-            void playAlertSound();
-            console.log('[DriverDashboard] 🔔 Showing ride alert for:', rideToAlert.id, isFirstFetch ? '(initial load)' : '(new ride)');
-          }
-        } catch (err) {
-          console.error('[DriverDashboard] Error processing rides:', err);
-        }
-      }
-    };
-
-    fetchRides();
-
-    // Subscribe to new rides
+    // Listen for new ride notifications via realtime on the notifications table
     const channel = supabase
-      .channel('searching-rides')
+      .channel('driver-ride-offers')
       .on(
         'postgres_changes',
         {
-          event: '*',
+          event: 'INSERT',
           schema: 'public',
-          table: 'rides',
-          filter: 'status=eq.searching',
+          table: 'notifications',
+          filter: `user_id=eq.${user.id}`,
         },
-        (payload) => {
+        async (payload) => {
           try {
-            // Reliable in-app fallback alert (works even when system push is flaky on mobile browsers)
-            if (!currentRide && payload.eventType === 'INSERT') {
-              console.log('[DriverDashboard] 🚗 New ride INSERT detected via realtime!');
-              
-              // Play LOUD alert sound immediately on realtime event
-              void playAlertSound();
-              
-              toast({
-                title: '🚗 NEW RIDE REQUEST!',
-                description: 'A rider is looking for a driver now.',
-              });
+            const notif = payload.new as { type: string; ride_id: string | null };
+            if (notif.type !== 'new_ride' || !notif.ride_id) return;
+            if (currentRide || newRideAlertOpen) return; // already busy
 
-              if ('vibrate' in navigator) {
-                // Strong vibration pattern
-                (navigator as any).vibrate?.([300, 100, 300, 100, 500]);
-              }
+            // Fetch the ride details
+            const { data: ride, error } = await supabase
+              .from('rides')
+              .select('*')
+              .eq('id', notif.ride_id)
+              .eq('status', 'searching')
+              .maybeSingle();
+
+            if (error || !ride) return;
+
+            console.log('[DriverDashboard] 🔔 Push-based ride offer:', ride.id);
+              
+            // Cache and show offer modal
+            setCachedAlertRide(ride);
+            setNewRideAlertRideId(ride.id);
+            setNewRideAlertOpen(true);
+            alertStartTimeRef.current = Date.now();
+            void playAlertSound();
+
+            toast({
+              title: '🚗 NEW RIDE REQUEST!',
+              description: 'A rider is looking for a driver now.',
+            });
+
+            if ('vibrate' in navigator) {
+              (navigator as any).vibrate?.([300, 100, 300, 100, 500]);
             }
-            fetchRides();
           } catch (err) {
-            console.error('[DriverDashboard] Realtime handler error:', err);
+            console.error('[DriverDashboard] Ride offer handler error:', err);
           }
         }
       )
@@ -652,7 +600,6 @@ const DriverDashboard = () => {
 
       // Update UI immediately
       setCurrentRide({ ...ride, status: 'driver_assigned' });
-      setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id));
       
       if (!acceptanceTimeSeconds || acceptanceTimeSeconds > 5) {
         toast({
@@ -855,7 +802,7 @@ const DriverDashboard = () => {
       <RideOfferModal
         open={newRideAlertOpen}
         ride={alertRide}
-        countdownSeconds={30}
+        countdownSeconds={10}
         driverLocation={driverLocation}
         onDecline={() => {
           setNewRideAlertOpen(false);
@@ -1126,127 +1073,19 @@ const DriverDashboard = () => {
             {/* Earnings moved to dedicated Earnings page (/earnings) */}
             {/* Active ride buttons are handled by DriverActiveRidePanel above */}
 
-            {/* Available Rides Section - Always visible when online */}
-            {isOnline && (
-              <div id="available-rides" className={currentRide ? 'mt-8 pt-6 border-t border-border' : ''}>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="font-display text-xl font-bold flex items-center gap-2">
-                    <Navigation className="h-5 w-5 text-primary" />
-                    {currentRide ? 'Other Available Rides' : 'Available Rides'}
-                  </h2>
-                  {availableRides.length > 0 && (
-                    <span className="bg-primary text-primary-foreground text-xs font-bold px-2.5 py-1 rounded-full">
-                      {availableRides.length}
-                    </span>
-                  )}
-                </div>
-
-                {availableRides.length === 0 && (
-                  <Card className="p-8 text-center border-dashed border-2 border-muted-foreground/20">
-                    <Navigation className="h-12 w-12 mx-auto mb-3 text-muted-foreground/40" />
-                    <p className="font-medium text-muted-foreground">No rides available nearby</p>
-                    <p className="text-sm text-muted-foreground/70 mt-1">New requests will appear here automatically</p>
-                  </Card>
-                )}
-
-                <div className="space-y-4">
-                  {availableRides.map((ride, index) => {
-                    // Calculate pickup distance from driver
-                    let pickupDistanceKm: number | undefined;
-                    if (driverLocation && typeof ride.pickup_lat === 'number' && typeof ride.pickup_lng === 'number') {
-                      pickupDistanceKm = calculateDistanceKm(
-                        driverLocation.lat, driverLocation.lng,
-                        ride.pickup_lat, ride.pickup_lng
-                      );
-                    }
-                    const driverEarnings = Number(ride.estimated_fare) - calculatePlatformFee(Number(ride.estimated_fare));
-
-                    return (
-                      <motion.div
-                        key={ride.id}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.05 }}
-                      >
-                        <Card className="p-4 border-primary/20 hover:border-primary/40 transition-all hover:shadow-md">
-                          {/* Earnings highlight */}
-                          <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                              {pickupDistanceKm !== undefined
-                                ? `${pickupDistanceKm.toFixed(1)} km away`
-                                : 'Ride Request'}
-                            </span>
-                            <span className="text-lg font-bold text-accent">
-                              {formatCurrency(driverEarnings, language)}
-                            </span>
-                          </div>
-
-                          {/* Route */}
-                          <div className="space-y-2 mb-3">
-                            <div className="flex items-start gap-2">
-                              <div className="mt-1.5 h-2.5 w-2.5 rounded-full bg-primary flex-shrink-0" />
-                              <p className="text-sm font-medium line-clamp-1">{ride.pickup_address}</p>
-                            </div>
-                            <div className="ml-[5px] border-l-2 border-dashed border-muted-foreground/30 h-3" />
-                            <div className="flex items-start gap-2">
-                              <div className="mt-1.5 h-2.5 w-2.5 rounded-sm bg-accent flex-shrink-0" />
-                              <p className="text-sm font-medium line-clamp-1">{ride.dropoff_address}</p>
-                            </div>
-                          </div>
-
-                          {/* Trip details */}
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground mb-3">
-                            <span className="flex items-center gap-1">
-                              <MapPin className="h-3 w-3" />
-                              {formatDistance(Number(ride.distance_km), language)}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              {formatDuration(ride.estimated_duration_minutes, language)}
-                            </span>
-                          </div>
-
-                          {/* Earnings breakdown */}
-                          <div className="p-3 bg-muted/50 rounded-lg mb-4 text-sm">
-                            <div className="flex justify-between mb-1">
-                              <span className="text-muted-foreground">Fare</span>
-                              <span>{formatCurrency(Number(ride.estimated_fare), language)}</span>
-                            </div>
-                            <div className="flex justify-between text-destructive mb-1">
-                              <span>{t('driver.platformFee')}</span>
-                              <span>-{formatCurrency(calculatePlatformFee(Number(ride.estimated_fare)), language)}</span>
-                            </div>
-                            <div className="flex justify-between font-bold text-accent pt-2 border-t border-border">
-                              <span>{t('driver.yourEarnings')}</span>
-                              <span>{formatCurrency(driverEarnings, language)}</span>
-                            </div>
-                          </div>
-
-                          {/* Action buttons */}
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button
-                              variant="outline"
-                              className="text-destructive border-destructive/50 hover:bg-destructive/10"
-                              onClick={() => setAvailableRides((prev) => prev.filter((r) => r.id !== ride.id))}
-                            >
-                              <XCircle className="h-4 w-4 mr-2" />
-                              {t('driver.decline')}
-                            </Button>
-                            <Button
-                              className="gradient-primary"
-                              onClick={() => acceptRide(ride)}
-                              disabled={!!currentRide}
-                            >
-                              <CheckCircle className="h-4 w-4 mr-2" />
-                              {t('driver.accept')}
-                            </Button>
-                          </div>
-                        </Card>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </div>
+            {/* Waiting for rides - push-only, no feed */}
+            {isOnline && !currentRide && (
+              <Card className="p-8 text-center border-dashed border-2 border-muted-foreground/20">
+                <Navigation className="h-12 w-12 mx-auto mb-3 text-muted-foreground/40 animate-pulse" />
+                <p className="font-medium text-muted-foreground">
+                  {language === 'fr' ? 'En attente de courses...' : 'Waiting for ride offers...'}
+                </p>
+                <p className="text-sm text-muted-foreground/70 mt-1">
+                  {language === 'fr' 
+                    ? 'Vous recevrez une alerte quand une course est disponible'
+                    : 'You\'ll get an alert when a ride is available nearby'}
+                </p>
+              </Card>
             )}
 
             {/* Offline message */}
