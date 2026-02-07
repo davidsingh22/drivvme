@@ -93,11 +93,13 @@ export default function DriverFloatingGPSButton() {
   // Don't render if no active ride
   if (!activeRide) return null;
 
-  const destination = activeRide.status === 'in_progress'
+  // Before "Start Ride", always navigate to pickup only
+  const isInProgress = activeRide.status === 'in_progress';
+  const destination = isInProgress
     ? { lat: activeRide.dropoff_lat, lng: activeRide.dropoff_lng, address: activeRide.dropoff_address }
     : { lat: activeRide.pickup_lat, lng: activeRide.pickup_lng, address: activeRide.pickup_address };
 
-  const destinationType = activeRide.status === 'in_progress' ? 'dropoff' : 'pickup';
+  const destinationType = isInProgress ? 'dropoff' : 'pickup';
 
   return (
     <>
@@ -137,6 +139,7 @@ export default function DriverFloatingGPSButton() {
           destination={destination}
           destinationType={destinationType}
           onClose={() => setShowNavigation(false)}
+          hideDestination={!isInProgress}
         />
       )}
     </>
