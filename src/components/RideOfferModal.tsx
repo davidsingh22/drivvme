@@ -48,7 +48,7 @@ export function RideOfferModal({
   ride,
   onDecline,
   onAccept,
-  countdownSeconds = 20,
+  countdownSeconds = 25,
   driverLocation,
 }: RideOfferModalProps) {
   const { language } = useLanguage();
