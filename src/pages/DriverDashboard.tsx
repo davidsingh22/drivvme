@@ -30,6 +30,7 @@ import DriverInbox from '@/components/DriverInbox';
 import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
+import { withTimeout } from '@/lib/withTimeout';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
@@ -94,6 +95,7 @@ const DriverDashboard = () => {
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const { unreadCount: unreadSupportMessages } = useUnreadSupportMessages();
   const [showGPSNavigation, setShowGPSNavigation] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
@@ -593,30 +595,36 @@ const DriverDashboard = () => {
   // No client-side notification sending needed
 
   const acceptRide = async (ride: RideRequest) => {
-    if (!user) return;
+    if (!user || busyAction) return;
+
+    // Stop the alert sound immediately and clear cached ride
+    stopAlertSound();
+    setNewRideAlertOpen(false);
+    setCachedAlertRide(null);
+    setNewRideAlertRideId(null);
+    setBusyAction('accept');
 
     try {
-      // Stop the alert sound immediately and clear cached ride
-      stopAlertSound();
-      setNewRideAlertOpen(false);
-      setCachedAlertRide(null);
-      setNewRideAlertRideId(null);
-
       // Calculate acceptance time for priority driver reward
       const acceptanceTimeSeconds = alertStartTimeRef.current 
         ? Math.floor((Date.now() - alertStartTimeRef.current) / 1000)
         : null;
 
-      const { error } = await supabase
-        .from('rides')
-        .update({
-          driver_id: user.id,
-          status: 'driver_assigned',
-          accepted_at: new Date().toISOString(),
-          acceptance_time_seconds: acceptanceTimeSeconds,
-        })
-        .eq('id', ride.id)
-        .eq('status', 'searching');
+      const { error } = await withTimeout(
+        supabase
+          .from('rides')
+          .update({
+            driver_id: user.id,
+            status: 'driver_assigned',
+            accepted_at: new Date().toISOString(),
+            acceptance_time_seconds: acceptanceTimeSeconds,
+          })
+          .eq('id', ride.id)
+          .eq('status', 'searching')
+          .then(r => r),
+        7000,
+        'Accept ride'
+      );
 
       if (error) {
         toast({
@@ -630,10 +638,11 @@ const DriverDashboard = () => {
       // Grant Priority Driver status if accepted within 5 seconds
       if (acceptanceTimeSeconds !== null && acceptanceTimeSeconds <= 5) {
         const priorityUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-        await supabase
+        supabase
           .from('driver_profiles')
           .update({ priority_driver_until: priorityUntil })
-          .eq('user_id', user.id);
+          .eq('user_id', user.id)
+          .then(() => {});
 
         toast({
           title: '⚡ Priority Driver Activated!',
@@ -668,11 +677,16 @@ const DriverDashboard = () => {
     } catch (error) {
       console.error('[DriverDashboard] acceptRide error:', error);
       toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const updateRideStatus = async (status: string) => {
-    if (!currentRide || !user) return;
+    if (!currentRide || !user || busyAction) return;
+
+    stopAlertSound();
+    setBusyAction(status);
 
     // Optimistic update — instant UI feedback
     const prev = { ...currentRide };
@@ -708,13 +722,13 @@ const DriverDashboard = () => {
         updates.driver_earnings = fareForFee - fee;
       }
 
-      const { error } = await supabase
-        .from('rides')
-        .update(updates)
-        .eq('id', prev.id);
+      const { error } = await withTimeout(
+        supabase.from('rides').update(updates).eq('id', prev.id).then(r => r),
+        7000,
+        `Update status to ${status}`
+      );
 
       if (error) {
-        // Rollback
         setCurrentRide(prev);
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
         return;
@@ -726,12 +740,17 @@ const DriverDashboard = () => {
     } catch (error) {
       setCurrentRide(prev);
       console.error('[DriverDashboard] updateRideStatus error:', error);
-      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Network slow — status not saved. Try again.', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
     }
   };
 
   const cancelRide = async () => {
-    if (!currentRide || !user) return;
+    if (!currentRide || !user || busyAction) return;
+
+    stopAlertSound();
+    setBusyAction('cancel');
 
     // Optimistic: clear ride immediately
     const prev = currentRide;
@@ -740,26 +759,32 @@ const DriverDashboard = () => {
     toast({ title: 'Ride cancelled' });
 
     try {
-      const { error } = await supabase
-        .from('rides')
-        .update({
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-          cancelled_by: user.id,
-          cancellation_reason: 'Cancelled by driver',
-          driver_id: null,
-        })
-        .eq('id', prev.id);
+      const { error } = await withTimeout(
+        supabase
+          .from('rides')
+          .update({
+            status: 'cancelled',
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: user.id,
+            cancellation_reason: 'Cancelled by driver',
+            driver_id: null,
+          })
+          .eq('id', prev.id)
+          .then(r => r),
+        7000,
+        'Cancel ride'
+      );
 
       if (error) {
-        // Rollback
         setCurrentRide(prev);
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
     } catch (error) {
       setCurrentRide(prev);
       console.error('[DriverDashboard] cancelRide error:', error);
-      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Network slow — cancel not saved. Try again.', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
     }
   };
 

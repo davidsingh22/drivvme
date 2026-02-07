@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -25,6 +25,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
+import { withTimeout } from '@/lib/withTimeout';
 import DriverRideActionBar from '@/components/DriverRideActionBar';
 
 const PLATFORM_FEE = 5.00;
@@ -69,6 +70,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const [driverMismatch, setDriverMismatch] = useState<string | null>(null);
   const [showNavigation, setShowNavigation] = useState(false);
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -224,9 +226,9 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
 
   // Start Ride action (transition from arrived -> in_progress)
   const startRide = async () => {
-    if (!activeRide || !driverId) return;
+    if (!activeRide || !driverId || busyAction) return;
     
-    // Optimistic update - instant UI response
+    setBusyAction('start');
     const previousRide = { ...activeRide };
     setActiveRide({ ...activeRide, status: 'in_progress', pickup_at: new Date().toISOString() });
     onRideUpdated?.({ ...activeRide, status: 'in_progress', pickup_at: new Date().toISOString() });
@@ -237,17 +239,17 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     });
 
     try {
-      const { error } = await supabase
-        .from('rides')
-        .update({
-          status: 'in_progress',
-          pickup_at: new Date().toISOString(),
-        })
-        .eq('id', activeRide.id)
-        .eq('driver_id', driverId);
+      const { error } = await withTimeout(
+        supabase
+          .from('rides')
+          .update({ status: 'in_progress', pickup_at: new Date().toISOString() })
+          .eq('id', activeRide.id)
+          .eq('driver_id', driverId)
+          .then(r => r),
+        7000, 'Start ride'
+      );
 
       if (error) {
-        // Rollback on failure
         setActiveRide(previousRide);
         onRideUpdated?.(previousRide);
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
@@ -256,17 +258,19 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       setActiveRide(previousRide);
       onRideUpdated?.(previousRide);
       console.error('[DriverActiveRidePanel] startRide error:', err);
-      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
     }
   };
 
   // End Ride action (transition to completed)
   const endRide = async () => {
-    if (!activeRide || !driverId) return;
+    if (!activeRide || !driverId || busyAction) return;
     
-    const driverEarnings = activeRide.estimated_fare - PLATFORM_FEE;
+    setBusyAction('complete');
+    const driverEarningsCalc = activeRide.estimated_fare - PLATFORM_FEE;
     
-    // Optimistic update - clear ride immediately
     setActiveRide(null);
     setRiderInfo(null);
     onRideCompleted?.();
@@ -274,39 +278,44 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     toast({
       title: language === 'fr' ? 'Course terminée!' : 'Ride completed!',
       description: language === 'fr' 
-        ? `Vous avez gagné ${formatCurrency(driverEarnings, language)}`
-        : `You earned ${formatCurrency(driverEarnings, language)}`,
+        ? `Vous avez gagné ${formatCurrency(driverEarningsCalc, language)}`
+        : `You earned ${formatCurrency(driverEarningsCalc, language)}`,
     });
 
     try {
-      const { error } = await supabase
-        .from('rides')
-        .update({
-          status: 'completed',
-          dropoff_at: new Date().toISOString(),
-          actual_fare: activeRide.estimated_fare,
-          driver_earnings: driverEarnings,
-        })
-        .eq('id', activeRide.id)
-        .eq('driver_id', driverId);
+      const { error } = await withTimeout(
+        supabase
+          .from('rides')
+          .update({
+            status: 'completed',
+            dropoff_at: new Date().toISOString(),
+            actual_fare: activeRide.estimated_fare,
+            driver_earnings: driverEarningsCalc,
+          })
+          .eq('id', activeRide.id)
+          .eq('driver_id', driverId)
+          .then(r => r),
+        7000, 'Complete ride'
+      );
 
       if (error) {
-        // Rollback - restore the ride
         setActiveRide(activeRide);
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
     } catch (err) {
       setActiveRide(activeRide);
       console.error('[DriverActiveRidePanel] endRide error:', err);
-      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
     }
   };
 
   // Cancel Ride action
   const cancelRide = async () => {
-    if (!activeRide || !driverId) return;
+    if (!activeRide || !driverId || busyAction) return;
     
-    // Optimistic update - clear ride immediately
+    setBusyAction('cancel');
     const previousRide = { ...activeRide };
     setActiveRide(null);
     setRiderInfo(null);
@@ -319,16 +328,20 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     });
 
     try {
-      const { error } = await supabase
-        .from('rides')
-        .update({
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-          cancelled_by: driverId,
-          cancellation_reason: 'Driver cancelled',
-        })
-        .eq('id', activeRide.id)
-        .eq('driver_id', driverId);
+      const { error } = await withTimeout(
+        supabase
+          .from('rides')
+          .update({
+            status: 'cancelled',
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: driverId,
+            cancellation_reason: 'Driver cancelled',
+          })
+          .eq('id', activeRide.id)
+          .eq('driver_id', driverId)
+          .then(r => r),
+        7000, 'Cancel ride'
+      );
 
       if (error) {
         setActiveRide(previousRide);
@@ -337,15 +350,17 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     } catch (err) {
       setActiveRide(previousRide);
       console.error('[DriverActiveRidePanel] cancelRide error:', err);
-      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
     }
   };
 
   // Mark as arrived at pickup
   const markArrived = async () => {
-    if (!activeRide || !driverId) return;
+    if (!activeRide || !driverId || busyAction) return;
     
-    // Optimistic update - instant UI response
+    setBusyAction('arrived');
     const previousRide = { ...activeRide };
     setActiveRide({ ...activeRide, status: 'arrived' });
     onRideUpdated?.({ ...activeRide, status: 'arrived' });
@@ -359,11 +374,15 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     });
 
     try {
-      const { error } = await supabase
-        .from('rides')
-        .update({ status: 'arrived' })
-        .eq('id', activeRide.id)
-        .eq('driver_id', driverId);
+      const { error } = await withTimeout(
+        supabase
+          .from('rides')
+          .update({ status: 'arrived' })
+          .eq('id', activeRide.id)
+          .eq('driver_id', driverId)
+          .then(r => r),
+        7000, 'Mark arrived'
+      );
 
       if (error) {
         setActiveRide(previousRide);
@@ -374,7 +393,9 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       setActiveRide(previousRide);
       onRideUpdated?.(previousRide);
       console.error('[DriverActiveRidePanel] markArrived error:', err);
-      toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
     }
   };
 
@@ -608,7 +629,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
             onStartRide={startRide}
             onCompleteRide={endRide}
             onCancelRide={cancelRide}
-            isUpdating={isUpdating}
+            isUpdating={!!busyAction}
           />
         </div>
 
