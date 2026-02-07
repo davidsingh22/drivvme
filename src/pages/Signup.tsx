@@ -25,7 +25,7 @@ type DriverSignupStep = 'info' | 'agreement' | 'review';
 
 const Signup = () => {
   const { t } = useLanguage();
-  const { signUp, isLoading } = useAuth();
+  const { } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
@@ -659,9 +659,9 @@ const Signup = () => {
               <Button
                 type="submit"
                 className="w-full gradient-primary shadow-button py-6"
-                disabled={isLoading || isSubmitting}
+                disabled={isSubmitting}
               >
-                {(isLoading || isSubmitting) ? (
+                {isSubmitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     {role === 'driver' ? 'Creating Account...' : t('common.loading')}
