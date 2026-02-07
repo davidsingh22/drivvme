@@ -95,8 +95,8 @@ const DriverRideActionBar = ({
   return (
     <div
       className="space-y-2"
-      onPointerDownCapture={(e) => e.stopPropagation()}
-      onTouchStartCapture={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
+      onTouchStart={(e) => e.stopPropagation()}
     >
       {/* I've Arrived */}
       <TapButton
