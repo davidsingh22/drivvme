@@ -1180,7 +1180,12 @@ const DriverDashboard = () => {
               : { lat: currentRide.pickup_lat, lng: currentRide.pickup_lng, address: currentRide.pickup_address }
           }
           destinationType={currentRide.status === 'in_progress' ? 'dropoff' : 'pickup'}
+          rideStatus={currentRide.status}
           onClose={() => setShowGPSNavigation(false)}
+          onArrived={() => updateRideStatus('arrived')}
+          onStartRide={() => updateRideStatus('in_progress')}
+          onCompleteRide={() => updateRideStatus('completed')}
+          onCancelRide={cancelRide}
         />
       )}
     </div>

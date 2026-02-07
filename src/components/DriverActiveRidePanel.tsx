@@ -25,6 +25,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
+import DriverRideActionBar from '@/components/DriverRideActionBar';
 
 const PLATFORM_FEE = 5.00;
 
@@ -585,8 +586,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
 
       </Card>
 
-        {/* ===== STATUS-AWARE ACTION BUTTONS - Outside card, always visible ===== */}
-        <div className="space-y-3 mt-4 pb-4">
+        {/* ===== RIDE ACTION BUTTONS - Outside card, always visible ===== */}
+        <div className="mt-4 pb-4 space-y-3">
           {/* Open GPS Navigation - Always available */}
           <Button
             className="w-full py-6 text-lg font-bold bg-primary hover:bg-primary/90 rounded-xl touch-manipulation"
@@ -596,61 +597,15 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
             {language === 'fr' ? 'Ouvrir Navigation GPS' : 'Open GPS Navigation'}
           </Button>
 
-          {/* I've Arrived - Show when driver_assigned or driver_en_route */}
-          {(activeRide.status === 'driver_assigned' || activeRide.status === 'driver_en_route') && (
-            <Button
-              className="w-full py-6 text-lg font-bold rounded-xl touch-manipulation"
-              style={{ backgroundColor: 'hsl(45, 93%, 47%)', color: 'hsl(0, 0%, 10%)' }}
-              onClick={markArrived}
-              disabled={isUpdating}
-            >
-              <CheckCircle className="h-6 w-6 mr-2" />
-              {isUpdating
-                ? (language === 'fr' ? 'Mise à jour...' : 'Updating...')
-                : (language === 'fr' ? 'Je suis arrivé' : "I've Arrived")}
-            </Button>
-          )}
-
-          {/* Start Ride - Show when arrived */}
-          {activeRide.status === 'arrived' && (
-            <Button
-              className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl touch-manipulation"
-              onClick={startRide}
-              disabled={isUpdating}
-            >
-              <PlayCircle className="h-6 w-6 mr-2" />
-              {isUpdating
-                ? (language === 'fr' ? 'Démarrage...' : 'Starting...')
-                : (language === 'fr' ? 'Démarrer la course' : 'Start Ride')}
-            </Button>
-          )}
-
-          {/* Complete Ride - Show when in_progress */}
-          {activeRide.status === 'in_progress' && (
-            <Button
-              className="w-full py-6 text-lg font-bold bg-success hover:bg-success/90 rounded-xl touch-manipulation"
-              onClick={endRide}
-              disabled={isUpdating}
-            >
-              <CheckCircle className="h-6 w-6 mr-2" />
-              {isUpdating 
-                ? (language === 'fr' ? 'Finalisation...' : 'Completing...') 
-                : (language === 'fr' ? 'Terminer la course' : 'Complete Ride')}
-            </Button>
-          )}
-
-          {/* Cancel Ride - Always available */}
-          <Button
-            className="w-full py-6 text-lg font-bold rounded-xl touch-manipulation"
-            style={{ backgroundColor: 'hsl(75, 80%, 50%)', color: 'hsl(0, 0%, 10%)' }}
-            onClick={cancelRide}
-            disabled={isUpdating}
-          >
-            <XCircle className="h-6 w-6 mr-2" />
-            {isUpdating 
-              ? (language === 'fr' ? 'Annulation...' : 'Cancelling...') 
-              : (language === 'fr' ? 'Annuler la course' : 'Cancel Ride')}
-          </Button>
+          {/* All 4 action buttons — always visible, disabled when not applicable */}
+          <DriverRideActionBar
+            rideStatus={activeRide.status}
+            onArrived={markArrived}
+            onStartRide={startRide}
+            onCompleteRide={endRide}
+            onCancelRide={cancelRide}
+            isUpdating={isUpdating}
+          />
         </div>
 
       {/* Fullscreen GPS Navigation Map */}
