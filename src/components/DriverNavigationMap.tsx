@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
-import { AlertCircle, Loader2, Navigation, MapPin, ArrowUp, RotateCcw, Volume2, VolumeX, PlayCircle } from 'lucide-react';
+import { AlertCircle, Loader2, Navigation, MapPin, ArrowUp, RotateCcw, Volume2, VolumeX, PlayCircle, CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -19,9 +19,12 @@ interface DriverNavigationMapProps {
   driverLocation: { lat: number; lng: number } | null;
   destination: { lat: number; lng: number; address: string };
   destinationType: 'pickup' | 'dropoff';
+  rideStatus?: string;
   onClose?: () => void;
   onArrived?: () => void;
   onStartRide?: () => void;
+  onCompleteRide?: () => void;
+  onCancelRide?: () => void;
   hasArrived?: boolean;
 }
 
@@ -29,9 +32,12 @@ const DriverNavigationMap = ({
   driverLocation,
   destination,
   destinationType,
+  rideStatus,
   onClose,
   onArrived,
   onStartRide,
+  onCompleteRide,
+  onCancelRide,
   hasArrived,
 }: DriverNavigationMapProps) => {
   const { language } = useLanguage();
@@ -372,36 +378,51 @@ const DriverNavigationMap = ({
         <AlertCircle className="h-10 w-10 text-destructive mb-4" />
         <p className="text-center text-muted-foreground mb-6">{error}</p>
         
-        {/* Still show action buttons so driver can proceed */}
+        {/* All action buttons so driver can proceed without map */}
         <div className="w-full max-w-sm space-y-3">
-          {destinationType === 'pickup' && onArrived && !hasArrived && (
+          {onArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
             <Button
-              className="w-full h-14 text-lg font-bold bg-amber-500 hover:bg-amber-600 text-white"
+              className="w-full h-14 text-lg font-bold text-white touch-manipulation"
+              style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
               onClick={onArrived}
             >
               <MapPin className="h-5 w-5 mr-2" />
               {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
             </Button>
           )}
-          {destinationType === 'pickup' && onStartRide && hasArrived && (
+          {onStartRide && rideStatus === 'arrived' && (
             <Button
-              className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700 text-white"
+              className="w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
               onClick={onStartRide}
             >
               <PlayCircle className="h-5 w-5 mr-2" />
               {language === 'fr' ? "Démarrer la course" : "Start Ride"}
             </Button>
           )}
+          {onCompleteRide && rideStatus === 'in_progress' && (
+            <Button
+              className="w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
+              onClick={onCompleteRide}
+            >
+              <CheckCircle className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Terminer la course" : "Complete Ride"}
+            </Button>
+          )}
           {onClose && (
-            <Button variant="destructive" className="w-full h-12" onClick={onClose}>
+            <Button variant="outline" className="w-full h-12" onClick={onClose}>
               {language === 'fr' ? 'Fermer Navigation' : 'Exit Navigation'}
+            </Button>
+          )}
+          {onCancelRide && (
+            <Button variant="destructive" className="w-full h-12 touch-manipulation" onClick={onCancelRide}>
+              <XCircle className="h-5 w-5 mr-2" />
+              {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
             </Button>
           )}
           <Button
             variant="outline"
             className="w-full"
             onClick={() => {
-              // Clear cache and reload
               import('@/hooks/useMapboxToken').then(m => {
                 m.clearMapboxTokenCache();
                 window.location.reload();
@@ -490,10 +511,11 @@ const DriverNavigationMap = ({
           </div>
         </Card>
 
-        {/* I've Arrived button for pickup (before arrival) */}
-        {destinationType === 'pickup' && onArrived && !hasArrived && (
+        {/* I've Arrived button (before arrival, en route to pickup) */}
+        {onArrived && !hasArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
           <Button
-            className="w-full h-14 mb-3 text-lg font-bold bg-amber-500 hover:bg-amber-600 text-white"
+            className="w-full h-14 mb-3 text-lg font-bold text-white touch-manipulation"
+            style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
             onClick={onArrived}
           >
             <MapPin className="h-5 w-5 mr-2" />
@@ -501,10 +523,10 @@ const DriverNavigationMap = ({
           </Button>
         )}
 
-        {/* Start Ride button for pickup (after arrival) */}
-        {destinationType === 'pickup' && onStartRide && hasArrived && (
+        {/* Start Ride button (after arrival at pickup) */}
+        {onStartRide && rideStatus === 'arrived' && (
           <Button
-            className="w-full h-14 mb-3 text-lg font-bold bg-success hover:bg-success/90 text-white"
+            className="w-full h-14 mb-3 text-lg font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
             onClick={onStartRide}
           >
             <PlayCircle className="h-5 w-5 mr-2" />
@@ -512,8 +534,19 @@ const DriverNavigationMap = ({
           </Button>
         )}
 
-        {/* Control buttons */}
-        <div className="flex items-center justify-between gap-3">
+        {/* Complete Ride button (during ride, heading to dropoff) */}
+        {onCompleteRide && rideStatus === 'in_progress' && (
+          <Button
+            className="w-full h-14 mb-3 text-lg font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
+            onClick={onCompleteRide}
+          >
+            <CheckCircle className="h-5 w-5 mr-2" />
+            {language === 'fr' ? "Terminer la course" : "Complete Ride"}
+          </Button>
+        )}
+
+        {/* Control buttons row */}
+        <div className="flex items-center justify-between gap-3 mb-3">
           <Button
             variant="secondary"
             size="icon"
@@ -534,14 +567,26 @@ const DriverNavigationMap = ({
 
           {onClose && (
             <Button
-              variant="destructive"
-              className="flex-1 h-12"
+              variant="outline"
+              className="flex-1 h-12 bg-white/10 hover:bg-white/20 border-white/20 text-white"
               onClick={onClose}
             >
               {language === 'fr' ? 'Fermer Navigation' : 'Exit Navigation'}
             </Button>
           )}
         </div>
+
+        {/* Cancel Ride - always available */}
+        {onCancelRide && (
+          <Button
+            variant="destructive"
+            className="w-full h-12 text-base font-bold touch-manipulation"
+            onClick={onCancelRide}
+          >
+            <XCircle className="h-5 w-5 mr-2" />
+            {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
+          </Button>
+        )}
       </div>
 
       {/* Next steps preview */}
