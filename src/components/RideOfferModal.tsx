@@ -48,7 +48,7 @@ export function RideOfferModal({
   ride,
   onDecline,
   onAccept,
-  countdownSeconds = 45,
+  countdownSeconds = 30,
   driverLocation,
 }: RideOfferModalProps) {
   const { language } = useLanguage();
@@ -142,7 +142,11 @@ export function RideOfferModal({
                   </div>
                   <span className="text-xl font-semibold text-primary">Drivveme</span>
                 </div>
-                <div className="px-4 py-2 rounded-full bg-white/10 border border-white/10 text-white font-semibold">
+                <div className={`px-4 py-2 rounded-full font-bold text-lg ${
+                  timeLeft <= 10 
+                    ? 'bg-destructive/20 border border-destructive/50 text-destructive animate-pulse' 
+                    : 'bg-white/10 border border-white/10 text-white'
+                }`}>
                   {timeLeft}s
                 </div>
               </div>
@@ -257,15 +261,20 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Decline Button - Same prominence as Accept */}
+                {/* Decline Button - dismisses and returns ride to pool */}
                 <Button
                   size="lg"
                   onClick={onDecline}
                   className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl"
                 >
                   <X className="h-5 w-5 mr-2" />
-                  {language === 'fr' ? 'Refuser la course' : 'Decline Ride'}
+                  {language === 'fr' ? 'Non merci — Passer' : 'No thanks — Skip'}
                 </Button>
+                <p className="text-center text-white/40 text-xs">
+                  {language === 'fr' 
+                    ? 'La course restera disponible pour d\'autres chauffeurs'
+                    : 'Ride will remain available for other drivers'}
+                </p>
               </div>
             </Card>
           </motion.div>
