@@ -1341,7 +1341,7 @@ const RideBooking = () => {
         />
 
         {/* Cancel button for early phases */}
-        {(step === 'matched' || step === 'arriving') && (
+        {(step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress') && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
