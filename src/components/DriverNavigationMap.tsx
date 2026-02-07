@@ -364,10 +364,51 @@ const DriverNavigationMap = ({
 
   const currentStep = navigationSteps[currentStepIndex];
 
+  // While loading, show buttons immediately so driver isn't blocked
   if (loading) {
     return (
-      <div className="fixed inset-0 z-50 bg-background flex items-center justify-center">
-        <Loader2 className="h-10 w-10 animate-spin text-primary" />
+      <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center p-4">
+        <Loader2 className="h-10 w-10 animate-spin text-primary mb-4" />
+        <p className="text-muted-foreground text-sm mb-6">
+          {language === 'fr' ? 'Chargement de la carte...' : 'Loading map...'}
+        </p>
+        
+        {/* Show action buttons while map loads so driver is never blocked */}
+        <div className="w-full max-w-sm space-y-3">
+          {onArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
+            <Button
+              className="w-full h-14 text-lg font-bold text-white touch-manipulation"
+              style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
+              onClick={onArrived}
+            >
+              <MapPin className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
+            </Button>
+          )}
+          {onStartRide && rideStatus === 'arrived' && (
+            <Button className="w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white touch-manipulation" onClick={onStartRide}>
+              <PlayCircle className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Démarrer la course" : "Start Ride"}
+            </Button>
+          )}
+          {onCompleteRide && rideStatus === 'in_progress' && (
+            <Button className="w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white touch-manipulation" onClick={onCompleteRide}>
+              <CheckCircle className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Terminer la course" : "Complete Ride"}
+            </Button>
+          )}
+          {onClose && (
+            <Button variant="outline" className="w-full h-12" onClick={onClose}>
+              {language === 'fr' ? 'Fermer Navigation' : 'Exit Navigation'}
+            </Button>
+          )}
+          {onCancelRide && (
+            <Button variant="destructive" className="w-full h-12 touch-manipulation" onClick={onCancelRide}>
+              <XCircle className="h-5 w-5 mr-2" />
+              {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
@@ -440,19 +481,19 @@ const DriverNavigationMap = ({
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col">
       {/* Navigation Header */}
-      <div className="absolute top-0 left-0 right-0 z-10 p-4 bg-gradient-to-b from-black/80 to-transparent">
+      <div className="absolute top-0 left-0 right-0 z-10 p-3 bg-gradient-to-b from-black/80 to-transparent">
         {/* Current instruction card */}
         {currentStep && (
-          <Card className="p-4 bg-black/90 border-primary/30 backdrop-blur-sm">
-            <div className="flex items-center gap-4">
-              <div className="w-16 h-16 rounded-xl bg-primary/20 flex items-center justify-center text-3xl">
+          <Card className="p-3 bg-black/90 border-primary/30 backdrop-blur-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-primary/20 flex items-center justify-center text-2xl">
                 {getManeuverIcon(currentStep.maneuver)}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-lg font-bold text-white truncate">
+                <p className="text-base font-bold text-white truncate">
                   {currentStep.instruction}
                 </p>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {formatDistanceLabel(currentStep.distance)}
                 </p>
               </div>
@@ -461,16 +502,16 @@ const DriverNavigationMap = ({
         )}
 
         {/* ETA and distance info */}
-        <div className="flex items-center justify-between mt-3 px-2">
-          <Badge variant="secondary" className="text-sm py-1 px-3">
-            <Navigation className="h-4 w-4 mr-1" />
+        <div className="flex items-center justify-between mt-2 px-1">
+          <Badge variant="secondary" className="text-xs py-0.5 px-2">
+            <Navigation className="h-3 w-3 mr-1" />
             {formatDistanceLabel(totalDistance)}
           </Badge>
-          <Badge variant="secondary" className="text-sm py-1 px-3">
+          <Badge variant="secondary" className="text-xs py-0.5 px-2">
             ⏱ {formatDurationLabel(totalDuration)}
           </Badge>
           <Badge 
-            className={`text-sm py-1 px-3 ${
+            className={`text-xs py-0.5 px-2 ${
               destinationType === 'pickup' 
                 ? 'bg-primary/20 text-primary' 
                 : 'bg-green-500/20 text-green-400'
@@ -486,112 +527,100 @@ const DriverNavigationMap = ({
       {/* Map */}
       <div ref={mapContainerRef} className="flex-1 w-full" />
 
-      {/* Bottom controls */}
-      <div className="absolute bottom-0 left-0 right-0 z-10 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-black via-black/90 to-transparent">
-        {/* Destination address */}
-        <Card className="p-3 bg-black/90 border-primary/30 backdrop-blur-sm mb-3">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-              destinationType === 'pickup' ? 'bg-primary/20' : 'bg-green-500/20'
-            }`}>
-              <MapPin className={`h-5 w-5 ${
-                destinationType === 'pickup' ? 'text-primary' : 'text-green-400'
-              }`} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground">
-                {destinationType === 'pickup' 
-                  ? (language === 'fr' ? 'Ramassage du passager' : 'Picking up rider')
-                  : (language === 'fr' ? 'Destination finale' : 'Final destination')}
-              </p>
-              <p className="text-sm font-medium text-white truncate">
-                {destination.address}
-              </p>
-            </div>
-          </div>
-        </Card>
+      {/* Bottom controls - compact, always visible */}
+      <div className="absolute bottom-0 left-0 right-0 z-10 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-black via-black/95 to-transparent">
+        {/* Destination address - compact */}
+        <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-lg bg-black/80 border border-white/10">
+          <MapPin className={`h-4 w-4 shrink-0 ${
+            destinationType === 'pickup' ? 'text-primary' : 'text-green-400'
+          }`} />
+          <p className="text-xs text-white truncate flex-1">{destination.address}</p>
+        </div>
 
-        {/* I've Arrived button (before arrival, en route to pickup) */}
-        {onArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
-          <Button
-            className="w-full h-14 mb-3 text-lg font-bold text-white touch-manipulation"
-            style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
-            onClick={onArrived}
-          >
-            <MapPin className="h-5 w-5 mr-2" />
-            {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
-          </Button>
-        )}
-
-        {/* Start Ride button (after arrival at pickup) */}
-        {onStartRide && rideStatus === 'arrived' && (
-          <Button
-            className="w-full h-14 mb-3 text-lg font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
-            onClick={onStartRide}
-          >
-            <PlayCircle className="h-5 w-5 mr-2" />
-            {language === 'fr' ? "Démarrer la course" : "Start Ride"}
-          </Button>
-        )}
-
-        {/* Complete Ride button (during ride, heading to dropoff) */}
-        {onCompleteRide && rideStatus === 'in_progress' && (
-          <Button
-            className="w-full h-14 mb-3 text-lg font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
-            onClick={onCompleteRide}
-          >
-            <CheckCircle className="h-5 w-5 mr-2" />
-            {language === 'fr' ? "Terminer la course" : "Complete Ride"}
-          </Button>
-        )}
-
-        {/* Control buttons row */}
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <Button
-            variant="secondary"
-            size="icon"
-            className="h-12 w-12 rounded-full bg-white/10 hover:bg-white/20"
-            onClick={() => setIsMuted(!isMuted)}
-          >
-            {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-          </Button>
-          
-          <Button
-            variant="secondary"
-            size="icon"
-            className="h-12 w-12 rounded-full bg-white/10 hover:bg-white/20"
-            onClick={recenterCamera}
-          >
-            <RotateCcw className="h-5 w-5" />
-          </Button>
-
-          {onClose && (
+        {/* Action buttons - stacked vertically, compact */}
+        <div className="space-y-2">
+          {/* I've Arrived button */}
+          {onArrived && (rideStatus === 'driver_assigned' || rideStatus === 'driver_en_route') && (
             <Button
-              variant="outline"
-              className="flex-1 h-12 bg-white/10 hover:bg-white/20 border-white/20 text-white"
-              onClick={onClose}
+              className="w-full h-12 text-base font-bold text-white touch-manipulation"
+              style={{ backgroundColor: 'hsl(45, 93%, 47%)' }}
+              onClick={onArrived}
             >
-              {language === 'fr' ? 'Fermer Navigation' : 'Exit Navigation'}
+              <MapPin className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Je suis arrivé" : "I've Arrived"}
+            </Button>
+          )}
+
+          {/* Start Ride button */}
+          {onStartRide && rideStatus === 'arrived' && (
+            <Button
+              className="w-full h-12 text-base font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
+              onClick={onStartRide}
+            >
+              <PlayCircle className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Démarrer la course" : "Start Ride"}
+            </Button>
+          )}
+
+          {/* Complete Ride button */}
+          {onCompleteRide && rideStatus === 'in_progress' && (
+            <Button
+              className="w-full h-12 text-base font-bold bg-success hover:bg-success/90 text-white touch-manipulation"
+              onClick={onCompleteRide}
+            >
+              <CheckCircle className="h-5 w-5 mr-2" />
+              {language === 'fr' ? "Terminer la course" : "Complete Ride"}
+            </Button>
+          )}
+
+          {/* Exit + Mute + Recenter row */}
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="icon"
+              className="h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 shrink-0"
+              onClick={() => setIsMuted(!isMuted)}
+            >
+              {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            </Button>
+            
+            <Button
+              variant="secondary"
+              size="icon"
+              className="h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 shrink-0"
+              onClick={recenterCamera}
+            >
+              <RotateCcw className="h-4 w-4" />
+            </Button>
+
+            {onClose && (
+              <Button
+                variant="outline"
+                className="flex-1 h-10 bg-white/10 hover:bg-white/20 border-white/20 text-white text-sm"
+                onClick={onClose}
+              >
+                {language === 'fr' ? 'Fermer' : 'Exit Navigation'}
+              </Button>
+            )}
+          </div>
+
+          {/* Cancel Ride - always available */}
+          {onCancelRide && (
+            <Button
+              variant="destructive"
+              className="w-full h-10 text-sm font-bold touch-manipulation"
+              onClick={onCancelRide}
+            >
+              <XCircle className="h-4 w-4 mr-2" />
+              {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
             </Button>
           )}
         </div>
-
-        {/* Cancel Ride - always available */}
-        {onCancelRide && (
-          <Button
-            variant="destructive"
-            className="w-full h-12 text-base font-bold touch-manipulation"
-            onClick={onCancelRide}
-          >
-            <XCircle className="h-5 w-5 mr-2" />
-            {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
-          </Button>
-        )}
       </div>
 
       {/* Next steps preview */}
       {navigationSteps.length > 1 && currentStepIndex < navigationSteps.length - 1 && (
-        <div className="absolute right-4 top-40 z-10 w-48">
+        <div className="absolute right-3 top-36 z-10 w-44">
           <Card className="p-2 bg-black/70 border-white/10 backdrop-blur-sm">
             <p className="text-[10px] text-muted-foreground mb-1">
               {language === 'fr' ? 'Ensuite' : 'Then'}
