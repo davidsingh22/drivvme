@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
 
 type AlertSoundOptions = {
-  /** Overall volume 0..1 */
   volume?: number;
-  /** Loop the sound until stop() is called */
   loop?: boolean;
-  /** Interval between loops in ms (default: 2000) */
   loopInterval?: number;
 };
 
-// Tiny WAV beep as base64 data-URI — guaranteed to play without user gesture on most browsers
+// Tiny WAV beep as base64 — plays without user gesture on most browsers
 const BEEP_WAV_URI = (() => {
-  // Generate a simple 440Hz beep WAV (0.15s, 8kHz mono 8-bit)
   const sampleRate = 8000;
   const duration = 0.15;
   const numSamples = Math.floor(sampleRate * duration);
@@ -19,64 +15,74 @@ const BEEP_WAV_URI = (() => {
   const fileSize = 44 + dataSize;
   const buf = new ArrayBuffer(fileSize);
   const view = new DataView(buf);
-  const writeStr = (off: number, s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
-  writeStr(0, 'RIFF');
+  const writeStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+  };
+  writeStr(0, "RIFF");
   view.setUint32(4, fileSize - 8, true);
-  writeStr(8, 'WAVE');
-  writeStr(12, 'fmt ');
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
   view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true); // PCM
-  view.setUint16(22, 1, true); // mono
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, sampleRate, true);
   view.setUint16(32, 1, true);
-  view.setUint16(34, 8, true); // 8-bit
-  writeStr(36, 'data');
+  view.setUint16(34, 8, true);
+  writeStr(36, "data");
   view.setUint32(40, dataSize, true);
   for (let i = 0; i < numSamples; i++) {
     const t = i / sampleRate;
-    const sample = Math.sin(2 * Math.PI * 880 * t) * 0.8; // 880Hz
+    const sample = Math.sin(2 * Math.PI * 880 * t) * 0.8;
     view.setUint8(44 + i, Math.floor((sample + 1) * 127.5));
   }
   const bytes = new Uint8Array(buf);
-  let binary = '';
+  let binary = "";
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return 'data:audio/wav;base64,' + btoa(binary);
+  return "data:audio/wav;base64," + btoa(binary);
 })();
 
 /**
- * LOUD alert sound using WebAudio (no asset files).
- * Falls back to HTML5 Audio with inline WAV when WebAudio is blocked (no user gesture).
- * Supports looping for persistent alerts that require user action to dismiss.
+ * Bullet-proof alert sound hook.
+ * All options are stored in refs so re-renders NEVER kill an active beep loop.
+ * The returned play/stop functions have stable identity (no deps that change).
  */
 export function useAlertSound(options: AlertSoundOptions = {}) {
-  const volume = options.volume ?? 0.8;
-  const loop = options.loop ?? false;
-  const loopInterval = options.loopInterval ?? 1500;
+  // Store ALL config in refs so re-renders don't affect anything
+  const volumeRef = useRef(options.volume ?? 0.8);
+  const loopRef = useRef(options.loop ?? false);
+  const loopIntervalRef = useRef(options.loopInterval ?? 1500);
+
+  // Update refs when options change (but don't trigger re-renders or recreate callbacks)
+  volumeRef.current = options.volume ?? 0.8;
+  loopRef.current = options.loop ?? false;
+  loopIntervalRef.current = options.loopInterval ?? 1500;
 
   const ctxRef = useRef<AudioContext | null>(null);
   const unlockedRef = useRef(false);
-  const loopingRef = useRef(false);
-  const loopIntervalIdRef = useRef<number | null>(null);
-  // HTML5 Audio fallback pool for when WebAudio is blocked
+  const activeRef = useRef(false); // true while beeping
+  const intervalIdRef = useRef<number | null>(null);
   const fallbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const mountedRef = useRef(true);
 
-  const getOrCreateContext = useCallback(() => {
+  // Create or get AudioContext — stable, no deps
+  const getCtx = useCallback(() => {
     if (ctxRef.current) return ctxRef.current;
-    const AudioContextCtor = (window.AudioContext || (window as any).webkitAudioContext) as
+    const Ctor = (window.AudioContext || (window as any).webkitAudioContext) as
       | (new () => AudioContext)
       | undefined;
-    if (!AudioContextCtor) return null;
-    ctxRef.current = new AudioContextCtor();
+    if (!Ctor) return null;
+    ctxRef.current = new Ctor();
     return ctxRef.current;
   }, []);
 
+  // Unlock AudioContext — stable
   const unlock = useCallback(async () => {
-    const ctx = getOrCreateContext();
+    const ctx = getCtx();
     if (!ctx) return false;
     try {
       if (ctx.state === "suspended") await ctx.resume();
-      if (ctx.state === "running") {
+      if (ctx.state === "running" && !unlockedRef.current) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         gain.gain.value = 0.001;
@@ -90,136 +96,138 @@ export function useAlertSound(options: AlertSoundOptions = {}) {
     } catch {
       return false;
     }
-  }, [getOrCreateContext]);
+  }, [getCtx]);
 
-  // Auto-unlock on ANY user interaction
+  // Auto-unlock on user interaction
   useEffect(() => {
+    mountedRef.current = true;
     const handler = () => void unlock();
     const events = ["pointerdown", "keydown", "touchstart", "click", "touchend"];
-    events.forEach(e => window.addEventListener(e, handler, { passive: true }));
+    events.forEach((e) => window.addEventListener(e, handler, { passive: true }));
     return () => {
-      events.forEach(e => window.removeEventListener(e, handler));
+      mountedRef.current = false;
+      events.forEach((e) => window.removeEventListener(e, handler));
     };
   }, [unlock]);
 
-  // Hard cleanup on unmount
-  useEffect(() => {
-    return () => {
-      loopingRef.current = false;
-      if (loopIntervalIdRef.current) {
-        clearInterval(loopIntervalIdRef.current);
-        loopIntervalIdRef.current = null;
-      }
-      if (fallbackAudioRef.current) {
-        try { fallbackAudioRef.current.pause(); } catch {}
-        fallbackAudioRef.current = null;
-      }
-    };
-  }, []);
-
-  /** Play using HTML5 Audio fallback — reuses same element for reliability */
+  // Play HTML5 fallback beep — reads volume from ref
   const playFallbackBeep = useCallback(() => {
     try {
       if (!fallbackAudioRef.current) {
         fallbackAudioRef.current = new Audio(BEEP_WAV_URI);
       }
       const audio = fallbackAudioRef.current;
-      audio.volume = Math.min(volume, 1);
+      audio.volume = Math.min(volumeRef.current, 1);
       audio.currentTime = 0;
       audio.play().catch(() => {
-        console.warn('[AlertSound] Fallback audio blocked');
+        console.warn("[AlertSound] Fallback audio blocked");
       });
-      return true;
-    } catch {
-      return false;
-    }
-  }, [volume]);
+    } catch {}
+  }, []);
 
+  // Play WebAudio beep — reads volume from ref
   const playWebAudio = useCallback(async () => {
     await unlock();
     const ctx = ctxRef.current;
-    if (!ctx || ctx.state !== "running") return false;
+    if (!ctx || ctx.state !== "running") return;
 
     const now = ctx.currentTime;
+    const vol = volumeRef.current;
     const master = ctx.createGain();
-    master.gain.value = volume;
+    master.gain.value = vol;
     master.connect(ctx.destination);
 
-    const playTone = (startTime: number, freq: number, duration: number, type: OscillatorType = "square") => {
+    const playTone = (
+      startTime: number,
+      freq: number,
+      dur: number,
+      type: OscillatorType = "square"
+    ) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = type;
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, startTime);
       gain.gain.exponentialRampToValueAtTime(1, startTime + 0.02);
-      gain.gain.setValueAtTime(1, startTime + duration - 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      gain.gain.setValueAtTime(1, startTime + dur - 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur);
       osc.connect(gain);
       gain.connect(master);
       osc.start(startTime);
-      osc.stop(startTime + duration + 0.02);
+      osc.stop(startTime + dur + 0.02);
     };
 
-    playTone(now + 0.0, 880, 0.15, "square");
+    playTone(now, 880, 0.15, "square");
     playTone(now + 0.18, 660, 0.15, "square");
     playTone(now + 0.36, 880, 0.15, "square");
     playTone(now + 0.54, 660, 0.15, "square");
     playTone(now + 0.72, 1100, 0.25, "sawtooth");
+  }, [unlock]);
 
-    return true;
-  }, [unlock, volume]);
-
-  /** Play once — always plays HTML5 fallback for reliability, plus WebAudio if unlocked */
-  const playOnce = useCallback(async () => {
-    // Always fire HTML5 Audio — it's the most reliable on mobile without user gesture
+  // Play one beep (both channels)
+  const playOnce = useCallback(() => {
     playFallbackBeep();
-    // Also try WebAudio for richer sound (will layer on top if both work)
-    try { await playWebAudio(); } catch {}
-    return true;
-  }, [playWebAudio, playFallbackBeep]);
+    try {
+      void playWebAudio();
+    } catch {}
+  }, [playFallbackBeep, playWebAudio]);
 
-  /** Start beeping. Kills any existing beep first. */
-  const play = useCallback(async () => {
-    loopingRef.current = false;
-    if (loopIntervalIdRef.current) {
-      clearInterval(loopIntervalIdRef.current);
-      loopIntervalIdRef.current = null;
-    }
-
-    await playOnce();
-
-    if (loop) {
-      loopingRef.current = true;
-      loopIntervalIdRef.current = window.setInterval(() => {
-        if (!loopingRef.current) {
-          if (loopIntervalIdRef.current) {
-            clearInterval(loopIntervalIdRef.current);
-            loopIntervalIdRef.current = null;
-          }
-          return;
-        }
-        void playOnce();
-      }, loopInterval);
-    }
-
-    return true;
-  }, [playOnce, loop, loopInterval]);
-
-  /** Stop beeping immediately. Safe to call multiple times. */
-  const stop = useCallback(() => {
-    loopingRef.current = false;
-    if (loopIntervalIdRef.current) {
-      clearInterval(loopIntervalIdRef.current);
-      loopIntervalIdRef.current = null;
-    }
-    // Also kill any fallback audio
-    if (fallbackAudioRef.current) {
-      try { fallbackAudioRef.current.pause(); } catch {}
-      fallbackAudioRef.current = null;
+  // Clear any running loop interval
+  const clearLoop = useCallback(() => {
+    if (intervalIdRef.current !== null) {
+      clearInterval(intervalIdRef.current);
+      intervalIdRef.current = null;
     }
   }, []);
 
-  const isLooping = useCallback(() => loopingRef.current, []);
+  /** Stop beeping. Stable identity — safe to call anytime, multiple times. */
+  const stop = useCallback(() => {
+    activeRef.current = false;
+    clearLoop();
+    if (fallbackAudioRef.current) {
+      try {
+        fallbackAudioRef.current.pause();
+      } catch {}
+      fallbackAudioRef.current = null;
+    }
+  }, [clearLoop]);
+
+  /** Start beeping. Stable identity — reads loop config from refs. */
+  const play = useCallback(async () => {
+    // Kill any previous beep first
+    stop();
+
+    activeRef.current = true;
+    playOnce();
+
+    if (loopRef.current) {
+      intervalIdRef.current = window.setInterval(() => {
+        if (!activeRef.current || !mountedRef.current) {
+          clearLoop();
+          return;
+        }
+        playOnce();
+      }, loopIntervalRef.current);
+    }
+
+    return true;
+  }, [stop, playOnce, clearLoop]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      activeRef.current = false;
+      clearLoop();
+      if (fallbackAudioRef.current) {
+        try {
+          fallbackAudioRef.current.pause();
+        } catch {}
+        fallbackAudioRef.current = null;
+      }
+    };
+  }, [clearLoop]);
+
+  const isLooping = useCallback(() => activeRef.current, []);
 
   return { play, stop, unlock, isLooping };
 }
