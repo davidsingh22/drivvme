@@ -15,7 +15,7 @@ interface DriverRideActionBarProps {
   compact?: boolean;
 }
 
-/** Tap-safe button: fires once per gesture via onPointerUp/onTouchEnd/onClick */
+/** Tap-safe button: fires on DOWN/START + capture phase to beat map overlays */
 function TapButton({
   children,
   disabled,
@@ -56,8 +56,8 @@ function TapButton({
         touchAction: 'manipulation',
         ...style,
       }}
-      onPointerUp={handle}
-      onTouchEnd={handle}
+      onPointerDownCapture={handle}
+      onTouchStartCapture={handle}
       onClick={handle}
     >
       {children}
@@ -95,8 +95,8 @@ const DriverRideActionBar = ({
   return (
     <div
       className="space-y-2"
-      onPointerDown={(e) => e.stopPropagation()}
-      onTouchStart={(e) => e.stopPropagation()}
+      onPointerDownCapture={(e) => e.stopPropagation()}
+      onTouchStartCapture={(e) => e.stopPropagation()}
     >
       {/* I've Arrived */}
       <TapButton
