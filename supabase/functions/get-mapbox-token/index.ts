@@ -15,24 +15,32 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // Validate JWT (caller must be logged in)
     const authHeader = req.headers.get("Authorization") || "";
-    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData?.user) {
-      console.log("Auth error:", userErr?.message || "No user");
+    if (!authHeader.startsWith("Bearer ")) {
+      console.log("Auth error: No Bearer token");
       return new Response(
         JSON.stringify({ error: "Unauthorized" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // User is authenticated - return the Mapbox token
-    const mapboxToken = Deno.env.get("MAPBOX_ACCESS_TOKEN");
+    const token = authHeader.replace("Bearer ", "");
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
 
+    const { data: claimsData, error: claimsErr } = await userClient.auth.getClaims(token);
+    if (claimsErr || !claimsData?.claims) {
+      console.log("Auth error:", claimsErr?.message || "No claims");
+      return new Response(
+        JSON.stringify({ error: "Unauthorized" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const userId = claimsData.claims.sub;
+
+    const mapboxToken = Deno.env.get("MAPBOX_ACCESS_TOKEN");
     if (!mapboxToken) {
       console.log("MAPBOX_ACCESS_TOKEN not configured");
       return new Response(
@@ -41,7 +49,7 @@ serve(async (req) => {
       );
     }
 
-    console.log("Successfully returning mapbox token for user:", userData.user.id);
+    console.log("Successfully returning mapbox token for user:", userId);
     return new Response(
       JSON.stringify({ token: mapboxToken }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
