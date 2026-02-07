@@ -613,14 +613,35 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
             </div>
           </motion.div>
 
-          {/* Open GPS Navigation - Always available */}
-          <Button
-            className="w-full py-6 text-lg font-bold bg-primary hover:bg-primary/90 rounded-xl touch-manipulation"
-            onClick={() => setShowNavigation(true)}
+          {/* Open GPS Navigation - Always available, capture-phase tap for mobile */}
+          <button
+            type="button"
+            className="w-full py-6 text-lg font-bold bg-primary hover:bg-primary/90 text-primary-foreground rounded-xl flex items-center justify-center gap-2"
+            style={{
+              touchAction: 'manipulation',
+              userSelect: 'none',
+              WebkitUserSelect: 'none',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+            onPointerDownCapture={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setShowNavigation(true);
+            }}
+            onTouchStartCapture={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setShowNavigation(true);
+            }}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setShowNavigation(true);
+            }}
           >
-            <Map className="h-6 w-6 mr-2" />
+            <Map className="h-6 w-6" />
             {language === 'fr' ? 'Ouvrir Navigation GPS' : 'Open GPS Navigation'}
-          </Button>
+          </button>
 
           {/* All 4 action buttons — always visible, disabled when not applicable */}
           <DriverRideActionBar
