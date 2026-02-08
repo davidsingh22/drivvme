@@ -838,7 +838,7 @@ const DriverDashboard = () => {
         <motion.div
           initial={{ x: 100, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
-          className="w-full lg:w-[420px] border-l border-border flex flex-col relative overflow-hidden"
+          className="w-full lg:w-[420px] border-l border-border flex flex-col relative overflow-hidden min-h-[40vh]"
         >
           {/* Background Image */}
           <div 
@@ -849,7 +849,7 @@ const DriverDashboard = () => {
           <div className="absolute inset-0 bg-gradient-to-b from-background/90 via-background/85 to-background/95" />
           
           {/* Content container - relative to appear above background */}
-          <div className="relative z-10 flex flex-col flex-1">
+          <div className="relative z-10 flex flex-col flex-1 overflow-hidden">
             {/* Wake Lock Banner - Keep screen awake while driving */}
             <div className="pt-4">
               <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
@@ -883,7 +883,7 @@ const DriverDashboard = () => {
               />
             </div>
 
-            <div className="p-4 flex-1 overflow-y-auto">
+            <div className="p-4 flex-1 overflow-y-auto pb-8">
 
             {/* Go Online/Offline Button - Always visible at top */}
             <Button
