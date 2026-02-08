@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, UserCircle, Bell, Map, HelpCircle } from 'lucide-react';
+import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, UserCircle, Bell, Map, HelpCircle, Gift } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -91,6 +91,7 @@ const DriverDashboard = () => {
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
   const [todayEarnings, setTodayEarnings] = useState(0);
   const [todayRides, setTodayRides] = useState(0);
+  const [todayTips, setTodayTips] = useState<{ amount: number; rider_name: string; pickup: string; dropoff: string; time: string }[]>([]);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const { unreadCount: unreadSupportMessages } = useUnreadSupportMessages();
@@ -462,7 +463,7 @@ const DriverDashboard = () => {
     };
   }, [currentRide?.id]);
 
-  // Fetch today's earnings
+  // Fetch today's earnings and tips
   useEffect(() => {
     if (!user) return;
 
@@ -481,6 +482,40 @@ const DriverDashboard = () => {
         const earnings = data.reduce((sum, ride) => sum + (Number(ride.driver_earnings) || 0), 0);
         setTodayEarnings(earnings);
         setTodayRides(data.length);
+      }
+
+      // Fetch charged tips for today
+      const { data: tipRides } = await supabase
+        .from('rides')
+        .select('id, tip_amount, pickup_address, dropoff_address, dropoff_at, rider_id')
+        .eq('driver_id', user.id)
+        .eq('status', 'completed')
+        .eq('tip_status', 'charged')
+        .gt('tip_amount', 0)
+        .gte('dropoff_at', today.toISOString())
+        .order('dropoff_at', { ascending: false });
+
+      if (tipRides && tipRides.length > 0) {
+        const riderIds = [...new Set(tipRides.map(r => r.rider_id).filter(Boolean))] as string[];
+        let riderNames: Record<string, string> = {};
+        if (riderIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('profiles')
+            .select('user_id, first_name, last_name')
+            .in('user_id', riderIds);
+          profiles?.forEach(p => {
+            riderNames[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Rider';
+          });
+        }
+        setTodayTips(tipRides.map(r => ({
+          amount: Number(r.tip_amount),
+          rider_name: r.rider_id ? (riderNames[r.rider_id] || 'Rider') : 'Rider',
+          pickup: r.pickup_address,
+          dropoff: r.dropoff_address,
+          time: r.dropoff_at || '',
+        })));
+      } else {
+        setTodayTips([]);
       }
     };
 
@@ -1058,6 +1093,34 @@ const DriverDashboard = () => {
 
             {/* Earnings moved to dedicated Earnings page (/earnings) */}
             {/* Active ride buttons are handled by DriverActiveRidePanel above */}
+
+            {/* Today's Tips Card */}
+            {todayTips.length > 0 && (
+              <Card className="mb-4 p-4 border-accent/20 bg-accent/5">
+                <div className="flex items-center gap-2 mb-3">
+                  <Gift className="h-5 w-5 text-accent" />
+                  <h3 className="font-semibold text-sm">
+                    {language === 'fr' ? 'Pourboires du jour' : "Today's Tips"}
+                  </h3>
+                  <span className="ml-auto font-bold text-accent">
+                    {formatCurrency(todayTips.reduce((s, t) => s + t.amount, 0), language)}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {todayTips.map((tip, i) => (
+                    <div key={i} className="bg-background/60 rounded-lg p-2 text-xs space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="font-medium">{tip.rider_name}</span>
+                        <span className="font-bold text-accent">+{formatCurrency(tip.amount, language)}</span>
+                      </div>
+                      <div className="text-muted-foreground truncate">
+                        <MapPin className="h-3 w-3 inline mr-1" />{tip.pickup} → {tip.dropoff}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
 
             {/* Waiting for rides - push-only, no feed */}
             {isOnline && !currentRide && (
