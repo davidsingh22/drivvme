@@ -10,6 +10,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Logo from '@/components/Logo';
 import LanguageToggle from '@/components/LanguageToggle';
+import loginBg from '@/assets/drivveme-welcome-bg.png';
 
 const Login = () => {
   const { t } = useLanguage();
@@ -71,9 +72,20 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen gradient-hero flex flex-col">
+    <div className="min-h-screen flex flex-col relative overflow-hidden">
+      {/* Background image */}
+      <div
+        className="absolute inset-0 z-0"
+        style={{
+          backgroundImage: `url(${loginBg})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+        }}
+      />
+      {/* Dark overlay for readability */}
+      <div className="absolute inset-0 z-0 bg-black/40" />
       {/* Header */}
-      <div className="flex items-center justify-between p-4">
+      <div className="flex items-center justify-between p-4 relative z-10">
         <Link to="/">
           <Logo />
         </Link>
@@ -81,7 +93,7 @@ const Login = () => {
       </div>
 
       {/* Form */}
-      <div className="flex-1 flex items-center justify-center p-4">
+      <div className="flex-1 flex items-center justify-center p-4 relative z-10">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
