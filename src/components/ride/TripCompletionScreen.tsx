@@ -105,13 +105,17 @@ const TripCompletionScreen = ({
 
       // Save tip as pending (admin will charge it)
       if (selectedTip > 0) {
-        const { error: tipError } = await supabase
+        console.log('[TIP] Saving tip:', { rideId, selectedTip, riderId });
+        const { data: tipData, error: tipError } = await supabase
           .from('rides')
           .update({ tip_amount: selectedTip, tip_status: 'pending' })
-          .eq('id', rideId);
+          .eq('id', rideId)
+          .select('id, tip_amount, tip_status');
 
         if (tipError) {
-          console.error('Tip save failed:', tipError);
+          console.error('[TIP] Save failed:', tipError);
+        } else {
+          console.log('[TIP] Save succeeded:', tipData);
         }
       }
 
