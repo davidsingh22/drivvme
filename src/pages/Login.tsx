@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import LanguageToggle from '@/components/LanguageToggle';
-import loginBg from '@/assets/drivveme-welcome-bg.png';
+import montrealNightBg from '@/assets/montreal-night-bg.jpg';
 const Login = () => {
   const {
     t
@@ -85,10 +85,13 @@ const Login = () => {
     }
   };
   return <div className="min-h-screen flex flex-col relative overflow-hidden">
-      {/* Purple gradient background */}
-      <div className="absolute inset-0 z-0" style={{
-      background: 'radial-gradient(ellipse at center, hsl(270 60% 25%) 0%, hsl(270 50% 10%) 60%, hsl(270 40% 5%) 100%)'
-    }} />
+      {/* City background */}
+      <div className="absolute inset-0 z-0">
+        <img src={montrealNightBg} alt="" className="w-full h-full object-cover" />
+        <div className="absolute inset-0" style={{
+          background: 'radial-gradient(ellipse at center, hsl(270 60% 25% / 0.6) 0%, hsl(270 50% 10% / 0.8) 60%, hsl(270 40% 5% / 0.95) 100%)'
+        }} />
+      </div>
 
       {/* Language toggle top-right */}
       <div className="absolute top-4 right-4 z-20">
