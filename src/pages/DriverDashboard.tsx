@@ -883,7 +883,22 @@ const DriverDashboard = () => {
               />
             </div>
 
-            <div className="p-6 flex-1 overflow-y-auto">
+            <div className="p-4 flex-1 overflow-y-auto">
+
+            {/* Go Online/Offline Button - Always visible at top */}
+            <Button
+                onClick={async () => {
+                  await toggleOnlineStatus();
+                }}
+              className={`w-full h-14 text-lg font-bold mb-4 transition-all ${
+                isOnline 
+                  ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' 
+                  : 'gradient-primary'
+              }`}
+            >
+              <Power className={`h-6 w-6 mr-3 ${isOnline ? '' : 'animate-pulse'}`} />
+              {isOnline ? 'Go Offline' : 'Go Online'}
+            </Button>
 
             {/* ========== DRIVER ACTIVE RIDE PANEL ========== */}
             {/* Always shows Start/End Ride buttons for the assigned driver */}
@@ -1027,20 +1042,6 @@ const DriverDashboard = () => {
               </Card>
             )}
 
-            {/* Go Online/Offline Button */}
-            <Button
-                onClick={async () => {
-                  await toggleOnlineStatus();
-                }}
-              className={`w-full h-16 text-lg font-bold mb-6 transition-all ${
-                isOnline 
-                  ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' 
-                  : 'gradient-primary'
-              }`}
-            >
-              <Power className={`h-6 w-6 mr-3 ${isOnline ? '' : 'animate-pulse'}`} />
-              {isOnline ? 'Go Offline' : 'Go Online'}
-            </Button>
 
             {/* Location Sharing Status */}
             {isOnline && (
