@@ -43,6 +43,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { SupportMessagesPanel } from '@/components/admin/SupportMessagesPanel';
+import { AdminTipsPanel } from '@/components/admin/AdminTipsPanel';
 
 interface Payment {
   id: string;
@@ -934,6 +935,10 @@ const AdminDashboard = () => {
                 <DollarSign className="w-4 h-4" />
                 Payments
               </TabsTrigger>
+              <TabsTrigger value="tips" className="gap-2">
+                <DollarSign className="w-4 h-4" />
+                Tips
+              </TabsTrigger>
               <TabsTrigger value="notifications" className="gap-2">
                 <Bell className="w-4 h-4" />
                 Notifications
@@ -1282,6 +1287,11 @@ const AdminDashboard = () => {
                 </Table>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Tips Tab */}
+          <TabsContent value="tips">
+            <AdminTipsPanel />
           </TabsContent>
 
           {/* Notifications Tab */}
