@@ -101,7 +101,18 @@ const Login = () => {
               boxShadow: '0 0 40px hsl(var(--primary) / 0.5), 0 0 80px hsl(var(--primary) / 0.3)',
             }}
           >
-            <Car className="h-10 w-10 text-primary-foreground" />
+            <svg viewBox="0 0 64 64" className="h-12 w-12" fill="none" xmlns="http://www.w3.org/2000/svg">
+              {/* Car body */}
+              <path d="M8 38 L14 24 L24 18 L44 18 L52 26 L58 30 L58 40 L54 40 L54 42 C54 44.2 52.2 46 50 46 C47.8 46 46 44.2 46 42 L46 40 L22 40 L22 42 C22 44.2 20.2 46 18 46 C15.8 46 14 44.2 14 42 L14 40 L8 40 Z" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              {/* Window */}
+              <path d="M24 20 L20 30 L44 30 L38 20 Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              {/* Front wheel - green */}
+              <circle cx="18" cy="42" r="5" stroke="#84cc16" strokeWidth="2.5" fill="#84cc16" fillOpacity="0.3"/>
+              <circle cx="18" cy="42" r="2" fill="#84cc16"/>
+              {/* Rear wheel */}
+              <circle cx="50" cy="42" r="5" stroke="white" strokeWidth="2.5" fill="none"/>
+              <circle cx="50" cy="42" r="2" fill="white"/>
+            </svg>
           </div>
         </motion.div>
 
