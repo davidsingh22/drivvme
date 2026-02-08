@@ -87,7 +87,7 @@ const Landing = () => {
               <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
                 <span className="text-foreground">Payez moins.</span>
                 <br />
-                <span className="text-primary italic">Roulez mieux.</span>
+                <span className="text-gradient">Roulez mieux.</span>
               </h1>
             </motion.div>
 
