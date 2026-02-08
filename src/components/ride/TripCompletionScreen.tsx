@@ -103,7 +103,28 @@ const TripCompletionScreen = ({
           .eq('user_id', driverId);
       }
 
-      // TODO: Handle tip payment if selectedTip > 0
+      // Charge tip if selected
+      if (selectedTip > 0) {
+        try {
+          const { data: tipData, error: tipError } = await supabase.functions.invoke('charge-tip', {
+            body: { rideId, tipAmount: selectedTip },
+          });
+
+          if (tipError) throw tipError;
+          if (tipData?.error) throw new Error(tipData.error);
+        } catch (tipErr: any) {
+          console.error('Tip charge failed:', tipErr);
+          toast({
+            title: language === 'fr' ? 'Pourboire non traité' : 'Tip not processed',
+            description: language === 'fr' 
+              ? 'Votre évaluation a été enregistrée mais le pourboire n\'a pas pu être traité.'
+              : 'Your rating was submitted but the tip could not be processed.',
+            variant: 'destructive',
+          });
+          onComplete();
+          return;
+        }
+      }
 
       toast({
         title: language === 'fr' ? 'Merci!' : 'Thank you!',
