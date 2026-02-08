@@ -24,8 +24,8 @@ const translations: Translations = {
 
   // Hero Section
   'hero.title': { en: 'Pay less.', fr: 'Payez moins.' },
-  'hero.title2': { en: 'Ride smart.', fr: 'Roulez malin.' },
-  'hero.subtitle': { en: 'Fair for riders. Fair for drivers.', fr: 'Juste pour les passagers. Juste pour les conducteurs.' },
+  'hero.title2': { en: 'Ride smart.', fr: 'Roulez mieux.' },
+  'hero.subtitle': { en: 'Fair for riders. Fair for drivers.', fr: 'Équitable pour les passagers. Équitable pour les chauffeurs.' },
   'hero.cta.rider': { en: 'Book a Ride', fr: 'Réserver un trajet' },
   'hero.cta.driver': { en: 'Become a Driver', fr: 'Devenir conducteur' },
 
