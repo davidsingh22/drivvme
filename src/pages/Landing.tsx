@@ -89,11 +89,11 @@ const Landing = () => {
             }} className="mb-6">
               <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
                 <span className="text-foreground">
-                  Same Ride.
+                  Pay less.
                 </span>
                 <br />
                 <span className="text-gradient">
-                  Less Money.
+                  Ride smart.
                 </span>
               </h1>
             </motion.div>
@@ -109,7 +109,7 @@ const Landing = () => {
               duration: 0.6,
               delay: 0.2
             }} className="text-xl md:text-2xl text-foreground mb-12 max-w-2xl mx-auto">
-              Cheaper than the competition. Same great rides.
+              Fair for riders. Fair for drivers.
             </motion.p>
 
             <motion.div initial={{
