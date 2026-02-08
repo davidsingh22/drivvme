@@ -6,6 +6,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
 import landingBg from '@/assets/landing-cityscape-bg.png';
+import drivvemeLogo from '@/assets/drivveme-logo.png';
 const features = [{
   icon: TrendingDown,
   key: 'savings',
@@ -41,11 +42,9 @@ const Landing = () => {
       <div className="fixed inset-0 z-0" style={{
       backgroundImage: `url(${landingBg})`,
       backgroundSize: 'cover',
-      backgroundPosition: 'center',
+      backgroundPosition: 'center bottom',
       backgroundRepeat: 'no-repeat'
-    }}>
-      {/* No overlay - full brightness */}
-      </div>
+    }} />
       <div className="relative z-10">
         <Navbar />
 
@@ -83,6 +82,15 @@ const Landing = () => {
             }} transition={{
               duration: 0.6
             }} className="mb-6">
+              {/* DrivveMe Logo */}
+              <motion.img
+                src={drivvemeLogo}
+                alt="DrivveMe"
+                className="w-32 h-32 md:w-40 md:h-40 mx-auto mb-6 object-contain"
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ duration: 0.5 }}
+              />
               <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
                 <span className="text-foreground">Payez moins.</span>
                 <br />
@@ -131,7 +139,7 @@ const Landing = () => {
       </section>
 
       {/* Canadian Badge - Positioned Higher */}
-      <section className="pt-6 pb-10 bg-card">
+      <section className="pt-6 pb-10">
         <div className="container mx-auto px-4">
           {/* Canadian Pride Badge - Powerful Layout */}
           <motion.div initial={{
