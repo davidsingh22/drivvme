@@ -101,17 +101,25 @@ const Login = () => {
               boxShadow: '0 0 40px hsl(var(--primary) / 0.5), 0 0 80px hsl(var(--primary) / 0.3)',
             }}
           >
-            <svg viewBox="0 0 64 64" className="h-12 w-12" fill="none" xmlns="http://www.w3.org/2000/svg">
-              {/* Car body */}
-              <path d="M8 38 L14 24 L24 18 L44 18 L52 26 L58 30 L58 40 L54 40 L54 42 C54 44.2 52.2 46 50 46 C47.8 46 46 44.2 46 42 L46 40 L22 40 L22 42 C22 44.2 20.2 46 18 46 C15.8 46 14 44.2 14 42 L14 40 L8 40 Z" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-              {/* Window */}
-              <path d="M24 20 L20 30 L44 30 L38 20 Z" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              {/* Front wheel - green */}
-              <circle cx="18" cy="42" r="5" stroke="#84cc16" strokeWidth="2.5" fill="#84cc16" fillOpacity="0.3"/>
-              <circle cx="18" cy="42" r="2" fill="#84cc16"/>
-              {/* Rear wheel */}
-              <circle cx="50" cy="42" r="5" stroke="white" strokeWidth="2.5" fill="none"/>
-              <circle cx="50" cy="42" r="2" fill="white"/>
+            <svg viewBox="0 0 80 56" className="h-12 w-auto" fill="none" xmlns="http://www.w3.org/2000/svg">
+              {/* Car body - rounded SUV shape matching reference */}
+              <path d="M16 36 C16 36 14 36 12 34 L10 30 C8 28 8 26 10 24 L18 18 C20 16 22 14 26 13 L42 12 C46 12 50 13 54 16 L62 22 C66 24 68 26 68 30 L68 34 C68 36 66 36 64 36" 
+                stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              {/* Roof/top curve */}
+              <path d="M22 18 C22 18 26 10 34 9 L44 9 C48 9 52 12 54 16" 
+                stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+              {/* Window divider */}
+              <line x1="40" y1="10" x2="40" y2="18" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+              {/* Bottom bar connecting wheels */}
+              <path d="M24 36 L56 36" stroke="white" strokeWidth="3" strokeLinecap="round"/>
+              {/* Front wheel - GREEN */}
+              <circle cx="22" cy="38" r="7" stroke="#84cc16" strokeWidth="3" fill="#84cc16" fillOpacity="0.25"/>
+              <circle cx="22" cy="38" r="3" fill="#84cc16"/>
+              {/* Rear wheel - white */}
+              <circle cx="58" cy="38" r="7" stroke="white" strokeWidth="3" fill="none"/>
+              <circle cx="58" cy="38" r="3" fill="white"/>
+              {/* Headlight accent */}
+              <circle cx="66" cy="26" r="2" fill="white" fillOpacity="0.6"/>
             </svg>
           </div>
         </motion.div>
