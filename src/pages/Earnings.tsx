@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { DollarSign, TrendingUp, Car, ArrowUp, ArrowDown, Wallet, ExternalLink } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { DollarSign, TrendingUp, Car, ArrowUp, ArrowDown, Wallet, ExternalLink, Gift, ChevronDown, ChevronUp, MapPin, Navigation, User } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -22,6 +22,7 @@ interface EarningsSummary {
   totalPlatformFees: number;
   totalRides: number;
   availableBalance: number;
+  totalTips: number;
 }
 
 interface DailyEarnings {
@@ -30,6 +31,15 @@ interface DailyEarnings {
   earnings: number;
   rides: number;
   fares: number;
+}
+
+interface TipEntry {
+  id: string;
+  tip_amount: number;
+  pickup_address: string;
+  dropoff_address: string;
+  dropoff_at: string | null;
+  rider_name: string;
 }
 
 const Earnings = () => {
@@ -46,8 +56,11 @@ const Earnings = () => {
     totalPlatformFees: 0,
     totalRides: 0,
     availableBalance: 0,
+    totalTips: 0,
   });
   const [dailyData, setDailyData] = useState<DailyEarnings[]>([]);
+  const [tipEntries, setTipEntries] = useState<TipEntry[]>([]);
+  const [tipsExpanded, setTipsExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [withdrawDialogOpen, setWithdrawDialogOpen] = useState(false);
 
@@ -100,9 +113,20 @@ const Earnings = () => {
 
       const { data, error } = await supabase
         .from('rides')
-        .select('actual_fare, driver_earnings, platform_fee, dropoff_at')
+        .select('actual_fare, driver_earnings, platform_fee, dropoff_at, tip_amount, tip_status')
         .eq('driver_id', user.id)
         .eq('status', 'completed')
+        .gte('dropoff_at', startDate.toISOString())
+        .order('dropoff_at', { ascending: false });
+
+      // Also fetch tip details (charged tips with rider info)
+      const { data: tipRides } = await supabase
+        .from('rides')
+        .select('id, tip_amount, tip_status, pickup_address, dropoff_address, dropoff_at, rider_id')
+        .eq('driver_id', user.id)
+        .eq('status', 'completed')
+        .eq('tip_status', 'charged')
+        .gt('tip_amount', 0)
         .gte('dropoff_at', startDate.toISOString())
         .order('dropoff_at', { ascending: false });
 
@@ -117,6 +141,12 @@ const Earnings = () => {
         const totalEarnings = data.reduce((sum, r) => sum + (Number(r.driver_earnings) || 0), 0);
         const totalFares = data.reduce((sum, r) => sum + (Number(r.actual_fare) || 0), 0);
         const totalPlatformFees = data.reduce((sum, r) => sum + (Number(r.platform_fee) || 0), 0);
+        const totalTips = data.reduce((sum, r) => {
+          if ((r as any).tip_status === 'charged') {
+            return sum + (Number(r.tip_amount) || 0);
+          }
+          return sum;
+        }, 0);
         const availableBalance = Number(driverProfile?.total_earnings) || 0;
 
         setSummary({
@@ -125,6 +155,7 @@ const Earnings = () => {
           totalPlatformFees,
           totalRides: data.length,
           availableBalance,
+          totalTips,
         });
 
         // Group by day - use ISO format for easier parsing
@@ -142,6 +173,31 @@ const Earnings = () => {
         });
 
         setDailyData(Object.values(dailyMap));
+
+        // Process tip entries with rider names
+        if (tipRides && tipRides.length > 0) {
+          const riderIds = [...new Set(tipRides.map(r => r.rider_id).filter(Boolean))] as string[];
+          let riderNames: Record<string, string> = {};
+          if (riderIds.length > 0) {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('user_id, first_name, last_name')
+              .in('user_id', riderIds);
+            profiles?.forEach(p => {
+              riderNames[p.user_id] = `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Rider';
+            });
+          }
+          setTipEntries(tipRides.map(r => ({
+            id: r.id,
+            tip_amount: Number(r.tip_amount),
+            pickup_address: r.pickup_address,
+            dropoff_address: r.dropoff_address,
+            dropoff_at: r.dropoff_at,
+            rider_name: r.rider_id ? (riderNames[r.rider_id] || 'Rider') : 'Rider',
+          })));
+        } else {
+          setTipEntries([]);
+        }
       }
 
       setIsLoading(false);
@@ -250,12 +306,104 @@ const Earnings = () => {
                 </div>
                 <span className="font-medium text-destructive">-{formatCurrency(summary.totalPlatformFees, language)}</span>
               </div>
+              {summary.totalTips > 0 && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Gift className="h-4 w-4 text-accent" />
+                    <span>{language === 'fr' ? 'Pourboires' : 'Tips Received'}</span>
+                  </div>
+                  <span className="font-medium text-accent">+{formatCurrency(summary.totalTips, language)}</span>
+                </div>
+              )}
               <div className="flex items-center justify-between pt-3 border-t border-border">
                 <span className="font-semibold">{language === 'fr' ? 'Vos gains' : 'Your Earnings'}</span>
                 <span className="font-bold text-lg text-accent">{formatCurrency(summary.totalEarnings, language)}</span>
               </div>
             </div>
           </Card>
+
+          {/* Tips Section */}
+          {tipEntries.length > 0 && (
+            <Card 
+              className={`mb-8 overflow-hidden cursor-pointer transition-all ${tipsExpanded ? 'border-accent/30' : ''}`}
+              onClick={() => setTipsExpanded(!tipsExpanded)}
+            >
+              <div className="p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-accent/10 flex items-center justify-center">
+                      <Gift className="h-5 w-5 text-accent" />
+                    </div>
+                    <div>
+                      <h3 className="font-display text-lg font-semibold">
+                        {language === 'fr' ? 'Pourboires' : 'Tips'}
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        {tipEntries.length} {language === 'fr' ? 'pourboire(s) reçu(s)' : 'tip(s) received'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold text-lg text-accent">
+                      {formatCurrency(summary.totalTips, language)}
+                    </span>
+                    {tipsExpanded ? (
+                      <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <AnimatePresence>
+                {tipsExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.2 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="border-t border-border bg-muted/30 p-4 space-y-3">
+                      {tipEntries.map((tip, index) => (
+                        <motion.div
+                          key={tip.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="bg-background rounded-lg p-3 space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-primary" />
+                              <span className="font-medium text-sm">{tip.rider_name}</span>
+                            </div>
+                            <span className="font-bold text-accent">+{formatCurrency(tip.tip_amount, language)}</span>
+                          </div>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex items-start gap-2">
+                              <MapPin className="h-3 w-3 text-primary flex-shrink-0 mt-0.5" />
+                              <span className="line-clamp-1 text-muted-foreground">{tip.pickup_address}</span>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <Navigation className="h-3 w-3 text-accent flex-shrink-0 mt-0.5" />
+                              <span className="line-clamp-1 text-muted-foreground">{tip.dropoff_address}</span>
+                            </div>
+                          </div>
+                          {tip.dropoff_at && (
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(tip.dropoff_at).toLocaleDateString(language === 'fr' ? 'fr-CA' : 'en-CA')}
+                            </p>
+                          )}
+                        </motion.div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Card>
+          )}
 
           {/* Lifetime Stats from profile */}
           {driverProfile && (

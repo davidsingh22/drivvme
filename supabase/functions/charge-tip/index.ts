@@ -5,7 +5,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 serve(async (req) => {
@@ -30,53 +30,72 @@ serve(async (req) => {
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) throw new Error("Unauthorized");
 
-    const { rideId, tipAmount, savedCardId } = await req.json();
+    const { rideId, tipAmount, adminCharge } = await req.json();
 
     if (!rideId || !tipAmount || tipAmount <= 0) {
       throw new Error("Missing or invalid rideId/tipAmount");
     }
 
-    // Verify ride belongs to user and is completed
-    const { data: ride, error: rideError } = await supabase
+    // If admin is charging, verify admin role
+    let riderId: string;
+    if (adminCharge) {
+      const { data: isAdmin } = await supabase.rpc("is_admin", { _user_id: user.id });
+      if (!isAdmin) throw new Error("Only admins can charge tips");
+
+      // Get ride info using service role (admin can see all rides)
+      const { data: ride, error: rideError } = await supabase
+        .from("rides")
+        .select("id, rider_id, driver_id, status, tip_amount, tip_status")
+        .eq("id", rideId)
+        .single();
+
+      if (rideError || !ride) throw new Error("Ride not found");
+      if (ride.status !== "completed") throw new Error("Ride is not completed");
+      if (ride.tip_status === "charged") throw new Error("Tip already charged");
+      if (!ride.rider_id) throw new Error("No rider associated with this ride");
+
+      riderId = ride.rider_id;
+    } else {
+      // Rider is submitting their own tip
+      const { data: ride, error: rideError } = await supabase
+        .from("rides")
+        .select("id, rider_id, driver_id, status, tip_amount, tip_status")
+        .eq("id", rideId)
+        .eq("rider_id", user.id)
+        .single();
+
+      if (rideError || !ride) throw new Error("Ride not found or unauthorized");
+      if (ride.status !== "completed") throw new Error("Ride is not completed");
+      if (ride.tip_status === "charged") throw new Error("Tip already charged");
+
+      riderId = user.id;
+    }
+
+    // Get the ride for driver_id
+    const { data: rideData } = await supabase
       .from("rides")
-      .select("id, rider_id, driver_id, status, tip_amount")
+      .select("driver_id")
       .eq("id", rideId)
-      .eq("rider_id", user.id)
       .single();
 
-    if (rideError || !ride) throw new Error("Ride not found or unauthorized");
-    if (ride.status !== "completed") throw new Error("Ride is not completed");
-    if ((ride.tip_amount || 0) > 0) throw new Error("Tip already added to this ride");
-
-    // Get the saved card to charge
+    // Get saved card for the rider
     let cardToCharge;
-    if (savedCardId) {
-      const { data: card } = await supabase
-        .from("saved_cards")
-        .select("*")
-        .eq("id", savedCardId)
-        .eq("user_id", user.id)
-        .single();
-      cardToCharge = card;
-    }
 
-    if (!cardToCharge) {
-      // Fall back to default card
-      const { data: defaultCard } = await supabase
-        .from("saved_cards")
-        .select("*")
-        .eq("user_id", user.id)
-        .eq("is_default", true)
-        .single();
-      cardToCharge = defaultCard;
-    }
+    // Try default card first
+    const { data: defaultCard } = await supabase
+      .from("saved_cards")
+      .select("*")
+      .eq("user_id", riderId)
+      .eq("is_default", true)
+      .single();
+    cardToCharge = defaultCard;
 
     if (!cardToCharge) {
       // Fall back to any card
       const { data: anyCard } = await supabase
         .from("saved_cards")
         .select("*")
-        .eq("user_id", user.id)
+        .eq("user_id", riderId)
         .order("created_at", { ascending: false })
         .limit(1)
         .single();
@@ -84,7 +103,7 @@ serve(async (req) => {
     }
 
     if (!cardToCharge) {
-      throw new Error("No saved card found. Please add a payment method first.");
+      throw new Error("No saved card found for this rider.");
     }
 
     // Get the Stripe customer from the payment method
@@ -98,31 +117,33 @@ serve(async (req) => {
 
     // Create and confirm off-session payment for the tip
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(tipAmount * 100), // cents
+      amount: Math.round(tipAmount * 100),
       currency: "cad",
       customer: paymentMethod.customer as string,
       payment_method: cardToCharge.stripe_payment_method_id,
       off_session: true,
       confirm: true,
+      description: `Drivveme Tip - Ride ${rideId.substring(0, 8)}`,
       metadata: {
         ride_id: rideId,
-        user_id: user.id,
+        rider_id: riderId,
         type: "tip",
-        driver_id: ride.driver_id,
+        driver_id: rideData?.driver_id || "",
+        charged_by: adminCharge ? "admin" : "rider",
       },
     });
 
     if (paymentIntent.status === "succeeded") {
-      // Update ride with tip amount
+      // Update ride tip_status to charged
       await supabase
         .from("rides")
-        .update({ tip_amount: tipAmount })
+        .update({ tip_amount: tipAmount, tip_status: "charged" })
         .eq("id", rideId);
 
       // Record tip payment
       await supabase.from("payments").insert({
         ride_id: rideId,
-        payer_id: user.id,
+        payer_id: riderId,
         amount: tipAmount,
         currency: "CAD",
         payment_type: "tip",
@@ -131,11 +152,11 @@ serve(async (req) => {
       });
 
       // Add tip to driver earnings
-      if (ride.driver_id) {
+      if (rideData?.driver_id) {
         const { data: driverProfile } = await supabase
           .from("driver_profiles")
           .select("total_earnings")
-          .eq("user_id", ride.driver_id)
+          .eq("user_id", rideData.driver_id)
           .single();
 
         if (driverProfile) {
@@ -144,7 +165,7 @@ serve(async (req) => {
             .update({
               total_earnings: (driverProfile.total_earnings || 0) + tipAmount,
             })
-            .eq("user_id", ride.driver_id);
+            .eq("user_id", rideData.driver_id);
         }
       }
 
