@@ -814,8 +814,8 @@ const DriverDashboard = () => {
       <Navbar />
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
-        {/* Map */}
-        <div className="flex-1 relative">
+        {/* Map - takes 65% on mobile, flex-[2] on desktop */}
+        <div className="flex-[2] min-h-[60vh] lg:min-h-0 relative">
           <MapComponent
             pickup={currentRide ? { lat: currentRide.pickup_lat, lng: currentRide.pickup_lng } : null}
             dropoff={currentRide ? { lat: currentRide.dropoff_lat, lng: currentRide.dropoff_lng } : null}
@@ -935,8 +935,8 @@ const DriverDashboard = () => {
               </button>
             )}
 
-            {/* Profile, Help and Inbox Buttons */}
-            <div className="flex gap-2 mb-4">
+            {/* Profile and Inbox Buttons */}
+            <div className="flex gap-2 mb-3">
               <Button
                 variant="outline"
                 className="flex-1"
@@ -945,20 +945,33 @@ const DriverDashboard = () => {
                 <UserCircle className="h-5 w-5 mr-2" />
                 Edit Profile
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => setHelpDialogOpen(true)}
-                className="relative"
-              >
-                <HelpCircle className="h-5 w-5" />
+              <DriverInbox />
+            </div>
+
+            {/* Help / Contact Admin - Prominent Card */}
+            <Card 
+              className="mb-4 p-4 border-primary/40 bg-primary/10 cursor-pointer hover:bg-primary/20 transition-colors"
+              onClick={() => setHelpDialogOpen(true)}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">
+                  <HelpCircle className="h-5 w-5 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-sm">
+                    {language === 'fr' ? 'Besoin d\'aide ?' : 'Need Help?'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {language === 'fr' ? 'Contactez l\'équipe DriveMe' : 'Contact DriveMe Support'}
+                  </p>
+                </div>
                 {unreadSupportMessages > 0 && (
-                  <span className="absolute -top-1 -right-1 h-4 w-4 bg-destructive text-destructive-foreground text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
+                  <span className="h-6 w-6 bg-destructive text-destructive-foreground text-xs font-bold rounded-full flex items-center justify-center animate-pulse">
                     {unreadSupportMessages}
                   </span>
                 )}
-              </Button>
-              <DriverInbox />
-            </div>
+              </div>
+            </Card>
 
             {/* Push Notifications (critical for new ride alerts when app is backgrounded) */}
             {!pushSubscribed && (
