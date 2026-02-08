@@ -34,6 +34,7 @@ interface RideData {
   requested_at: string;
   dropoff_at: string | null;
   driver_id: string | null;
+  tip_amount?: number | null;
 }
 
 interface DriverInfo {
@@ -55,6 +56,7 @@ export function RiderBillModal({ open, onClose, ride }: RiderBillModalProps) {
   const [mapboxToken, setMapboxToken] = useState<string | null>(null);
   const [routeGeoJSON, setRouteGeoJSON] = useState<GeoJSON.LineString | null>(null);
   const [driverInfo, setDriverInfo] = useState<DriverInfo | null>(null);
+  const [tipAmount, setTipAmount] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchToken = async () => {
@@ -86,7 +88,6 @@ export function RiderBillModal({ open, onClose, ride }: RiderBillModalProps) {
     if (!ride?.driver_id) return;
 
     const fetchDriver = async () => {
-      // Fetch driver profile info
       const { data: driverProfile } = await supabase
         .from('driver_profiles')
         .select('vehicle_make, vehicle_model, vehicle_color, license_plate, user_id')
@@ -94,7 +95,6 @@ export function RiderBillModal({ open, onClose, ride }: RiderBillModalProps) {
         .single();
 
       if (driverProfile) {
-        // Fetch driver name from profiles
         const { data: profile } = await supabase
           .from('profiles')
           .select('first_name')
@@ -112,6 +112,17 @@ export function RiderBillModal({ open, onClose, ride }: RiderBillModalProps) {
     };
     fetchDriver();
   }, [ride?.driver_id]);
+
+  // Fetch tip amount from rides table
+  useEffect(() => {
+    if (!ride?.id) return;
+    const tp = ride.tip_amount ?? null;
+    if (tp && tp > 0) {
+      setTipAmount(tp);
+    } else {
+      setTipAmount(null);
+    }
+  }, [ride]);
 
   if (!ride) return null;
 
@@ -364,6 +375,29 @@ export function RiderBillModal({ open, onClose, ride }: RiderBillModalProps) {
                 {formatCurrency(total, language)}
               </span>
             </div>
+
+            {/* Tip */}
+            {tipAmount != null && tipAmount > 0 && (
+              <>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">
+                    {language === 'fr' ? 'Pourboire' : 'Tip'}
+                  </span>
+                  <span>{formatCurrency(tipAmount, language)}</span>
+                </div>
+
+                <Separator className="my-2" />
+
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-lg">
+                    {language === 'fr' ? 'Total avec pourboire' : 'Total with tip'}
+                  </span>
+                  <span className="font-bold text-xl text-primary">
+                    {formatCurrency(total + tipAmount, language)}
+                  </span>
+                </div>
+              </>
+            )}
 
             {/* Uber vs Drivveme Comparison */}
             <div className="mt-4 p-4 bg-muted/30 rounded-lg border border-border">
