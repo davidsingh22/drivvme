@@ -5,9 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
-
 import landingBg from '@/assets/landing-cityscape-bg.png';
-
 const features = [{
   icon: TrendingDown,
   key: 'savings',
@@ -29,7 +27,6 @@ const features = [{
   color: 'text-warning',
   bgColor: 'bg-warning/10'
 }];
-
 const Landing = () => {
   const {
     t
@@ -39,7 +36,6 @@ const Landing = () => {
     isRider,
     isDriver
   } = useAuth();
-
   return <div className="min-h-screen bg-background relative">
       {/* Full-page background image */}
       <div className="fixed inset-0 z-0" style={{
@@ -88,13 +84,9 @@ const Landing = () => {
               duration: 0.6
             }} className="mb-6">
               <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
-                <span className="text-foreground">
-                  Pay less.
-                </span>
+                <span className="text-foreground">Payez moins.</span>
                 <br />
-                <span className="text-gradient">
-                  Ride smart.
-                </span>
+                <span className="text-gradient">Roulez mieux.</span>
               </h1>
             </motion.div>
 
@@ -108,9 +100,7 @@ const Landing = () => {
             }} transition={{
               duration: 0.6,
               delay: 0.2
-            }} className="text-xl md:text-2xl text-foreground mb-12 max-w-2xl mx-auto">
-              Fair for riders. Fair for drivers.
-            </motion.p>
+            }} className="text-xl md:text-2xl text-foreground mb-12 max-w-2xl mx-auto">Équitable pour les passagers. Équitable pour les chauffeurs.</motion.p>
 
             <motion.div initial={{
               opacity: 0,
