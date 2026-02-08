@@ -72,17 +72,13 @@ const Login = () => {
 
   return (
     <div className="min-h-screen flex flex-col relative overflow-hidden">
-      {/* Background image */}
+      {/* Purple gradient background */}
       <div
         className="absolute inset-0 z-0"
         style={{
-          backgroundImage: `url(${loginBg})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
+          background: 'radial-gradient(ellipse at center, hsl(270 60% 25%) 0%, hsl(270 50% 10%) 60%, hsl(270 40% 5%) 100%)',
         }}
       />
-      {/* Dark overlay for readability */}
-      <div className="absolute inset-0 z-0 bg-black/30" />
 
       {/* Language toggle top-right */}
       <div className="absolute top-4 right-4 z-20">
