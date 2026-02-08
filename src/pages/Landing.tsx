@@ -150,7 +150,7 @@ const Landing = () => {
       </section>
 
       {/* Features Section */}
-      <section className="py-16 bg-card">
+      <section className="py-16">
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {features.map((feature, index) => <motion.div key={feature.key} initial={{
