@@ -107,11 +107,11 @@ const Login = () => {
       }} transition={{
         duration: 0.5
       }} className="mb-3">
-          <div className="h-40 w-40 rounded-full flex items-center justify-center logo-icon-pulse" style={{
+          <div className="h-40 w-40 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
           background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
           boxShadow: '0 0 40px hsl(var(--primary) / 0.5), 0 0 80px hsl(var(--primary) / 0.3)'
         }}>
-            <img src={drivvemeCarIcon} alt="Drivveme" className="h-32 w-32 object-contain" />
+            <img src={drivvemeCarIcon} alt="Drivveme" className="h-64 w-64 object-contain" />
           </div>
         </motion.div>
 
