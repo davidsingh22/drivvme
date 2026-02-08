@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { DollarSign, Loader2, CheckCircle, CreditCard, RefreshCw } from 'lucide-react';
+import { DollarSign, Loader2, CheckCircle, CreditCard, RefreshCw, Bell } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface PendingTip {
@@ -29,6 +29,7 @@ export function AdminTipsPanel() {
   const [tips, setTips] = useState<PendingTip[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [chargingId, setChargingId] = useState<string | null>(null);
+  const [notifyingId, setNotifyingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTips();
@@ -133,6 +134,45 @@ export function AdminTipsPanel() {
       });
     } finally {
       setChargingId(null);
+    }
+  };
+
+  const notifyDriver = async (tip: PendingTip) => {
+    if (!tip.driver_id) return;
+    setNotifyingId(tip.id);
+    try {
+      // Insert in-app notification
+      await supabase.from('notifications').insert({
+        user_id: tip.driver_id,
+        ride_id: tip.id,
+        type: 'tip_charged',
+        title: 'You received a tip! 🎉',
+        message: `You received a $${tip.tip_amount.toFixed(2)} tip from ${tip.rider_name}`,
+      });
+
+      // Send push notification via FCM
+      await supabase.functions.invoke('send-fcm-notification', {
+        body: {
+          userId: tip.driver_id,
+          title: 'You received a tip! 🎉',
+          body: `You received a $${tip.tip_amount.toFixed(2)} tip from ${tip.rider_name}`,
+          data: { type: 'tip_charged', rideId: tip.id },
+        },
+      });
+
+      toast({
+        title: '✅ Driver Notified',
+        description: `${tip.driver_name} has been notified about their $${tip.tip_amount.toFixed(2)} tip`,
+      });
+    } catch (error: any) {
+      console.error('Error notifying driver:', error);
+      toast({
+        title: 'Failed to notify driver',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setNotifyingId(null);
     }
   };
 
@@ -249,6 +289,7 @@ export function AdminTipsPanel() {
                 <TableHead>Driver</TableHead>
                 <TableHead>Tip Amount</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Notify</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -263,11 +304,27 @@ export function AdminTipsPanel() {
                   <TableCell>
                     <Badge className="bg-success text-success-foreground">Charged</Badge>
                   </TableCell>
+                  <TableCell>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => notifyDriver(tip)}
+                      disabled={notifyingId === tip.id}
+                      className="gap-1"
+                    >
+                      {notifyingId === tip.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Bell className="w-4 h-4" />
+                      )}
+                      Notify
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
               {chargedTips.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
                     No charged tips yet
                   </TableCell>
                 </TableRow>
