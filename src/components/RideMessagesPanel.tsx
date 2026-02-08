@@ -309,18 +309,10 @@ export default function RideMessagesPanel() {
 
   // Render "Why you can't message" explanation
   const renderExplanation = () => {
-    if (!currentUserId) {
-      return (
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <AlertTriangle className="h-5 w-5 text-warning" />
-          <span>{language === 'fr' ? 'Non connecté' : 'Not logged in'}</span>
-        </div>
-      );
-    }
-
+    // Simplified: just show a short message or nothing
     if (isLoading) {
       return (
-        <div className="text-muted-foreground animate-pulse">
+        <div className="text-muted-foreground animate-pulse text-sm">
           {language === 'fr' ? 'Chargement...' : 'Loading...'}
         </div>
       );
@@ -328,69 +320,19 @@ export default function RideMessagesPanel() {
 
     if (!activeRide) {
       return (
-        <div className="flex items-start gap-3 text-muted-foreground">
-          <Info className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium">
-              {language === 'fr' ? 'Aucune course active' : 'No active ride'}
-            </p>
-            <p className="text-sm mt-1">
-              {language === 'fr' 
-                ? 'Acceptez une course pour commencer à communiquer avec le passager.'
-                : 'Accept a ride to start messaging with the rider.'}
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    if (!isLinked) {
-      return (
-        <div className="flex items-start gap-3 text-destructive">
-          <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium">
-              {language === 'fr' ? 'Course non assignée' : 'Ride not assigned to you'}
-            </p>
-            <p className="text-sm mt-1 text-muted-foreground font-mono">
-              driver_id: {activeRide.driver_id} ≠ you: {currentUserId}
-            </p>
-          </div>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {language === 'fr' 
+            ? 'Acceptez une course pour envoyer des messages.'
+            : 'Accept a ride to send messages.'}
+        </p>
       );
     }
 
     if (isEnded) {
       return (
-        <div className="flex items-start gap-3 text-muted-foreground">
-          <Lock className="h-5 w-5 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium">
-              {language === 'fr' ? 'Course terminée' : 'Ride ended'}
-            </p>
-            <p className="text-sm mt-1">
-              {language === 'fr'
-                ? 'La messagerie est fermée pour les courses terminées.'
-                : 'Messaging is closed for completed rides.'}
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    if (!isActive) {
-      return (
-        <div className="flex items-start gap-3 text-muted-foreground">
-          <Lock className="h-5 w-5 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-medium">
-              {language === 'fr' ? 'Statut invalide' : 'Invalid status'}
-            </p>
-            <p className="text-sm mt-1 font-mono">
-              status: {activeRide.status}
-            </p>
-          </div>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {language === 'fr' ? 'Course terminée.' : 'Ride ended.'}
+        </p>
       );
     }
 
@@ -398,35 +340,34 @@ export default function RideMessagesPanel() {
   };
 
   return (
-    <Card className="mb-4 border-primary/30 overflow-visible" style={{ minHeight: 240 }}>
+    <Card className="mb-4 border-primary/30 overflow-visible">
 
       {/* Header */}
-      <div className="flex items-center gap-2 p-4 border-b border-border">
-        <MessageSquare className="h-5 w-5 text-primary" />
-        <h3 className="font-display font-semibold">
-          {language === 'fr' ? 'Messages de la course' : 'Ride Messages'}
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+        <MessageSquare className="h-4 w-4 text-primary" />
+        <h3 className="font-display font-semibold text-sm">
+          {language === 'fr' ? 'Messages' : 'Messages'}
         </h3>
         {canMessage && messages.length > 0 && (
           <span className="ml-auto text-xs text-muted-foreground">
-            {messages.length} {language === 'fr' ? 'messages' : 'messages'}
+            {messages.length}
           </span>
         )}
       </div>
 
       {/* Content */}
-      <div className="p-4">
+      <div className="px-3 py-2">
         {!canMessage ? (
-          <div className="py-4">
+          <div className="py-2">
             {renderExplanation()}
           </div>
         ) : (
           <>
             {/* Messages List */}
-            <div className="space-y-3 max-h-60 overflow-y-auto mb-4">
+            <div className="space-y-2 max-h-40 overflow-y-auto mb-3">
               {messages.length === 0 && (
-                <div className="text-center text-muted-foreground py-6">
-                  <MessageSquare className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                  <p>{language === 'fr' ? 'Aucun message.' : 'No messages yet.'}</p>
+                <div className="text-center text-muted-foreground py-3">
+                  <p className="text-sm">{language === 'fr' ? 'Aucun message.' : 'No messages yet.'}</p>
                 </div>
               )}
 
