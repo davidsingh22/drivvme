@@ -33,6 +33,7 @@ interface Ride {
   subtotal_before_tax?: number | null;
   gst_amount?: number | null;
   qst_amount?: number | null;
+  tip_amount: number | null;
   status: string;
   requested_at: string;
   dropoff_at: string | null;
