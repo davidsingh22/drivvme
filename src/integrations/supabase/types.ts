@@ -682,6 +682,7 @@ export type Database = {
           rider_id: string | null
           status: Database["public"]["Enums"]["ride_status"]
           subtotal_before_tax: number | null
+          tip_amount: number | null
           updated_at: string
         }
         Insert: {
@@ -717,6 +718,7 @@ export type Database = {
           rider_id?: string | null
           status?: Database["public"]["Enums"]["ride_status"]
           subtotal_before_tax?: number | null
+          tip_amount?: number | null
           updated_at?: string
         }
         Update: {
@@ -752,6 +754,7 @@ export type Database = {
           rider_id?: string | null
           status?: Database["public"]["Enums"]["ride_status"]
           subtotal_before_tax?: number | null
+          tip_amount?: number | null
           updated_at?: string
         }
         Relationships: []
