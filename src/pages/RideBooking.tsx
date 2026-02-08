@@ -29,7 +29,7 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
-import montrealCityscapeBg from '@/assets/montreal-purple-skyline.png';
+import welcomeBg from '@/assets/drivveme-welcome-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
@@ -1389,7 +1389,7 @@ const RideBooking = () => {
         <div 
           className="absolute inset-0 z-0"
           style={{
-            backgroundImage: `url(${montrealCityscapeBg})`,
+            backgroundImage: `url(${welcomeBg})`,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
@@ -1567,7 +1567,7 @@ const RideBooking = () => {
           <div 
             className="absolute inset-0"
             style={{
-              backgroundImage: `url(${montrealCityscapeBg})`,
+              backgroundImage: `url(${welcomeBg})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
             }}
