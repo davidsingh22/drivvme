@@ -111,7 +111,7 @@ const Login = () => {
           background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
           boxShadow: '0 0 40px hsl(var(--primary) / 0.5), 0 0 80px hsl(var(--primary) / 0.3)'
         }}>
-            <img src={drivvemeCarIcon} alt="Drivveme" className="h-14 w-14 object-contain" />
+            <img src={drivvemeCarIcon} alt="Drivveme" className="h-[4.5rem] w-[4.5rem] object-contain" />
           </div>
         </motion.div>
 
