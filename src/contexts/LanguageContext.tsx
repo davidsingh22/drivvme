@@ -23,9 +23,9 @@ const translations: Translations = {
   'nav.logout': { en: 'Log Out', fr: 'Déconnexion' },
 
   // Hero Section
-  'hero.title': { en: 'Ride Better.', fr: 'Roulez mieux.' },
-  'hero.title2': { en: 'Pay Less.', fr: 'Payez moins.' },
-  'hero.subtitle': { en: '15% cheaper than the competition. Same great rides.', fr: '15% moins cher que la concurrence. Mêmes excellents trajets.' },
+  'hero.title': { en: 'Pay less.', fr: 'Payez moins.' },
+  'hero.title2': { en: 'Ride smart.', fr: 'Roulez malin.' },
+  'hero.subtitle': { en: 'Fair for riders. Fair for drivers.', fr: 'Juste pour les passagers. Juste pour les conducteurs.' },
   'hero.cta.rider': { en: 'Book a Ride', fr: 'Réserver un trajet' },
   'hero.cta.driver': { en: 'Become a Driver', fr: 'Devenir conducteur' },
 
