@@ -1398,7 +1398,7 @@ const RideBooking = () => {
           <div className="absolute inset-0" style={{
           backgroundImage: `url(${welcomeBg})`,
           backgroundSize: 'cover',
-          backgroundPosition: 'center top'
+          backgroundPosition: 'center bottom'
         }} />
           {/* Frosted glass overlay */}
           <div className="absolute inset-0" style={{
