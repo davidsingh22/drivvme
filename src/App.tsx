@@ -133,7 +133,7 @@ const DriverRoute = () => {
   return <DriverDashboard />;
 };
 
-// Wrapped inside BrowserRouter AND AuthProvider to ensure context is available.
+// Wrapped inside BrowserRouter AND AuthProvider so useAuth context is available.
 const AppRoutes = () => {
   return (
     <>
