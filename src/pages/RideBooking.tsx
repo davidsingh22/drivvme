@@ -31,6 +31,7 @@ import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
 import welcomeBg from '@/assets/drivveme-galaxy-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
+import drivvemeLogoNew from '@/assets/drivveme-logo-new.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
@@ -1404,17 +1405,9 @@ const RideBooking = () => {
           <div className="absolute inset-0" style={{
           background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.3) 0%, rgba(30, 15, 60, 0.4) 50%, rgba(60, 30, 100, 0.3) 100%)'
         }} />
-          {/* Glowing logo + brand name at top center */}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
-            <div className="h-16 w-16 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
-            background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
-            boxShadow: '0 0 30px hsl(var(--primary) / 0.5), 0 0 60px hsl(var(--primary) / 0.3)'
-          }}>
-              
-            </div>
-            <span className="font-display text-lg font-bold mt-0.5 logo-flash">
-              Drivve<span className="text-accent">Me</span>
-            </span>
+          {/* Logo at top center */}
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">
+            <img src={drivvemeLogoNew} alt="DrivveMe" className="h-20 w-auto object-contain drop-shadow-lg" />
           </div>
           {/* Content layer */}
           <div className="relative h-full p-5 pt-28 space-y-4 overflow-y-auto z-10">
