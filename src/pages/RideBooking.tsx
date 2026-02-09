@@ -29,7 +29,8 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
-import welcomeBg from '@/assets/montreal-purple-city-bg.png';
+import welcomeBg from '@/assets/drivveme-galaxy-bg.png';
+import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
@@ -1572,17 +1573,22 @@ const RideBooking = () => {
               backgroundPosition: 'center',
             }}
           />
-          {/* Animated glow orbs for living background effect */}
-          <div className="bg-glow-orb bg-glow-orb-1" />
-          <div className="bg-glow-orb bg-glow-orb-2" />
-          <div className="bg-glow-orb bg-glow-orb-3" />
-          {/* Frosted glass overlay - light tint so city shows through */}
+          {/* Frosted glass overlay */}
           <div 
             className="absolute inset-0"
             style={{
-              background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.4) 0%, rgba(30, 15, 60, 0.5) 50%, rgba(60, 30, 100, 0.4) 100%)',
+              background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.3) 0%, rgba(30, 15, 60, 0.4) 50%, rgba(60, 30, 100, 0.3) 100%)',
             }}
           />
+          {/* Glowing logo at top center */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
+            <div className="h-20 w-20 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
+              background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
+              boxShadow: '0 0 40px hsl(var(--primary) / 0.5), 0 0 80px hsl(var(--primary) / 0.3)'
+            }}>
+              <img src={drivvemeCarIcon} alt="Drivveme" className="h-48 w-48 object-contain" />
+            </div>
+          </div>
           {/* Content layer */}
           <div 
             className="relative h-full p-5 pt-6 space-y-4 overflow-y-auto z-10"
