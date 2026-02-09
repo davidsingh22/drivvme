@@ -205,9 +205,14 @@ const RideBooking = () => {
   // Route guard - drivers go to /driver, only pure riders stay here
   // Track if we've started a redirect to prevent flash
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const routeGuardResolved = useRef(false);
   useEffect(() => {
     // Don't redirect while auth state is still being resolved.
     if (authLoading) return;
+
+    // Once we've resolved the route guard, don't re-run on background refreshes
+    if (routeGuardResolved.current) return;
+
     if (!user) {
       setIsRedirecting(true);
       navigate('/login', {
@@ -217,7 +222,6 @@ const RideBooking = () => {
     }
 
     // Drivers should never land on /ride (rider booking UI).
-    // If roles are slow to load on mobile, fall back to a quick backend check.
     let cancelled = false;
     const maybeRedirectDriver = async () => {
       // If context already knows they're a driver, redirect immediately.
@@ -230,11 +234,13 @@ const RideBooking = () => {
         return;
       }
 
-      // If roles are present and not driver, allow rider flow.
-      if (roles.length > 0 && !isDriver) return;
+      // If roles are present and not driver, allow rider flow — mark resolved.
+      if (roles.length > 0 && !isDriver) {
+        routeGuardResolved.current = true;
+        return;
+      }
 
       // Roles missing: do a one-shot backend role check to avoid misrouting drivers to /ride.
-      // Use RPC since it is SECURITY DEFINER (works even if direct roles reads are blocked).
       const {
         data: isDriverRpc
       } = await supabase.rpc('is_driver', {
@@ -272,7 +278,11 @@ const RideBooking = () => {
         navigate('/driver', {
           replace: true
         });
+        return;
       }
+
+      // Not a driver — mark resolved so we don't re-run
+      routeGuardResolved.current = true;
     };
     void maybeRedirectDriver();
     return () => {
@@ -1130,7 +1140,7 @@ const RideBooking = () => {
 
   // Avoid blocking the whole page during background token refreshes.
   // Show loading while redirecting to prevent black screen flash
-  if (isRedirecting || authLoading && roles.length === 0) {
+  if (isRedirecting || (authLoading && roles.length === 0)) {
     return <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
       </div>;
