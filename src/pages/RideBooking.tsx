@@ -30,6 +30,7 @@ import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
 import welcomeBg from '@/assets/drivveme-galaxy-bg-new.png';
+import rideBg from '@/assets/drivveme-ride-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
@@ -1263,7 +1264,7 @@ const RideBooking = () => {
     return <div className="min-h-screen bg-background relative overflow-hidden">
         {/* Full-page background image */}
         <div className="absolute inset-0 z-0" style={{
-        backgroundImage: `url(${welcomeBg})`,
+        backgroundImage: `url(${rideBg})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center'
       }} />
