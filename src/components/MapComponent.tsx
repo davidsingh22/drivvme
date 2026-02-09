@@ -155,11 +155,12 @@ const MapComponent = ({
         // Set golden hour lighting for warm, luxurious ambiance
         try {
           map.setConfigProperty('basemap', 'lightPreset', 'dusk');
-          // Enable 3D buildings in standard style
           map.setConfigProperty('basemap', 'showPlaceLabels', true);
           map.setConfigProperty('basemap', 'showRoadLabels', true);
           map.setConfigProperty('basemap', 'showPointOfInterestLabels', true);
           map.setConfigProperty('basemap', 'showTransitLabels', false);
+          // Disable 3D tree/object models to prevent loading errors and glitching
+          map.setConfigProperty('basemap', 'show3dObjects', false);
         } catch (e) {
           console.log('Standard style config not available, using fallback');
         }
