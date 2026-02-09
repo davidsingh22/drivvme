@@ -1580,18 +1580,21 @@ const RideBooking = () => {
               background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.3) 0%, rgba(30, 15, 60, 0.4) 50%, rgba(60, 30, 100, 0.3) 100%)',
             }}
           />
-          {/* Glowing logo at top center */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20">
-            <div className="h-20 w-20 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
+          {/* Glowing logo + brand name at top center */}
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
+            <div className="h-24 w-24 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
               background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
               boxShadow: '0 0 40px hsl(var(--primary) / 0.5), 0 0 80px hsl(var(--primary) / 0.3)'
             }}>
-              <img src={drivvemeCarIcon} alt="Drivveme" className="h-48 w-48 object-contain" />
+              <img src={drivvemeCarIcon} alt="Drivveme" className="h-64 w-64 object-contain" />
             </div>
+            <span className="font-display text-2xl font-bold mt-1 logo-flash">
+              Drivve<span className="text-accent">Me</span>
+            </span>
           </div>
           {/* Content layer */}
           <div 
-            className="relative h-full p-5 pt-6 space-y-4 overflow-y-auto z-10"
+            className="relative h-full p-5 pt-36 space-y-4 overflow-y-auto z-10"
           >
             {/* Greeting */}
             <GreetingHeader />
