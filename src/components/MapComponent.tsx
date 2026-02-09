@@ -174,7 +174,7 @@ const MapComponent = ({
         });
 
         // Add luxurious 3D building extrusions with realistic lighting
-        if (!map.getLayer('3d-buildings')) {
+        if (!map.getLayer('3d-buildings') && map.getSource('composite')) {
           const layers = map.getStyle().layers;
           let labelLayerId: string | undefined;
           for (let i = 0; i < layers.length; i++) {
@@ -219,7 +219,7 @@ const MapComponent = ({
         }
 
         // Add subtle road glow layer for premium feel
-        if (!map.getLayer('road-glow')) {
+        if (!map.getLayer('road-glow') && map.getSource('composite')) {
           try {
             map.addLayer({
               'id': 'road-glow',
