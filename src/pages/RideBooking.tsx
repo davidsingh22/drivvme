@@ -1130,7 +1130,7 @@ const RideBooking = () => {
 
   // Avoid blocking the whole page during background token refreshes.
   // Show loading while redirecting to prevent black screen flash
-  if (isRedirecting || authLoading && roles.length === 0) {
+  if (isRedirecting || (authLoading && roles.length === 0)) {
     return <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
       </div>;
