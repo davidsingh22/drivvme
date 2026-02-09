@@ -29,9 +29,8 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
-import welcomeBg from '@/assets/drivveme-galaxy-bg.png';
+import welcomeBg from '@/assets/drivveme-galaxy-bg-new.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
-import drivvemeLogoNew from '@/assets/drivveme-logo-new.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
@@ -1395,22 +1394,18 @@ const RideBooking = () => {
         border: '1px solid rgba(255, 255, 255, 0.12)',
         boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)'
       }}>
-          {/* Background image layer */}
-          <div className="absolute inset-0" style={{
+          {/* Background image layer - positioned so logo/text shows at top */}
+          <div className="absolute inset-0 rounded-[20px] overflow-hidden" style={{
           backgroundImage: `url(${welcomeBg})`,
           backgroundSize: 'cover',
-          backgroundPosition: 'center bottom'
+          backgroundPosition: 'center 25%'
         }} />
-          {/* Frosted glass overlay */}
+          {/* Subtle overlay for text readability */}
           <div className="absolute inset-0" style={{
-          background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.3) 0%, rgba(30, 15, 60, 0.4) 50%, rgba(60, 30, 100, 0.3) 100%)'
+          background: 'linear-gradient(180deg, transparent 0%, rgba(20, 10, 40, 0.4) 60%, rgba(20, 10, 40, 0.7) 100%)'
         }} />
-          {/* Logo at top center */}
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20">
-            <img src={drivvemeLogoNew} alt="DrivveMe" className="h-20 w-auto object-contain drop-shadow-lg" />
-          </div>
           {/* Content layer */}
-          <div className="relative h-full p-5 pt-28 space-y-4 overflow-y-auto z-10">
+          <div className="relative h-full p-5 pt-32 space-y-4 overflow-y-auto z-10">
             {/* Greeting */}
             <GreetingHeader />
             
