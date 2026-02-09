@@ -1266,7 +1266,7 @@ const RideBooking = () => {
         <div className="absolute inset-0 z-0" style={{
         backgroundImage: `url(${rideBg})`,
         backgroundSize: 'cover',
-        backgroundPosition: 'center'
+        backgroundPosition: 'center center'
       }} />
         {/* Gradient overlay for better contrast */}
         <div className="absolute inset-0 z-0" style={{
