@@ -1406,12 +1406,7 @@ const RideBooking = () => {
         }} />
           {/* Glowing logo + brand name at top center */}
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
-            <div className="h-24 w-24 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
-            background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
-            boxShadow: '0 0 40px hsl(var(--primary) / 0.5), 0 0 80px hsl(var(--primary) / 0.3)'
-          }}>
-              
-            </div>
+            
             
           </div>
           {/* Content layer */}
