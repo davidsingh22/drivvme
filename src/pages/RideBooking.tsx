@@ -1407,9 +1407,7 @@ const RideBooking = () => {
           {/* Glowing logo + brand name at top center */}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
             
-            <span className="font-display text-lg font-bold mt-0.5 logo-flash">
-              Drivve<span className="text-accent">e</span>
-            </span>
+            
           </div>
           {/* Content layer */}
           <div className="relative h-full p-5 pt-28 space-y-4 overflow-y-auto z-10">
