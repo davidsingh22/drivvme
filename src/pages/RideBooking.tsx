@@ -1130,7 +1130,7 @@ const RideBooking = () => {
 
   // Avoid blocking the whole page during background token refreshes.
   // Show loading while redirecting to prevent black screen flash
-  if (isRedirecting || (authLoading && roles.length === 0)) {
+  if (isRedirecting || authLoading && roles.length === 0) {
     return <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
       </div>;
@@ -1407,10 +1407,10 @@ const RideBooking = () => {
           {/* Glowing logo + brand name at top center */}
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
             <div className="h-16 w-16 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
-              background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
-              boxShadow: '0 0 30px hsl(var(--primary) / 0.5), 0 0 60px hsl(var(--primary) / 0.3)'
-            }}>
-              <img src={drivvemeCarIcon} alt="Drivveme" className="h-40 w-40 object-contain" />
+            background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
+            boxShadow: '0 0 30px hsl(var(--primary) / 0.5), 0 0 60px hsl(var(--primary) / 0.3)'
+          }}>
+              
             </div>
             <span className="font-display text-lg font-bold mt-0.5 logo-flash">
               Drivve<span className="text-accent">Me</span>
