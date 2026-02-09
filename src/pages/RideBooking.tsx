@@ -1398,7 +1398,7 @@ const RideBooking = () => {
           <div className="absolute inset-0 rounded-[20px] overflow-hidden" style={{
           backgroundImage: `url(${welcomeBg})`,
           backgroundSize: 'cover',
-          backgroundPosition: 'center 15%'
+          backgroundPosition: 'center 5%'
         }} />
           {/* Subtle overlay for text readability */}
           <div className="absolute inset-0" style={{
