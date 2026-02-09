@@ -29,7 +29,7 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
-import welcomeBg from '@/assets/drivveme-galaxy-bg.png';
+import welcomeBg from '@/assets/drivveme-galaxy-bg-new.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
@@ -1399,7 +1399,7 @@ const RideBooking = () => {
         left: '12px',
         right: '12px',
         bottom: '12px',
-        height: '55vh',
+        height: '48vh',
         borderRadius: '20px',
         border: '1px solid rgba(255, 255, 255, 0.12)',
         boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)'
@@ -1420,7 +1420,7 @@ const RideBooking = () => {
             
           </div>
           {/* Content layer */}
-          <div className="relative h-full p-5 pt-28 space-y-4 overflow-y-auto z-10">
+          <div className="relative h-full p-5 pt-6 space-y-3 overflow-y-auto z-10">
             {/* Greeting */}
             <GreetingHeader />
             
