@@ -155,12 +155,11 @@ const MapComponent = ({
         // Set golden hour lighting for warm, luxurious ambiance
         try {
           map.setConfigProperty('basemap', 'lightPreset', 'dusk');
+          // Enable 3D buildings in standard style
           map.setConfigProperty('basemap', 'showPlaceLabels', true);
           map.setConfigProperty('basemap', 'showRoadLabels', true);
           map.setConfigProperty('basemap', 'showPointOfInterestLabels', true);
           map.setConfigProperty('basemap', 'showTransitLabels', false);
-          // Disable 3D tree/object models to prevent loading errors and glitching
-          map.setConfigProperty('basemap', 'show3dObjects', false);
         } catch (e) {
           console.log('Standard style config not available, using fallback');
         }
@@ -175,7 +174,7 @@ const MapComponent = ({
         });
 
         // Add luxurious 3D building extrusions with realistic lighting
-        if (!map.getLayer('3d-buildings') && map.getSource('composite')) {
+        if (!map.getLayer('3d-buildings')) {
           const layers = map.getStyle().layers;
           let labelLayerId: string | undefined;
           for (let i = 0; i < layers.length; i++) {
@@ -220,7 +219,7 @@ const MapComponent = ({
         }
 
         // Add subtle road glow layer for premium feel
-        if (!map.getLayer('road-glow') && map.getSource('composite')) {
+        if (!map.getLayer('road-glow')) {
           try {
             map.addLayer({
               'id': 'road-glow',

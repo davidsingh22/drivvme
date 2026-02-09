@@ -29,7 +29,7 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
-import welcomeBg from '@/assets/drivveme-galaxy-bg-new.png';
+import welcomeBg from '@/assets/drivveme-galaxy-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
@@ -1130,7 +1130,7 @@ const RideBooking = () => {
 
   // Avoid blocking the whole page during background token refreshes.
   // Show loading while redirecting to prevent black screen flash
-  if (isRedirecting || authLoading && roles.length === 0) {
+  if (isRedirecting || (authLoading && roles.length === 0)) {
     return <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
       </div>;
@@ -1394,18 +1394,30 @@ const RideBooking = () => {
         border: '1px solid rgba(255, 255, 255, 0.12)',
         boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)'
       }}>
-          {/* Background image layer - positioned so logo/text shows at top */}
-          <div className="absolute inset-0 rounded-[20px] overflow-hidden" style={{
+          {/* Background image layer */}
+          <div className="absolute inset-0" style={{
           backgroundImage: `url(${welcomeBg})`,
           backgroundSize: 'cover',
-          backgroundPosition: 'center 5%'
+          backgroundPosition: 'center'
         }} />
-          {/* Subtle overlay for text readability */}
+          {/* Frosted glass overlay */}
           <div className="absolute inset-0" style={{
-          background: 'linear-gradient(180deg, transparent 0%, rgba(20, 10, 40, 0.4) 60%, rgba(20, 10, 40, 0.7) 100%)'
+          background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.3) 0%, rgba(30, 15, 60, 0.4) 50%, rgba(60, 30, 100, 0.3) 100%)'
         }} />
+          {/* Glowing logo + brand name at top center */}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
+            <div className="h-16 w-16 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
+              background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
+              boxShadow: '0 0 30px hsl(var(--primary) / 0.5), 0 0 60px hsl(var(--primary) / 0.3)'
+            }}>
+              <img src={drivvemeCarIcon} alt="Drivveme" className="h-40 w-40 object-contain" />
+            </div>
+            <span className="font-display text-lg font-bold mt-0.5 logo-flash">
+              Drivve<span className="text-accent">Me</span>
+            </span>
+          </div>
           {/* Content layer */}
-          <div className="relative h-full p-5 pt-32 space-y-4 overflow-y-auto z-10">
+          <div className="relative h-full p-5 pt-28 space-y-4 overflow-y-auto z-10">
             {/* Greeting */}
             <GreetingHeader />
             
