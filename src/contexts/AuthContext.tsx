@@ -254,8 +254,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Set profile and roles immediately - don't wait for driver profile
       setProfile(profileData ?? null);
       // Keep existing roles if fetch failed but we had cached ones
-      const finalRoles = rolesData.length > 0 ? rolesData : roles;
-      setRoles(finalRoles);
+      // IMPORTANT: use functional update to avoid stale-closure race (this fn
+      // can be captured by the onAuthStateChange callback which has [] deps).
+      let finalRoles = rolesData;
+      setRoles(prev => {
+        finalRoles = rolesData.length > 0 ? rolesData : prev;
+        return finalRoles;
+      });
 
       // Fetch driver profile for ALL users who have the driver role
       // Do this in the foreground (not background) to ensure it's available for the dashboard
