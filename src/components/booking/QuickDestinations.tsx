@@ -120,7 +120,8 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
               background: 'rgba(30, 30, 40, 0.7)',
               backdropFilter: 'blur(12px)',
               WebkitBackdropFilter: 'blur(12px)',
-              border: '1px solid rgba(100, 100, 120, 0.3)',
+              border: '1.5px solid rgba(200, 50, 255, 0.6)',
+              boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)',
             }}
           >
             <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">

@@ -1428,7 +1428,8 @@ const RideBooking = () => {
             {/* Pickup Location Row */}
             <div onClick={() => setShowFullInput(true)} className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" style={{
             background: 'rgba(40, 20, 60, 0.7)',
-            border: '1px solid rgba(255, 255, 255, 0.15)'
+            border: '1.5px solid rgba(200, 50, 255, 0.6)',
+            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
           }}>
               <div className="h-9 w-9 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0">
                 <Navigation className="h-4 w-4 text-lime-400" />
@@ -1444,7 +1445,8 @@ const RideBooking = () => {
             {/* Destination Input - Where to? */}
             <div className="rounded-xl" style={{
             background: 'rgba(40, 20, 60, 0.7)',
-            border: '1px solid rgba(255, 255, 255, 0.15)'
+            border: '1.5px solid rgba(200, 50, 255, 0.6)',
+            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
           }}>
               <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => handleDropoffChange(addr, coords)} placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'} />
             </div>
