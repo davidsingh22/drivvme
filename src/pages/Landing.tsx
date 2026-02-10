@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
+import Logo from '@/components/Logo';
 import landingBg from '@/assets/drivveme-purple-bridge-bg.png';
-import drivvemeLogo from '@/assets/drivveme-logo.png';
 const features = [{
   icon: TrendingDown,
   key: 'savings',
@@ -83,7 +83,9 @@ const Landing = () => {
               duration: 0.6
             }} className="mb-6">
               {/* DrivveMe Logo */}
-              
+              <div className="flex justify-center mb-6">
+                <Logo size="lg" />
+              </div>
               <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold mb-4">
                 <span className="text-foreground">Payez moins.</span>
                 <br />
