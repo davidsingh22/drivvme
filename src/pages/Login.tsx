@@ -100,18 +100,8 @@ const Login = () => {
 
       {/* Centered content */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-start pt-12 pb-8 px-4">
-        {/* Logo */}
-        <motion.div initial={{
-        opacity: 0,
-        scale: 0.8
-      }} animate={{
-        opacity: 1,
-        scale: 1
-      }} transition={{
-        duration: 0.5
-      }} className="mb-8">
-          <Logo size="lg" />
-        </motion.div>
+
+
 
         {/* Login card */}
         <motion.div initial={{
