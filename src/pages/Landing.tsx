@@ -112,7 +112,7 @@ const Landing = () => {
             }} transition={{
               duration: 0.6,
               delay: 0.4
-            }} className="flex flex-col sm:flex-row gap-4 justify-center mt-auto pt-[45vh]">
+            }} className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button asChild size="lg" className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group btn-dark-glow">
                 <Link to={user ? "/ride" : "/login"}>
                   {t('hero.cta.rider')}
