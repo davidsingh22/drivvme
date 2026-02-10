@@ -29,7 +29,7 @@ const Logo = ({ size = 'md', showText = true }: LogoProps) => {
         whileHover={{ rotate: -5 }}
         transition={{ type: 'spring', stiffness: 300 }}
       >
-        <Car className={`${size === 'sm' ? 'h-4 w-4' : size === 'md' ? 'h-5 w-5' : 'h-7 w-7'} text-primary-foreground`} />
+        <Car className={`${size === 'sm' ? 'h-4 w-4' : size === 'md' ? 'h-5 w-5' : 'h-7 w-7'} text-primary-foreground`} style={{ filter: 'drop-shadow(-2px 2px 3px hsl(82, 85%, 55%))' }} />
       </motion.div>
       {showText && (
         <span className={`font-display font-bold ${textSizes[size]} logo-flash`}>
