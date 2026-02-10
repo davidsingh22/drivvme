@@ -103,37 +103,31 @@ const Landing = () => {
               delay: 0.2
             }} className="text-xl md:text-2xl text-foreground mb-12 max-w-2xl mx-auto">Équitable pour les passagers. Équitable pour les chauffeurs.</motion.p>
 
-          </div>
-        </div>
-      </section>
+            <motion.div initial={{
+              opacity: 0,
+              y: 20
+            }} animate={{
+              opacity: 1,
+              y: 0
+            }} transition={{
+              duration: 0.6,
+              delay: 0.4
+            }} className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Button asChild size="lg" className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group btn-dark-glow">
+                <Link to={user ? "/ride" : "/login"}>
+                  {t('hero.cta.rider')}
+                  <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                </Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className="text-lg px-8 py-6 rounded-xl border-2 hover:bg-primary/10 hover:border-primary btn-purple-glow">
+                <Link to={user && isDriver ? "/driver" : "/login"}>
+                  <Car className="mr-2 h-5 w-5" />
+                  Driver Login
+                </Link>
+              </Button>
+            </motion.div>
 
-      {/* CTA Buttons Section */}
-      <section className="pt-6 pb-10">
-        <div className="container mx-auto px-4">
-          <motion.div initial={{
-            opacity: 0,
-            y: 20
-          }} whileInView={{
-            opacity: 1,
-            y: 0
-          }} viewport={{
-            once: true
-          }} transition={{
-            duration: 0.6
-          }} className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button asChild size="lg" className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group btn-dark-glow">
-              <Link to={user ? "/ride" : "/login"}>
-                {t('hero.cta.rider')}
-                <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
-              </Link>
-            </Button>
-            <Button asChild size="lg" variant="outline" className="text-lg px-8 py-6 rounded-xl border-2 hover:bg-primary/10 hover:border-primary btn-purple-glow">
-              <Link to={user && isDriver ? "/driver" : "/login"}>
-                <Car className="mr-2 h-5 w-5" />
-                Driver Login
-              </Link>
-            </Button>
-          </motion.div>
+          </div>
         </div>
       </section>
 
