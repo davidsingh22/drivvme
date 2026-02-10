@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff } from 'lucide-react';
-import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
+import Logo from '@/components/Logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -100,7 +100,7 @@ const Login = () => {
 
       {/* Centered content */}
       <div className="relative z-10 flex-1 flex flex-col items-center justify-start pt-12 pb-8 px-4">
-        {/* Logo icon with glow */}
+        {/* Logo */}
         <motion.div initial={{
         opacity: 0,
         scale: 0.8
@@ -109,27 +109,9 @@ const Login = () => {
         scale: 1
       }} transition={{
         duration: 0.5
-      }} className="mb-3">
-          <div className="h-24 w-24 rounded-full flex items-center justify-center logo-icon-pulse overflow-visible" style={{
-          background: 'radial-gradient(circle, hsl(var(--primary)) 0%, hsl(270 60% 20%) 100%)',
-          boxShadow: '0 0 40px hsl(var(--primary) / 0.5), 0 0 80px hsl(var(--primary) / 0.3)'
-        }}>
-            <img src={drivvemeCarIcon} alt="Drivveme" className="h-64 w-64 object-contain" />
-          </div>
+      }} className="mb-8">
+          <Logo size="lg" />
         </motion.div>
-
-        {/* Brand name */}
-        <motion.h1 initial={{
-        opacity: 0,
-        y: 10
-      }} animate={{
-        opacity: 1,
-        y: 0
-      }} transition={{
-        delay: 0.2
-      }} className="font-display text-4xl font-bold mb-8 logo-flash">
-          Drivve<span className="text-accent">Me</span>
-        </motion.h1>
 
         {/* Login card */}
         <motion.div initial={{
