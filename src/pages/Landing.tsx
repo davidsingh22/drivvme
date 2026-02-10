@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import Navbar from '@/components/Navbar';
-import landingBg from '@/assets/landing-cityscape-bg.png';
+import landingBg from '@/assets/drivveme-purple-bridge-bg.png';
 import drivvemeLogo from '@/assets/drivveme-logo.png';
 const features = [{
   icon: TrendingDown,
@@ -49,7 +49,7 @@ const Landing = () => {
         <Navbar />
 
       {/* Hero Section */}
-      <section className="relative z-10 pt-32 pb-20 overflow-hidden">
+      <section className="relative z-10 pt-32 pb-8 overflow-hidden min-h-[calc(100vh-64px)] flex flex-col justify-between">
         {/* Animated background elements */}
         <div className="absolute inset-0 overflow-hidden">
           <motion.div className="absolute -top-1/2 -right-1/4 w-[800px] h-[800px] rounded-full bg-primary/5 blur-3xl" animate={{
@@ -112,7 +112,7 @@ const Landing = () => {
             }} transition={{
               duration: 0.6,
               delay: 0.4
-            }} className="flex flex-col sm:flex-row gap-4 justify-center mb-16">
+            }} className="flex flex-col sm:flex-row gap-4 justify-center mt-auto pb-6">
               <Button asChild size="lg" className="gradient-primary shadow-button text-lg px-8 py-6 rounded-xl group btn-dark-glow">
                 <Link to={user ? "/ride" : "/login"}>
                   {t('hero.cta.rider')}
