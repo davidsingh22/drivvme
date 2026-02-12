@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.charge-tip]
 verify_jwt = false
+
+[functions.send-onesignal-notification]
+verify_jwt = false
