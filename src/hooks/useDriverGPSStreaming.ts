@@ -239,11 +239,30 @@ export function useDriverGPSStreaming({
         pendingWriteRef.current = null;
         return true;
       } else {
-        // No active ride, just update driver_profiles
-        const { error } = await profileUpdate;
-        if (error) {
-          console.error('[GPS] Failed to update location:', error);
-          throw new Error(error.message);
+        // No active ride, update driver_profiles + driver_locations
+        const driverLocationUpsert = supabase
+          .from('driver_locations')
+          .upsert(
+            {
+              driver_id: driverId,
+              user_id: driverId,
+              lat: position.lat,
+              lng: position.lng,
+              heading: position.heading ?? null,
+              speed_kph: position.speed != null ? position.speed * 3.6 : null,
+              is_online: true,
+              updated_at: now,
+            },
+            { onConflict: 'driver_id' }
+          );
+
+        const [profileRes, driverLocRes] = await Promise.all([profileUpdate, driverLocationUpsert]);
+        if (profileRes.error) {
+          console.error('[GPS] Failed to update driver_profiles:', profileRes.error);
+          throw new Error(profileRes.error.message);
+        }
+        if (driverLocRes.error) {
+          console.warn('[GPS] Failed to upsert driver_locations:', driverLocRes.error);
         }
         setState(prev => ({
           ...prev,
@@ -285,17 +304,59 @@ export function useDriverGPSStreaming({
   }, [driverId]);
 
   // Force immediate write with toast feedback (for manual "SEND NOW" button)
+  // Grabs a FRESH GPS fix first, updates local state immediately, then writes to DB
   const forceWriteWithFeedback = useCallback(async () => {
-    const pos = lastKnownPositionRef.current || state.position;
+    // Cancel any pending retry
+    if (dbRetryTimeoutRef.current) {
+      clearTimeout(dbRetryTimeoutRef.current);
+      dbRetryTimeoutRef.current = null;
+    }
+
+    // Try to get a fresh GPS position first
+    const freshPosition = await new Promise<GPSPosition | null>((resolve) => {
+      if (!('geolocation' in navigator)) {
+        resolve(null);
+        return;
+      }
+      const timeout = setTimeout(() => resolve(null), 5000); // 5s timeout
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          clearTimeout(timeout);
+          resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            heading: pos.coords.heading,
+            speed: pos.coords.speed,
+            accuracy: pos.coords.accuracy,
+            timestamp: pos.timestamp,
+          });
+        },
+        () => {
+          clearTimeout(timeout);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+      );
+    });
+
+    const pos = freshPosition || lastKnownPositionRef.current || state.position;
     if (!pos) {
       toast.error('No GPS position available');
       return;
     }
 
-    // Cancel any pending retry
-    if (dbRetryTimeoutRef.current) {
-      clearTimeout(dbRetryTimeoutRef.current);
-      dbRetryTimeoutRef.current = null;
+    // Update local state immediately so the map reflects the new position
+    if (freshPosition) {
+      const now = Date.now();
+      lastGpsFixAtRef.current = now;
+      lastKnownPositionRef.current = freshPosition;
+      setState(prev => ({
+        ...prev,
+        position: freshPosition,
+        isConnected: true,
+        lastUpdateTime: now,
+        secondsSinceLastUpdate: 0,
+      }));
     }
 
     const success = await writeToDb(pos, 0);
