@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
+import OneSignal from 'react-onesignal';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -409,10 +410,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           // Load fresh data (will be quick with new fast path)
           await loadUserData(nextSession.user.id);
+
+          // OneSignal: associate this device with the user
+          try { OneSignal.login(nextSession.user.id); } catch {}
         } else {
           setProfile(null);
           setDriverProfile(null);
           setRoles([]);
+
+          // OneSignal: disassociate device from any user
+          try { OneSignal.logout(); } catch {}
         }
       } finally {
         setAuthLoading(false);
@@ -633,6 +640,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setDriverProfile(null);
     setRoles([]);
     
+    // OneSignal: disassociate device from user
+    try { OneSignal.logout(); } catch {}
+
     // Clear cached auth data and remember me preferences
     try {
       const keys = Object.keys(localStorage).filter(k => k.startsWith('auth-cache:'));
