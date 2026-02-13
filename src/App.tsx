@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -9,25 +9,27 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import Landing from "./pages/Landing";
-import Login from "./pages/Login";
-import Signup from "./pages/Signup";
-import RideBooking from "./pages/RideBooking";
-import DriverDashboard from "./pages/DriverDashboard";
-import DriverMessages from "./pages/DriverMessages";
-import RideHistory from "./pages/RideHistory";
-import Earnings from "./pages/Earnings";
-import AdminDashboard from "./pages/AdminDashboard";
-import AdminRefunds from "./pages/AdminRefunds";
-import AdminRideLocations from "./pages/AdminRideLocations";
-import AdminDriverDocuments from "./pages/AdminDriverDocuments";
-import AdminDriverDocumentDetail from "./pages/AdminDriverDocumentDetail";
-import LiveDriversMap from "@/pages/admin/LiveDriversMap";
-import LiveRidersMap from "@/pages/admin/LiveRidersMap";
-import DriverLive from "./pages/DriverLive";
-import NotFound from "./pages/NotFound";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
-import DriverFloatingGPSButton from "@/components/DriverFloatingGPSButton";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
+
+// Lazy-load all non-landing routes for faster initial page load
+const Login = lazy(() => import("./pages/Login"));
+const Signup = lazy(() => import("./pages/Signup"));
+const RideBooking = lazy(() => import("./pages/RideBooking"));
+const DriverDashboard = lazy(() => import("./pages/DriverDashboard"));
+const DriverMessages = lazy(() => import("./pages/DriverMessages"));
+const RideHistory = lazy(() => import("./pages/RideHistory"));
+const Earnings = lazy(() => import("./pages/Earnings"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const AdminRefunds = lazy(() => import("./pages/AdminRefunds"));
+const AdminRideLocations = lazy(() => import("./pages/AdminRideLocations"));
+const AdminDriverDocuments = lazy(() => import("./pages/AdminDriverDocuments"));
+const AdminDriverDocumentDetail = lazy(() => import("./pages/AdminDriverDocumentDetail"));
+const LiveDriversMap = lazy(() => import("@/pages/admin/LiveDriversMap"));
+const LiveRidersMap = lazy(() => import("@/pages/admin/LiveRidersMap"));
+const DriverLive = lazy(() => import("./pages/DriverLive"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const DriverFloatingGPSButton = lazy(() => import("@/components/DriverFloatingGPSButton"));
 
 const queryClient = new QueryClient();
 
@@ -134,9 +136,15 @@ const DriverRoute = () => {
 };
 
 // Wrapped inside BrowserRouter AND AuthProvider so useAuth context is available.
+const LazyFallback = () => (
+  <div className="min-h-screen bg-background flex items-center justify-center">
+    <div className="animate-pulse text-muted-foreground">Loading…</div>
+  </div>
+);
+
 const AppRoutes = () => {
   return (
-    <>
+    <Suspense fallback={<LazyFallback />}>
       <RouteRestorer />
       <DriverFloatingGPSButton />
       <RiderLocationTracker />
@@ -171,10 +179,9 @@ const AppRoutes = () => {
         <Route path="/admin/driver-documents" element={<AdminDriverDocuments />} />
         <Route path="/admin/driver-documents/:driverId" element={<AdminDriverDocumentDetail />} />
         <Route path="/driver-live" element={<DriverLive />} />
-        {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
         <Route path="*" element={<NotFound />} />
       </Routes>
-    </>
+    </Suspense>
   );
 };
 
