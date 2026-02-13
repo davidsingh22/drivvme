@@ -58,18 +58,12 @@ const Login = () => {
       return;
     }
 
-    // Give roles more time to load (especially on slow mobile connections)
-    // After 5s, check one more time then route
+    // Give roles a moment to load, then route with whatever we have
     const timeout = setTimeout(() => {
-      // Final check - if still no roles, route based on what we have
-      if (isAdmin) navigate('/admin', {
-        replace: true
-      });else if (isDriver) navigate('/driver', {
-        replace: true
-      });else navigate('/ride', {
-        replace: true
-      });
-    }, 5000);
+      if (isAdmin) navigate('/admin', { replace: true });
+      else if (isDriver) navigate('/driver', { replace: true });
+      else navigate('/ride', { replace: true });
+    }, 2000);
     return () => clearTimeout(timeout);
   }, [user, roles.length, isAdmin, isDriver, isRider, navigate]);
   const handleSubmit = async (e: React.FormEvent) => {
