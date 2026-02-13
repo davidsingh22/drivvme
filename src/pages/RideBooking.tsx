@@ -34,6 +34,7 @@ import rideBg from '@/assets/drivveme-ride-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
+import { useOneSignalRiderPrompt } from '@/hooks/useOneSignalRiderPrompt';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 const RideDebugBar = React.lazy(() => import('@/components/RideDebugBar').then(m => ({
@@ -146,6 +147,9 @@ const RideBooking = () => {
   const {
     unreadCount: unreadSupportMessages
   } = useUnreadSupportMessages();
+
+  // Auto-prompt OneSignal push notifications for riders
+  useOneSignalRiderPrompt();
 
   // Realtime driver tracking with live ETA
   const isActiveRidePhase = step === 'matched' || step === 'arriving' || step === 'arrived' || step === 'inProgress';
