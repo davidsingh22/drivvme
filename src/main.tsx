@@ -11,8 +11,15 @@ prefetchMapboxToken();
 OneSignal.init({
   appId: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
   allowLocalhostAsSecureOrigin: true,
-}).then(() => {
+}).then(async () => {
   console.log("[OneSignal] Initialized");
+  try {
+    await OneSignal.Notifications.requestPermission();
+    const permission = await OneSignal.Notifications.permission;
+    console.log("🔔 Permission:", permission);
+  } catch (err) {
+    console.warn("[OneSignal] Permission request failed:", err);
+  }
 }).catch((err) => {
   console.warn("[OneSignal] Init failed:", err);
 });
