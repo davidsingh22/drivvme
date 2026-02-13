@@ -411,8 +411,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Load fresh data (will be quick with new fast path)
           await loadUserData(nextSession.user.id);
 
-          // OneSignal: associate this device with the user
-          try { OneSignal.login(nextSession.user.id); } catch {}
+          // OneSignal: permission, login, and force subscription
+          try {
+            await OneSignal.Notifications.requestPermission();
+            await OneSignal.login(nextSession.user.id);
+            await OneSignal.User.PushSubscription.optIn();
+            console.log("✅ OneSignal fully initialized for user:", nextSession.user.id);
+          } catch (e) {
+            console.log("❌ OneSignal init error:", e);
+          }
         } else {
           setProfile(null);
           setDriverProfile(null);
