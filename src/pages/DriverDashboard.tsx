@@ -668,7 +668,7 @@ const DriverDashboard = () => {
             'send-onesignal-notification',
             {
               body: {
-                externalUserIds: [ride.rider_id],
+                playerIds: [playerId],
                 title: 'Driver Accepted 🚗',
                 message: 'Your driver is on the way.',
               },

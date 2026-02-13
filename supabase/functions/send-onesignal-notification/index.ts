@@ -11,10 +11,10 @@ serve(async (req) => {
   }
 
   try {
-    const { externalUserIds, title, message, url } = await req.json();
+    const { externalUserIds, playerIds, title, message, url } = await req.json();
 
-    if (!externalUserIds?.length || !title || !message) {
-      return new Response(JSON.stringify({ error: "Missing required fields: externalUserIds, title, message" }), {
+    if ((!externalUserIds?.length && !playerIds?.length) || !title || !message) {
+      return new Response(JSON.stringify({ error: "Missing required fields: (externalUserIds or playerIds), title, message" }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -25,19 +25,26 @@ serve(async (req) => {
       throw new Error("ONESIGNAL_REST_API_KEY not configured");
     }
 
+    const payload: Record<string, unknown> = {
+      app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
+      headings: { en: title },
+      contents: { en: message },
+      url: url || undefined,
+    };
+
+    if (playerIds?.length) {
+      payload.include_player_ids = playerIds;
+    } else {
+      payload.include_external_user_ids = externalUserIds;
+    }
+
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
       headers: {
         "Content-Type": "application/json; charset=utf-8",
         "Authorization": `Basic ${restApiKey}`,
       },
-      body: JSON.stringify({
-        app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
-        include_external_user_ids: externalUserIds,
-        headings: { en: title },
-        contents: { en: message },
-        url: url || undefined,
-      }),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
