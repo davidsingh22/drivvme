@@ -41,9 +41,18 @@ const RideRoute = () => {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!session?.user?.id) return;
+    if (!session?.user?.id) {
+      // No session — just show the page (it will redirect to login itself)
+      setChecked(true);
+      return;
+    }
 
     let cancelled = false;
+    const timeout = setTimeout(() => {
+      // Safety: if RPC hangs on slow mobile, stop blocking after 4s
+      if (!cancelled) setChecked(true);
+    }, 4000);
+
     (async () => {
       try {
         // Fast path: context already knows.
@@ -60,12 +69,14 @@ const RideRoute = () => {
           return;
         }
       } finally {
+        clearTimeout(timeout);
         if (!cancelled) setChecked(true);
       }
     })();
 
     return () => {
       cancelled = true;
+      clearTimeout(timeout);
     };
   }, [authLoading, session?.user?.id, isDriver, navigate]);
 
@@ -144,10 +155,13 @@ const LazyFallback = () => (
 
 const AppRoutes = () => {
   return (
-    <Suspense fallback={<LazyFallback />}>
+    <>
       <RouteRestorer />
-      <DriverFloatingGPSButton />
+      <Suspense fallback={null}>
+        <DriverFloatingGPSButton />
+      </Suspense>
       <RiderLocationTracker />
+      <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
@@ -181,7 +195,8 @@ const AppRoutes = () => {
         <Route path="/driver-live" element={<DriverLive />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
-    </Suspense>
+      </Suspense>
+    </>
   );
 };
 
