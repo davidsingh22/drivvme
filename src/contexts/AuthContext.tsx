@@ -411,15 +411,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Load fresh data (will be quick with new fast path)
           await loadUserData(nextSession.user.id);
 
-          // OneSignal: permission, login, and force subscription
-          try {
-            await OneSignal.Notifications.requestPermission();
-            await OneSignal.login(nextSession.user.id);
-            await OneSignal.User.PushSubscription.optIn();
-            console.log("✅ OneSignal fully initialized for user:", nextSession.user.id);
-          } catch (e) {
-            console.log("❌ OneSignal init error:", e);
-          }
+          // OneSignal: fire-and-forget so it never blocks auth/navigation
+          // (Median webview can hang on these calls for minutes)
+          const osUserId = nextSession.user.id;
+          setTimeout(() => {
+            (async () => {
+              try {
+                await OneSignal.Notifications.requestPermission();
+                await OneSignal.login(osUserId);
+                await OneSignal.User.PushSubscription.optIn();
+                console.log("✅ OneSignal fully initialized for user:", osUserId);
+              } catch (e) {
+                console.log("❌ OneSignal init error (non-blocking):", e);
+              }
+            })();
+          }, 0);
         } else {
           setProfile(null);
           setDriverProfile(null);
