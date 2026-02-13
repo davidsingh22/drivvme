@@ -11,6 +11,15 @@ prefetchMapboxToken();
 OneSignal.init({
   appId: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
   allowLocalhostAsSecureOrigin: true,
+  promptOptions: {
+    slidedown: {
+      prompts: [{
+        type: "push" as const,
+        autoPrompt: true,
+        delay: { pageViews: 1, timeDelay: 3 },
+      }]
+    }
+  }
 }).then(async () => {
   console.log("[OneSignal] Initialized");
   try {
