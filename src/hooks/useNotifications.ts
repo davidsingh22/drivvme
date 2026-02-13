@@ -53,8 +53,11 @@ export function useNotifications(userId?: string) {
 
           setItems((prev) => [newRow, ...prev]);
 
-          // Pop a toast immediately
-          toast(newRow.title, { description: newRow.message });
+          // Pop a toast for general notifications only — skip ride request
+          // notifications (drivers get a dedicated modal, riders should never see these)
+          if (newRow.type !== 'new_ride') {
+            toast(newRow.title, { description: newRow.message });
+          }
         }
       )
       .subscribe();
