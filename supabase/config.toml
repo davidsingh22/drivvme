@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.send-onesignal-notification]
 verify_jwt = false
+
+[functions.notify-driver]
+verify_jwt = false
