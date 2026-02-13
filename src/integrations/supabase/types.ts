@@ -337,6 +337,7 @@ export type Database = {
           id: string
           language: Database["public"]["Enums"]["language_preference"]
           last_name: string | null
+          onesignal_player_id: string | null
           phone_number: string | null
           updated_at: string
           user_id: string
@@ -349,6 +350,7 @@ export type Database = {
           id?: string
           language?: Database["public"]["Enums"]["language_preference"]
           last_name?: string | null
+          onesignal_player_id?: string | null
           phone_number?: string | null
           updated_at?: string
           user_id: string
@@ -361,6 +363,7 @@ export type Database = {
           id?: string
           language?: Database["public"]["Enums"]["language_preference"]
           last_name?: string | null
+          onesignal_player_id?: string | null
           phone_number?: string | null
           updated_at?: string
           user_id?: string
