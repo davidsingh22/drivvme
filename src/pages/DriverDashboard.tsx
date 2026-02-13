@@ -648,6 +648,42 @@ const DriverDashboard = () => {
         title: 'Driver Found! 🚗',
         message: 'Your driver is on the way to pick you up.',
       }).then(() => {});
+
+      // Send OneSignal push notification to the rider
+      (async () => {
+        try {
+          const { data: riderProfile } = await supabase
+            .from('profiles')
+            .select('onesignal_player_id')
+            .eq('user_id', ride.rider_id)
+            .maybeSingle();
+
+          const playerId = riderProfile?.onesignal_player_id;
+          if (!playerId) {
+            console.log('[acceptRide] Rider has no OneSignal player ID, skipping push');
+            return;
+          }
+
+          const { data: pushResp, error: pushErr } = await supabase.functions.invoke(
+            'send-onesignal-notification',
+            {
+              body: {
+                externalUserIds: [ride.rider_id],
+                title: 'Driver Accepted 🚗',
+                message: 'Your driver is on the way.',
+              },
+            }
+          );
+
+          if (pushErr) {
+            console.error('[acceptRide] OneSignal push error:', pushErr);
+          } else {
+            console.log('[acceptRide] OneSignal push response:', pushResp);
+          }
+        } catch (e) {
+          console.error('[acceptRide] OneSignal push exception:', e);
+        }
+      })();
     } catch (error) {
       console.error('[DriverDashboard] acceptRide error:', error);
       toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
