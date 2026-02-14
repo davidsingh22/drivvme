@@ -585,6 +585,25 @@ const DriverDashboard = () => {
         ? Math.floor((Date.now() - alertStartTimeRef.current) / 1000)
         : null;
 
+      // First verify ride is still available (SELECT uses different RLS than UPDATE)
+      const { data: rideCheck } = await supabase
+        .from('rides')
+        .select('id, status, driver_id')
+        .eq('id', ride.id)
+        .maybeSingle();
+
+      console.log('[AcceptRide] Pre-check:', JSON.stringify(rideCheck));
+
+      if (!rideCheck || rideCheck.status !== 'searching' || rideCheck.driver_id) {
+        console.log('[AcceptRide] Ride no longer available (pre-check failed)');
+        toast({
+          title: 'Error',
+          description: 'This ride is no longer available',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       const { data: updatedRows, error } = await withTimeout(
         supabase
           .from('rides')
@@ -602,7 +621,20 @@ const DriverDashboard = () => {
         'Accept ride'
       );
 
+      console.log('[AcceptRide] Update result:', JSON.stringify({ data: updatedRows, error }));
+
       if (error || !updatedRows || updatedRows.length === 0) {
+        // Log details for debugging
+        console.error('[AcceptRide] Update failed. error:', error, 'rows:', updatedRows);
+        
+        // Re-check ride state to give better error message
+        const { data: recheckRide } = await supabase
+          .from('rides')
+          .select('id, status, driver_id')
+          .eq('id', ride.id)
+          .maybeSingle();
+        console.log('[AcceptRide] Re-check after failed update:', JSON.stringify(recheckRide));
+        
         toast({
           title: 'Error',
           description: 'This ride is no longer available',
