@@ -585,56 +585,23 @@ const DriverDashboard = () => {
         ? Math.floor((Date.now() - alertStartTimeRef.current) / 1000)
         : null;
 
-      // First verify ride is still available (SELECT uses different RLS than UPDATE)
-      const { data: rideCheck } = await supabase
-        .from('rides')
-        .select('id, status, driver_id')
-        .eq('id', ride.id)
-        .maybeSingle();
-
-      console.log('[AcceptRide] Pre-check:', JSON.stringify(rideCheck));
-
-      if (!rideCheck || rideCheck.status !== 'searching' || rideCheck.driver_id) {
-        console.log('[AcceptRide] Ride no longer available (pre-check failed)');
-        toast({
-          title: 'Error',
-          description: 'This ride is no longer available',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      const { data: updatedRows, error } = await withTimeout(
+      // Use server-side atomic function to accept ride (bypasses RLS issues)
+      const { data: acceptedRideId, error } = await withTimeout(
         supabase
-          .from('rides')
-          .update({
-            driver_id: user.id,
-            status: 'driver_assigned',
-            accepted_at: new Date().toISOString(),
-            acceptance_time_seconds: acceptanceTimeSeconds,
+          .rpc('accept_ride', {
+            p_ride_id: ride.id,
+            p_driver_id: user.id,
+            p_acceptance_time_seconds: acceptanceTimeSeconds,
           })
-          .eq('id', ride.id)
-          .eq('status', 'searching')
-          .select()
           .then(r => r),
         7000,
         'Accept ride'
       );
 
-      console.log('[AcceptRide] Update result:', JSON.stringify({ data: updatedRows, error }));
+      console.log('[AcceptRide] RPC result:', JSON.stringify({ acceptedRideId, error }));
 
-      if (error || !updatedRows || updatedRows.length === 0) {
-        // Log details for debugging
-        console.error('[AcceptRide] Update failed. error:', error, 'rows:', updatedRows);
-        
-        // Re-check ride state to give better error message
-        const { data: recheckRide } = await supabase
-          .from('rides')
-          .select('id, status, driver_id')
-          .eq('id', ride.id)
-          .maybeSingle();
-        console.log('[AcceptRide] Re-check after failed update:', JSON.stringify(recheckRide));
-        
+      if (error || !acceptedRideId) {
+        console.error('[AcceptRide] Failed:', error, 'returnedId:', acceptedRideId);
         toast({
           title: 'Error',
           description: 'This ride is no longer available',
