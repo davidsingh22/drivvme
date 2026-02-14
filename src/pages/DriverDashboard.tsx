@@ -585,7 +585,7 @@ const DriverDashboard = () => {
         ? Math.floor((Date.now() - alertStartTimeRef.current) / 1000)
         : null;
 
-      const { error } = await withTimeout(
+      const { data: updatedRows, error } = await withTimeout(
         supabase
           .from('rides')
           .update({
@@ -596,12 +596,13 @@ const DriverDashboard = () => {
           })
           .eq('id', ride.id)
           .eq('status', 'searching')
+          .select()
           .then(r => r),
         7000,
         'Accept ride'
       );
 
-      if (error) {
+      if (error || !updatedRows || updatedRows.length === 0) {
         toast({
           title: 'Error',
           description: 'This ride is no longer available',
