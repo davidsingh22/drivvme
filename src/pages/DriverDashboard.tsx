@@ -573,6 +573,8 @@ const DriverDashboard = () => {
   const acceptRide = async (ride: RideRequest) => {
     if (!user || busyAction) return;
 
+    console.log('[AcceptRide] START — ride.id:', ride.id, 'user.id:', user.id);
+
     // Stop the beep immediately and clear cached ride
     setNewRideAlertOpen(false);
     setCachedAlertRide(null);
@@ -585,23 +587,74 @@ const DriverDashboard = () => {
         ? Math.floor((Date.now() - alertStartTimeRef.current) / 1000)
         : null;
 
-      // Use server-side atomic function to accept ride (bypasses RLS issues)
-      const { data: acceptedRideId, error } = await withTimeout(
+      console.log('[AcceptRide] Calling RPC accept_ride with:', {
+        p_ride_id: ride.id,
+        p_driver_id: user.id,
+        p_acceptance_time_seconds: acceptanceTimeSeconds,
+      });
+
+      // Use atomic direct update as primary method (bypasses RPC issues)
+      const { data: updatedRows, error } = await withTimeout(
         supabase
-          .rpc('accept_ride', {
-            p_ride_id: ride.id,
-            p_driver_id: user.id,
-            p_acceptance_time_seconds: acceptanceTimeSeconds,
+          .from('rides')
+          .update({
+            driver_id: user.id,
+            status: 'driver_assigned' as const,
+            accepted_at: new Date().toISOString(),
+            acceptance_time_seconds: acceptanceTimeSeconds,
           })
+          .eq('id', ride.id)
+          .eq('status', 'searching')
+          .is('driver_id', null)
+          .select('id, status, driver_id')
           .then(r => r),
         7000,
         'Accept ride'
       );
 
-      console.log('[AcceptRide] RPC result:', JSON.stringify({ acceptedRideId, error }));
+      console.log('[AcceptRide] Update result:', JSON.stringify({ data: updatedRows, error }));
 
-      if (error || !acceptedRideId) {
-        console.error('[AcceptRide] Failed:', error, 'returnedId:', acceptedRideId);
+      if (error) {
+        console.error('[AcceptRide] Update error:', JSON.stringify(error));
+        
+        // Fallback: try RPC approach
+        console.log('[AcceptRide] Trying RPC fallback...');
+        const { data: rpcResult, error: rpcError } = await supabase
+          .rpc('accept_ride', {
+            p_ride_id: ride.id,
+            p_driver_id: user.id,
+            p_acceptance_time_seconds: acceptanceTimeSeconds,
+          });
+        
+        console.log('[AcceptRide] RPC fallback result:', JSON.stringify({ rpcResult, rpcError }));
+        
+        if (rpcError || !rpcResult) {
+          toast({
+            title: 'Error',
+            description: 'This ride is no longer available',
+            variant: 'destructive',
+          });
+          return;
+        }
+      } else if (!updatedRows || updatedRows.length === 0) {
+        console.error('[AcceptRide] Zero rows updated — ride already taken or RLS blocked');
+        
+        // Debug: check what the ride looks like right now
+        const { data: debugRide } = await supabase
+          .from('rides')
+          .select('id, status, driver_id')
+          .eq('id', ride.id)
+          .maybeSingle();
+        console.log('[AcceptRide] Current ride state:', JSON.stringify(debugRide));
+        
+        // Check if we can read this ride at all
+        const { data: allRides, error: readErr } = await supabase
+          .from('rides')
+          .select('id, status')
+          .eq('status', 'searching')
+          .limit(3);
+        console.log('[AcceptRide] Can read searching rides?', JSON.stringify({ allRides, readErr }));
+        
         toast({
           title: 'Error',
           description: 'This ride is no longer available',
