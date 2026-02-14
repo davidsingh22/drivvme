@@ -198,6 +198,7 @@ const AdminDashboard = () => {
   }>>([]);
   const [processingWithdraw, setProcessingWithdraw] = useState<string | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [isAssigningDriver, setIsAssigningDriver] = useState(false);
 
   const isAdmin = roles.includes('admin' as any);
 
@@ -718,6 +719,44 @@ const AdminDashboard = () => {
       });
     } finally {
       setIsProcessingRefund(false);
+    }
+  };
+
+  const assignDriverToRide = async (rideId: string, driverUserId: string) => {
+    setIsAssigningDriver(true);
+    try {
+      const { error } = await supabase
+        .from('rides')
+        .update({ 
+          driver_id: driverUserId, 
+          status: 'driver_assigned' as any,
+          accepted_at: new Date().toISOString()
+        })
+        .eq('id', rideId);
+
+      if (error) throw error;
+
+      toast({ title: '✅ Driver assigned successfully' });
+      fetchRides();
+
+      // Update selected ride in dialog
+      setSelectedRide(prev => prev ? { 
+        ...prev, 
+        driver_id: driverUserId, 
+        status: 'driver_assigned',
+        driver_profile: users.find(u => u.user_id === driverUserId) 
+          ? { first_name: users.find(u => u.user_id === driverUserId)!.first_name, last_name: users.find(u => u.user_id === driverUserId)!.last_name }
+          : undefined
+      } : null);
+    } catch (error: any) {
+      console.error('Error assigning driver:', error);
+      toast({
+        title: 'Failed to assign driver',
+        description: error.message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAssigningDriver(false);
     }
   };
 
@@ -1632,6 +1671,29 @@ const AdminDashboard = () => {
                     </p>
                   ) : (
                     <p className="text-sm text-muted-foreground">Not assigned</p>
+                  )}
+                  {/* Admin driver assignment */}
+                  {(selectedRide.status === 'searching' || selectedRide.status === 'pending_payment') && (
+                    <div className="mt-3">
+                      <Select
+                        onValueChange={(driverUserId) => assignDriverToRide(selectedRide.id, driverUserId)}
+                        disabled={isAssigningDriver}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder={isAssigningDriver ? "Assigning..." : "Assign a driver..."} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {users
+                            .filter(u => u.roles.includes('driver'))
+                            .map(driver => (
+                              <SelectItem key={driver.user_id} value={driver.user_id}>
+                                {driver.first_name || ''} {driver.last_name || ''} ({driver.email || 'no email'})
+                              </SelectItem>
+                            ))
+                          }
+                        </SelectContent>
+                      </Select>
+                    </div>
                   )}
                 </div>
               </div>
