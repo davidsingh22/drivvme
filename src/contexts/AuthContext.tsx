@@ -420,7 +420,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 await OneSignal.Notifications.requestPermission();
                 await OneSignal.login(osUserId);
                 await OneSignal.User.PushSubscription.optIn();
-                console.log("✅ OneSignal fully initialized for user:", osUserId);
+
+                // Save player_id to profiles for server-side push targeting (native iOS + web)
+                const playerId = OneSignal.User.PushSubscription.id;
+                console.log("✅ OneSignal fully initialized for user:", osUserId, "playerId:", playerId);
+
+                if (playerId) {
+                  const { error: saveErr } = await supabase
+                    .from('profiles')
+                    .update({ onesignal_player_id: playerId } as any)
+                    .eq('user_id', osUserId);
+                  if (saveErr) {
+                    console.warn("⚠️ Failed to save OneSignal player ID:", saveErr);
+                  } else {
+                    console.log("✅ OneSignal player ID saved to profile:", playerId);
+                  }
+                }
               } catch (e) {
                 console.log("❌ OneSignal init error (non-blocking):", e);
               }
