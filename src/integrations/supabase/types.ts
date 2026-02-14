@@ -938,6 +938,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      accept_ride: {
+        Args: {
+          p_acceptance_time_seconds?: number
+          p_driver_id: string
+          p_ride_id: string
+        }
+        Returns: string
+      }
       can_access_ride_messages: {
         Args: { p_ride_id: string; p_user_id: string }
         Returns: boolean
