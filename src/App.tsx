@@ -158,50 +158,22 @@ const LazyFallback = () => (
 const OneSignalLinker = () => {
   useOneSignalSync();
 
-  // Retry loop: login + tag on app start and on resume
   useEffect(() => {
-    let cancelled = false;
-
-    const runLoginLoop = async () => {
-      for (let i = 0; i < 10 && !cancelled; i++) {
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const OS = (window as any).OneSignal;
-          if (session?.user?.id && OS) {
-            if (typeof OS.login === "function") {
-              await OS.login(session.user.id);
-              console.log(`✅ OneSignal.login() succeeded (attempt ${i + 1}):`, session.user.id);
-            }
-            if (OS.User?.addTag) {
-              await OS.User.addTag("supabase_id", session.user.id);
-              console.log(`✅ OneSignal tag supabase_id set (attempt ${i + 1})`);
-            }
-            return; // success — stop retrying
-          }
-        } catch (e) {
-          console.log(`⚠️ OneSignal login attempt ${i + 1}/10 failed:`, e);
-        }
-        if (!cancelled) await new Promise(r => setTimeout(r, 1000));
-      }
-      console.log("⚠️ OneSignal login retry loop exhausted (10 attempts)");
-    };
-
-    // Run on mount
-    runLoginLoop();
-
-    // Re-run on app resume (visibility change)
-    const handleResume = () => {
-      if (document.visibilityState === "visible") {
-        console.log("📱 App resumed — re-running OneSignal login loop");
-        runLoginLoop();
+    const linkOneSignal = async () => {
+      if (!(window as any).OneSignal) return;
+      const OneSignal = (window as any).OneSignal;
+      try {
+        const { data } = await supabase.auth.getSession();
+        const userId = data?.session?.user?.id;
+        if (!userId) return;
+        await OneSignal.login(userId);
+        console.log("✅ OneSignal linked to user:", userId);
+      } catch (e) {
+        console.error("❌ OneSignal login failed", e);
       }
     };
-    document.addEventListener("visibilitychange", handleResume);
-
-    return () => {
-      cancelled = true;
-      document.removeEventListener("visibilitychange", handleResume);
-    };
+    const timer = setTimeout(linkOneSignal, 1000);
+    return () => clearTimeout(timer);
   }, []);
 
   return null;
