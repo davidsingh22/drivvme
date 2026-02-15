@@ -39,6 +39,8 @@ serve(async (req) => {
           en: `Pickup: ${pickup} → Dropoff: ${dropoff}`,
         },
         priority: 10,
+        content_available: true,
+        ios_sound: "default",
       }),
     });
 

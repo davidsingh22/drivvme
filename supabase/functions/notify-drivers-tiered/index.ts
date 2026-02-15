@@ -498,23 +498,11 @@ serve(async (req) => {
     const oneSignalApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
     if (oneSignalApiKey && driverUserIds.length > 0) {
       try {
-        // Get OneSignal player IDs from profiles
-        const { data: driverProfiles } = await supabase
-          .from("profiles")
-          .select("user_id, onesignal_player_id")
-          .in("user_id", driverUserIds)
-          .not("onesignal_player_id", "is", null);
-
-        const playerIds = driverProfiles
-          ?.map(p => p.onesignal_player_id)
-          .filter(Boolean) as string[] || [];
-
-        // Also send via external_user_ids for drivers without saved player IDs
-        const driversWithPlayerId = new Set(driverProfiles?.map(p => p.user_id) || []);
-        const driversWithoutPlayerId = driverUserIds.filter(id => !driversWithPlayerId.has(id));
-
-        const oneSignalPayload: Record<string, unknown> = {
+        // Send via external_user_ids (Supabase auth UIDs) for reliable
+        // background delivery on native iOS — OneSignal.login(user.id) maps these
+        const oneSignalPayload = {
           app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
+          include_external_user_ids: driverUserIds,
           headings: { en: nearbyDrivers.some(d => d.is_priority) ? "⚡ PRIORITY RIDE REQUEST" : "🚗 New Ride Request" },
           contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
           url: "/driver",
@@ -524,38 +512,18 @@ serve(async (req) => {
           content_available: true,
         };
 
-        // Send to player IDs if available
-        if (playerIds.length > 0) {
-          const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json; charset=utf-8",
-              "Authorization": `Basic ${oneSignalApiKey}`,
-            },
-            body: JSON.stringify({ ...oneSignalPayload, include_player_ids: playerIds }),
-          });
-          const osData = await osRes.json();
-          console.log(`OneSignal push (player_ids) result:`, osData);
-          if (osRes.ok) {
-            results.push(...playerIds.map(id => ({ id, success: true })));
-          }
-        }
-
-        // Send to external user IDs for drivers without player IDs
-        if (driversWithoutPlayerId.length > 0) {
-          const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json; charset=utf-8",
-              "Authorization": `Basic ${oneSignalApiKey}`,
-            },
-            body: JSON.stringify({ ...oneSignalPayload, include_external_user_ids: driversWithoutPlayerId }),
-          });
-          const osData = await osRes.json();
-          console.log(`OneSignal push (external_ids) result:`, osData);
-          if (osRes.ok) {
-            results.push(...driversWithoutPlayerId.map(id => ({ id, success: true })));
-          }
+        const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Authorization": `Basic ${oneSignalApiKey}`,
+          },
+          body: JSON.stringify(oneSignalPayload),
+        });
+        const osData = await osRes.json();
+        console.log(`OneSignal push (external_user_ids) result:`, osData);
+        if (osRes.ok) {
+          results.push(...driverUserIds.map(id => ({ id, success: true })));
         }
       } catch (osErr) {
         console.error("OneSignal push error:", osErr);
