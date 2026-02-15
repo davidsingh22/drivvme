@@ -24,7 +24,7 @@ function waitForOneSignal(maxMs = 10000): Promise<any> {
 }
 
 async function setExternalId(OneSignal: any, userId: string) {
-  // Try modern login() first, fall back to legacy setExternalUserId()
+  // Try modern login() — wrapped safely since it crashes on some SDK builds
   try {
     if (typeof OneSignal.login === "function") {
       await OneSignal.login(userId);
@@ -32,9 +32,10 @@ async function setExternalId(OneSignal: any, userId: string) {
       return;
     }
   } catch (e) {
-    console.log("OneSignal.login() failed, trying fallback:", e);
+    console.log("OneSignal.login() failed (non-fatal), skipping:", (e as any)?.message);
   }
 
+  // Legacy fallback
   try {
     if (typeof OneSignal.setExternalUserId === "function") {
       await OneSignal.setExternalUserId(userId);
@@ -42,7 +43,26 @@ async function setExternalId(OneSignal: any, userId: string) {
       return;
     }
   } catch (e) {
-    console.log("OneSignal.setExternalUserId() also failed:", e);
+    console.log("OneSignal.setExternalUserId() also failed:", (e as any)?.message);
+  }
+
+  console.log("⚠️ External ID could not be set — relying on tags + player ID binding");
+}
+
+async function tagUser(OneSignal: any, userId: string) {
+  const role = window.location.pathname.startsWith("/driver") ? "driver" : "rider";
+  try {
+    if (OneSignal?.User?.addTag) {
+      await OneSignal.User.addTag("uid", userId);
+      await OneSignal.User.addTag("role", role);
+      console.log(`✅ OneSignal tagged uid=${userId}, role=${role}`);
+    } else if (typeof OneSignal?.sendTag === "function") {
+      OneSignal.sendTag("uid", userId);
+      OneSignal.sendTag("role", role);
+      console.log(`✅ OneSignal tagged uid=${userId}, role=${role} (legacy)`);
+    }
+  } catch (e) {
+    console.log("OneSignal tagging failed (non-fatal):", e);
   }
 }
 
@@ -101,13 +121,11 @@ export function useOneSignalSync() {
           if (session?.user?.id) {
             const userId = session.user.id;
 
-            // 1. Set External ID
+            // 1. Set External ID (best-effort)
             await setExternalId(OneSignal, userId);
 
-            // 2. Tag as authed
-            try {
-              await OneSignal.User?.addTag?.("role", "authed");
-            } catch {}
+            // 2. Tag with uid + role (reliable fallback)
+            await tagUser(OneSignal, userId);
 
             // 3. Read player ID (with retry — may not be ready immediately)
             let playerId: string | null = null;

@@ -37,7 +37,14 @@ export function useOneSignalPlayerSync() {
 
       console.log("[PlayerSync] 🆔 OneSignal playerId:", playerId);
 
-      // 4. POST to edge function
+      // 4. Tag with uid + role (reliable even if login() fails)
+      try {
+        await tagUser(os, userId);
+      } catch (e) {
+        console.warn("[PlayerSync] Tagging failed (non-fatal):", e);
+      }
+
+      // 5. POST to edge function
       try {
         const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/bind-onesignal-player-id`;
         const res = await fetch(url, {
@@ -125,6 +132,23 @@ function readPlayerId(os: any): string | null {
   } catch (_) {}
 
   return null;
+}
+
+async function tagUser(os: any, userId: string) {
+  // Determine role from current path
+  const role = window.location.pathname.startsWith("/driver") ? "driver" : "rider";
+
+  if (os?.User?.addTag) {
+    await os.User.addTag("uid", userId);
+    await os.User.addTag("role", role);
+    console.log(`[PlayerSync] ✅ Tagged uid=${userId}, role=${role} (modern API)`);
+  } else if (typeof os?.sendTag === "function") {
+    os.sendTag("uid", userId);
+    os.sendTag("role", role);
+    console.log(`[PlayerSync] ✅ Tagged uid=${userId}, role=${role} (legacy API)`);
+  } else {
+    console.warn("[PlayerSync] No tagging API available");
+  }
 }
 
 function sleep(ms: number) {
