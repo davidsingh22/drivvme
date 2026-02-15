@@ -55,8 +55,10 @@ serve(async (req) => {
       // Fallback: target via uid tag
       payload.filters = [
         { field: "tag", key: "uid", relation: "=", value: driver_id },
+        { operator: "AND" },
+        { field: "tag", key: "role", relation: "=", value: "driver" },
       ];
-      console.log("[notify-driver] Using tag-based targeting for uid:", driver_id);
+      console.log("[notify-driver] Using tag-based targeting for uid:", driver_id, "role: driver");
     }
 
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
