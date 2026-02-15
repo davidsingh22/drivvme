@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -16,62 +17,45 @@ interface RidePayload {
   driver_id: string | null;
 }
 
-/**
- * Determine who should receive the push and what the message should say.
- */
-function getNotificationConfig(payload: RidePayload): {
-  targetUserId: string | null;
-  title: string;
-  message: string;
-} | null {
+function getNotificationConfig(payload: RidePayload) {
   const { new_status, rider_id, driver_id } = payload;
 
   switch (new_status) {
     case "driver_assigned":
-      return {
-        targetUserId: rider_id,
-        title: "Driver Assigned 🚗",
-        message: "A driver has been assigned to your ride!",
-      };
+      return { targetUserId: rider_id, title: "Driver Assigned 🚗", message: "A driver has been assigned to your ride!" };
     case "driver_en_route":
-      return {
-        targetUserId: rider_id,
-        title: "Driver On The Way 🚗",
-        message: "Your driver is on the way to pick you up.",
-      };
+      return { targetUserId: rider_id, title: "Driver On The Way 🚗", message: "Your driver is on the way to pick you up." };
     case "arrived":
-      return {
-        targetUserId: rider_id,
-        title: "Driver Has Arrived 📍",
-        message: "Your driver is here! Head to the pickup point.",
-      };
+      return { targetUserId: rider_id, title: "Driver Has Arrived 📍", message: "Your driver is here! Head to the pickup point." };
     case "in_progress":
-      return {
-        targetUserId: rider_id,
-        title: "Ride Started 🛣️",
-        message: "Your ride has started. Enjoy the trip!",
-      };
+      return { targetUserId: rider_id, title: "Ride Started 🛣️", message: "Your ride has started. Enjoy the trip!" };
     case "completed":
-      return {
-        targetUserId: rider_id,
-        title: "Ride Completed ✅",
-        message: "You've arrived at your destination. Thanks for riding!",
-      };
+      return { targetUserId: rider_id, title: "Ride Completed ✅", message: "You've arrived at your destination. Thanks for riding!" };
     case "cancelled":
-      return {
-        targetUserId: driver_id,
-        title: "Ride Cancelled ❌",
-        message: "The ride has been cancelled.",
-      };
+      return { targetUserId: driver_id, title: "Ride Cancelled ❌", message: "The ride has been cancelled." };
     default:
       return null;
   }
 }
 
 /**
- * Send a OneSignal push via External User ID (Supabase auth UID).
- * This works reliably for both foreground web and background native iOS.
+ * Look up the user's onesignal_player_id from profiles.
+ * Returns null if not found.
  */
+async function getPlayerIdFromProfiles(userId: string): Promise<string | null> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const { data } = await supabase
+    .from("profiles")
+    .select("onesignal_player_id")
+    .eq("user_id", userId)
+    .single();
+
+  return data?.onesignal_player_id || null;
+}
+
 async function sendPush(
   targetUserId: string,
   title: string,
@@ -81,9 +65,11 @@ async function sendPush(
   const restApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
   if (!restApiKey) throw new Error("ONESIGNAL_REST_API_KEY not configured");
 
-  const osPayload = {
+  // Try player ID first (most reliable for native iOS)
+  const playerId = await getPlayerIdFromProfiles(targetUserId);
+
+  const osPayload: Record<string, unknown> = {
     app_id: ONESIGNAL_APP_ID,
-    include_external_user_ids: [targetUserId],
     headings: { en: title },
     contents: { en: message },
     content_available: true,
@@ -92,7 +78,13 @@ async function sendPush(
     data,
   };
 
-  console.log("[ride-status-push] Sending via external_user_id:", targetUserId);
+  if (playerId) {
+    osPayload.include_player_ids = [playerId];
+    console.log("[ride-status-push] Sending via player_id:", playerId);
+  } else {
+    osPayload.include_external_user_ids = [targetUserId];
+    console.log("[ride-status-push] Fallback: sending via external_user_id:", targetUserId);
+  }
 
   const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
     method: "POST",
@@ -126,20 +118,13 @@ serve(async (req) => {
       });
     }
 
-    const pushData = {
-      ride_id: payload.ride_id,
-      status: payload.new_status,
-    };
-
+    const pushData = { ride_id: payload.ride_id, status: payload.new_status };
     const result = await sendPush(config.targetUserId, config.title, config.message, pushData);
 
     if (!result.ok) {
       return new Response(
         JSON.stringify({ error: "OneSignal error", details: result.data }),
-        {
-          status: result.status,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        { status: result.status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 

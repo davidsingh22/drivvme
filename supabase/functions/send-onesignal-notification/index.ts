@@ -30,11 +30,15 @@ serve(async (req) => {
       headings: { en: title },
       contents: { en: message },
       url: url || undefined,
+      priority: 10,
+      content_available: true,
+      ios_sound: "default",
     };
 
+    // Prefer player IDs (most reliable for native iOS)
     if (playerIds?.length) {
       payload.include_player_ids = playerIds;
-    } else {
+    } else if (externalUserIds?.length) {
       payload.include_external_user_ids = externalUserIds;
     }
 

@@ -11,7 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
-import { useOneSignalLinking } from "@/hooks/useOneSignalLinking";
+import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 
 // Lazy-load all non-landing routes for faster initial page load
 const Login = lazy(() => import("./pages/Login"));
@@ -154,9 +154,9 @@ const LazyFallback = () => (
   </div>
 );
 
-// Runs once at app level to link OneSignal External ID
+// Runs once at app level to sync OneSignal identity + player ID
 const OneSignalLinker = () => {
-  useOneSignalLinking();
+  useOneSignalSync();
   return null;
 };
 
