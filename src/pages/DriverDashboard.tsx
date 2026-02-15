@@ -614,19 +614,24 @@ const DriverDashboard = () => {
 
       console.log('[AcceptRide] Update result:', JSON.stringify({ data: updatedRows, error }));
 
-      if (error) {
-        console.error('[AcceptRide] Update error:', JSON.stringify(error));
+      // If direct update failed (error or 0 rows due to RLS), use RPC fallback
+      const directSuccess = !error && updatedRows && updatedRows.length > 0;
+      
+      if (!directSuccess) {
+        console.log('[AcceptRide] Direct update did not succeed, trying RPC fallback...',
+          JSON.stringify({ error, rowCount: updatedRows?.length }));
         
-        // Fallback: try RPC approach
-        console.log('[AcceptRide] Trying RPC fallback...');
-        const { data: rpcResult, error: rpcError } = await supabase
-          .rpc('accept_ride', {
+        const { data: rpcResult, error: rpcError } = await withTimeout(
+          supabase.rpc('accept_ride', {
             p_ride_id: ride.id,
             p_driver_id: user.id,
             p_acceptance_time_seconds: acceptanceTimeSeconds,
-          });
+          }),
+          7000,
+          'Accept ride RPC'
+        );
         
-        console.log('[AcceptRide] RPC fallback result:', JSON.stringify({ rpcResult, rpcError }));
+        console.log('[AcceptRide] RPC result:', JSON.stringify({ rpcResult, rpcError }));
         
         if (rpcError || !rpcResult) {
           toast({
@@ -636,31 +641,6 @@ const DriverDashboard = () => {
           });
           return;
         }
-      } else if (!updatedRows || updatedRows.length === 0) {
-        console.error('[AcceptRide] Zero rows updated — ride already taken or RLS blocked');
-        
-        // Debug: check what the ride looks like right now
-        const { data: debugRide } = await supabase
-          .from('rides')
-          .select('id, status, driver_id')
-          .eq('id', ride.id)
-          .maybeSingle();
-        console.log('[AcceptRide] Current ride state:', JSON.stringify(debugRide));
-        
-        // Check if we can read this ride at all
-        const { data: allRides, error: readErr } = await supabase
-          .from('rides')
-          .select('id, status')
-          .eq('status', 'searching')
-          .limit(3);
-        console.log('[AcceptRide] Can read searching rides?', JSON.stringify({ allRides, readErr }));
-        
-        toast({
-          title: 'Error',
-          description: 'This ride is no longer available',
-          variant: 'destructive',
-        });
-        return;
       }
 
       // Grant Priority Driver status if accepted within 5 seconds
