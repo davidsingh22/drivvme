@@ -157,6 +157,25 @@ const LazyFallback = () => (
 // Runs once at app level to sync OneSignal identity + player ID
 const OneSignalLinker = () => {
   useOneSignalSync();
+
+  // Eager OneSignal.login() 1s after app start for iOS/Median reliability
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) return;
+        const OS = (window as any).OneSignal;
+        if (OS && typeof OS.login === "function") {
+          await OS.login(session.user.id);
+          console.log("✅ Eager OneSignal.login() on app start:", session.user.id);
+        }
+      } catch (e) {
+        console.log("Eager OneSignal.login error:", e);
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
   return null;
 };
 
