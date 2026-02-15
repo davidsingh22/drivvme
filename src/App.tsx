@@ -166,8 +166,9 @@ const OneSignalLinker = () => {
         const { data } = await supabase.auth.getSession();
         const userId = data?.session?.user?.id;
         if (!userId) return;
+        console.log("🔵 About to call OneSignal.login() for:", userId);
         await OneSignal.login(userId);
-        console.log("✅ OneSignal linked to user:", userId);
+        console.log("✅ OneSignal.login() succeeded for:", userId);
       } catch (e) {
         console.error("❌ OneSignal login failed", e);
       }
