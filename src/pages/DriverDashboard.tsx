@@ -103,7 +103,15 @@ const DriverDashboard = () => {
   // Cache the full ride data when alert opens so it persists even if ride is taken/cancelled
   const [cachedAlertRide, setCachedAlertRide] = useState<RideRequest | null>(null);
   
-  
+  // Refs to avoid stale closures in the realtime listener
+  const currentRideRef = useRef<RideRequest | null>(null);
+  const newRideAlertOpenRef = useRef(false);
+
+  // Keep refs in sync with state
+  useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
+  useEffect(() => { newRideAlertOpenRef.current = newRideAlertOpen; }, [newRideAlertOpen]);
+
+
   // GPS Streaming for live driver location (continuous foreground tracking)
   const {
     position: gpsPosition,
