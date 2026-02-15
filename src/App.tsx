@@ -158,22 +158,50 @@ const LazyFallback = () => (
 const OneSignalLinker = () => {
   useOneSignalSync();
 
-  // Eager OneSignal.login() 1s after app start for iOS/Median reliability
+  // Retry loop: login + tag on app start and on resume
   useEffect(() => {
-    const timer = setTimeout(async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user?.id) return;
-        const OS = (window as any).OneSignal;
-        if (OS && typeof OS.login === "function") {
-          await OS.login(session.user.id);
-          console.log("✅ Eager OneSignal.login() on app start:", session.user.id);
+    let cancelled = false;
+
+    const runLoginLoop = async () => {
+      for (let i = 0; i < 10 && !cancelled; i++) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const OS = (window as any).OneSignal;
+          if (session?.user?.id && OS) {
+            if (typeof OS.login === "function") {
+              await OS.login(session.user.id);
+              console.log(`✅ OneSignal.login() succeeded (attempt ${i + 1}):`, session.user.id);
+            }
+            if (OS.User?.addTag) {
+              await OS.User.addTag("supabase_id", session.user.id);
+              console.log(`✅ OneSignal tag supabase_id set (attempt ${i + 1})`);
+            }
+            return; // success — stop retrying
+          }
+        } catch (e) {
+          console.log(`⚠️ OneSignal login attempt ${i + 1}/10 failed:`, e);
         }
-      } catch (e) {
-        console.log("Eager OneSignal.login error:", e);
+        if (!cancelled) await new Promise(r => setTimeout(r, 1000));
       }
-    }, 1000);
-    return () => clearTimeout(timer);
+      console.log("⚠️ OneSignal login retry loop exhausted (10 attempts)");
+    };
+
+    // Run on mount
+    runLoginLoop();
+
+    // Re-run on app resume (visibility change)
+    const handleResume = () => {
+      if (document.visibilityState === "visible") {
+        console.log("📱 App resumed — re-running OneSignal login loop");
+        runLoginLoop();
+      }
+    };
+    document.addEventListener("visibilitychange", handleResume);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", handleResume);
+    };
   }, []);
 
   return null;
