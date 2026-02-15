@@ -1,10 +1,10 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Camera, Loader2, User } from 'lucide-react';
+import { Camera, Loader2, User, Bug } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -281,6 +281,9 @@ const DriverProfileModal = ({ open, onOpenChange }: DriverProfileModalProps) => 
           </div>
         </div>
 
+        {/* OneSignal Debug Section */}
+        <OneSignalDebugPanel userId={user?.id} />
+
         <div className="flex gap-3">
           <Button
             variant="outline"
@@ -309,5 +312,72 @@ const DriverProfileModal = ({ open, onOpenChange }: DriverProfileModalProps) => 
     </Dialog>
   );
 };
+
+function OneSignalDebugPanel({ userId }: { userId?: string }) {
+  const [showDebug, setShowDebug] = useState(false);
+  const [info, setInfo] = useState<Record<string, string | null>>({});
+  const [loading, setLoading] = useState(false);
+
+  const readValues = useCallback(async () => {
+    const OS = (window as any).OneSignal;
+    const { data: { session } } = await supabase.auth.getSession();
+    const vals: Record<string, string | null> = {
+      'session.user.id': session?.user?.id ?? 'null',
+      'OneSignal.User.externalId': null,
+      'OneSignal.User.PushSubscription.id': null,
+      'OneSignal.Notifications.permission': null,
+    };
+    try { vals['OneSignal.User.externalId'] = OS?.User?.externalId ?? 'null'; } catch { vals['OneSignal.User.externalId'] = 'error'; }
+    try { vals['OneSignal.User.PushSubscription.id'] = OS?.User?.PushSubscription?.id ?? 'null'; } catch { vals['OneSignal.User.PushSubscription.id'] = 'error'; }
+    try { vals['OneSignal.Notifications.permission'] = String(OS?.Notifications?.permission ?? 'null'); } catch { vals['OneSignal.Notifications.permission'] = 'error'; }
+    setInfo(vals);
+  }, []);
+
+  const handleForceLink = async () => {
+    setLoading(true);
+    try {
+      const OS = (window as any).OneSignal;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (OS && session?.user?.id) {
+        if (typeof OS.login === 'function') {
+          await OS.login(session.user.id);
+        } else if (typeof OS.setExternalUserId === 'function') {
+          await OS.setExternalUserId(session.user.id);
+        }
+      }
+      await new Promise(r => setTimeout(r, 2000));
+      await readValues();
+    } catch (e) {
+      console.log('Force link error:', e);
+    }
+    setLoading(false);
+  };
+
+  if (!showDebug) {
+    return (
+      <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" onClick={() => { setShowDebug(true); readValues(); }}>
+        <Bug className="h-3 w-3 mr-1" /> OneSignal Debug
+      </Button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/50 p-3 space-y-2 text-xs">
+      <div className="font-medium text-sm flex items-center gap-1"><Bug className="h-3 w-3" /> OneSignal Debug</div>
+      {Object.entries(info).map(([key, val]) => (
+        <div key={key} className="flex justify-between gap-2">
+          <span className="text-muted-foreground truncate">{key}</span>
+          <span className="font-mono text-foreground break-all text-right max-w-[50%]">{val}</span>
+        </div>
+      ))}
+      <div className="flex gap-2 pt-1">
+        <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={readValues}>Refresh</Button>
+        <Button size="sm" variant="default" className="flex-1 text-xs" onClick={handleForceLink} disabled={loading}>
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Force Link OneSignal'}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 export default DriverProfileModal;
