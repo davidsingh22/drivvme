@@ -65,8 +65,11 @@ async function sendPush(
   const restApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
   if (!restApiKey) throw new Error("ONESIGNAL_REST_API_KEY not configured");
 
+  console.log("[ride-status-push] target user id:", targetUserId);
+
   // Try player ID first (most reliable for native iOS)
   const playerId = await getPlayerIdFromProfiles(targetUserId);
+  console.log("[ride-status-push] onesignal_player_id", playerId ? `found: ${playerId}` : "missing");
 
   const osPayload: Record<string, unknown> = {
     app_id: ONESIGNAL_APP_ID,
@@ -80,10 +83,8 @@ async function sendPush(
 
   if (playerId) {
     osPayload.include_player_ids = [playerId];
-    console.log("[ride-status-push] Sending via player_id:", playerId);
   } else {
     osPayload.include_external_user_ids = [targetUserId];
-    console.log("[ride-status-push] Fallback: sending via external_user_id:", targetUserId);
   }
 
   const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -96,7 +97,7 @@ async function sendPush(
   });
 
   const osData = await osRes.json();
-  console.log("[ride-status-push] OneSignal response:", JSON.stringify(osData));
+  console.log("[ride-status-push] onesignal response status:", osRes.status, JSON.stringify(osData));
 
   return { ok: osRes.ok, status: osRes.status, data: osData };
 }

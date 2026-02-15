@@ -512,6 +512,12 @@ serve(async (req) => {
           uid => !driverProfiles?.find(p => p.user_id === uid && p.onesignal_player_id)
         );
 
+        // Log per-driver targeting info
+        for (const uid of driverUserIds) {
+          const prof = driverProfiles?.find(p => p.user_id === uid);
+          console.log(`[notify-drivers-tiered] target user id: ${uid} | onesignal_player_id ${prof?.onesignal_player_id ? `found: ${prof.onesignal_player_id}` : "missing"}`);
+        }
+
         // Send to drivers WITH player IDs (primary)
         if (playerIds.length > 0) {
           const playerPayload = {
@@ -535,7 +541,7 @@ serve(async (req) => {
             body: JSON.stringify(playerPayload),
           });
           const osData = await osRes.json();
-          console.log(`OneSignal push (player_ids) result:`, osData);
+          console.log(`[notify-drivers-tiered] onesignal response status (player_ids): ${osRes.status}`, JSON.stringify(osData));
           if (osRes.ok) {
             results.push(...playerIds.map(id => ({ id, success: true })));
           }
@@ -564,7 +570,7 @@ serve(async (req) => {
             body: JSON.stringify(fallbackPayload),
           });
           const osData2 = await osRes2.json();
-          console.log(`OneSignal push (external_user_ids fallback) result:`, osData2);
+          console.log(`[notify-drivers-tiered] onesignal response status (external_user_ids fallback): ${osRes2.status}`, JSON.stringify(osData2));
           if (osRes2.ok) {
             results.push(...driversMissingPlayerId.map(id => ({ id, success: true })));
           }

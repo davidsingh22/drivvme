@@ -25,6 +25,8 @@ serve(async (req) => {
       throw new Error("ONESIGNAL_REST_API_KEY not configured");
     }
 
+    console.log("[send-onesignal] target playerIds:", playerIds || "none", "| externalUserIds:", externalUserIds || "none");
+
     const payload: Record<string, unknown> = {
       app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
       headings: { en: title },
@@ -52,6 +54,7 @@ serve(async (req) => {
     });
 
     const data = await res.json();
+    console.log("[send-onesignal] onesignal response status:", res.status, JSON.stringify(data));
 
     if (!res.ok) {
       return new Response(JSON.stringify({ error: `OneSignal error: ${res.status}`, details: data }), {
