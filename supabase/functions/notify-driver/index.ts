@@ -52,7 +52,11 @@ serve(async (req) => {
     if (playerId) {
       payload.include_player_ids = [playerId];
     } else {
-      payload.include_external_user_ids = [driver_id];
+      // Fallback: target via uid tag
+      payload.filters = [
+        { field: "tag", key: "uid", relation: "=", value: driver_id },
+      ];
+      console.log("[notify-driver] Using tag-based targeting for uid:", driver_id);
     }
 
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
