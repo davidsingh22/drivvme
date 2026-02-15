@@ -88,6 +88,7 @@ async function sendPush(
     contents: { en: message },
     content_available: true,
     ios_sound: "default",
+    priority: 10,
     data,
   };
 
