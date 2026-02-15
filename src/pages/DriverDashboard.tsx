@@ -395,7 +395,7 @@ const DriverDashboard = () => {
           try {
             const notif = payload.new as { type: string; ride_id: string | null };
             if (notif.type !== 'new_ride' || !notif.ride_id) return;
-            if (currentRide || newRideAlertOpen) return; // already busy
+            if (currentRideRef.current || newRideAlertOpenRef.current) return; // already busy
 
             // Fetch the ride details
             const { data: ride, error } = await supabase
