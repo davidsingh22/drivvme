@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.ride-status-push]
 verify_jwt = false
+
+[functions.bind-onesignal-player-id]
+verify_jwt = false

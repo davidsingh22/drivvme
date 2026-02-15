@@ -2,29 +2,31 @@ import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 /**
- * Robustly syncs the OneSignal device/player ID to profiles.onesignal_player_id.
- * Works on native Median iOS even when External ID is blank.
- * Retries SDK detection for ~5 seconds and polls for player ID for ~8 seconds.
+ * Backend-driven OneSignal player ID sync.
+ * Polls for the SDK + player ID, then POSTs it to the
+ * bind-onesignal-player-id edge function (auth-secured).
+ * Re-runs on auth state change and app resume (visibilitychange).
  */
 export function useOneSignalPlayerSync() {
   useEffect(() => {
     let cancelled = false;
 
-    const run = async () => {
-      // 1. Wait for auth session
-      const { data } = await supabase.auth.getSession();
-      const userId = data?.session?.user?.id;
-      if (!userId) {
+    const sync = async () => {
+      // 1. Get auth session + token
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData?.session;
+      if (!session?.user?.id || !session?.access_token) {
         console.log("[PlayerSync] No auth session, skipping");
         return;
       }
+      const userId = session.user.id;
 
-      // 2. Wait for OneSignal SDK (up to ~5 s)
+      // 2. Wait for OneSignal SDK (up to ~5s)
       const os = await waitForOneSignalSDK();
       if (!os || cancelled) return;
       console.log("[PlayerSync] ✅ OneSignal SDK found");
 
-      // 3. Poll for player / subscription ID (up to ~8 s)
+      // 3. Poll for player / subscription ID (up to ~8s)
       const playerId = await pollPlayerId(os);
       if (cancelled) return;
 
@@ -35,31 +37,51 @@ export function useOneSignalPlayerSync() {
 
       console.log("[PlayerSync] 🆔 OneSignal playerId:", playerId);
 
-      // 4. Upsert into profiles
-      const { error } = await supabase
-        .from("profiles")
-        .update({ onesignal_player_id: playerId })
-        .eq("user_id", userId);
+      // 4. POST to edge function
+      try {
+        const url = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/bind-onesignal-player-id`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ playerId }),
+        });
 
-      if (error) {
-        console.error("[PlayerSync] ❌ Failed to save player ID:", error.message);
-      } else {
-        console.log("[PlayerSync] ✅ Saved onesignal_player_id to Supabase for", userId);
+        if (!res.ok) {
+          const errBody = await res.text();
+          console.error("[PlayerSync] ❌ Edge function error:", res.status, errBody);
+        } else {
+          console.log("[PlayerSync] ✅ Saved onesignal_player_id via edge function for", userId);
+        }
+      } catch (err) {
+        console.error("[PlayerSync] ❌ Network error calling edge function:", err);
       }
     };
 
-    run();
+    // Run immediately
+    sync();
 
-    // Also re-run when app resumes from background (iOS)
+    // Re-run on auth state change (login)
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session) {
+        sync();
+      }
+    });
+
+    // Re-run when app resumes from background (iOS)
     const onVisibility = () => {
       if (document.visibilityState === "visible") {
-        run();
+        sync();
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelled = true;
+      authListener?.subscription.unsubscribe();
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
@@ -68,7 +90,7 @@ export function useOneSignalPlayerSync() {
 /** Wait for window.OneSignal to be available, polling every 500ms for ~5s */
 async function waitForOneSignalSDK(): Promise<any | null> {
   for (let i = 0; i < 10; i++) {
-    const os = (window as any).OneSignal;
+    const os = (window as any).OneSignal || (window as any).OneSignalDeferred;
     if (os) return os;
     await sleep(500);
   }
@@ -76,7 +98,7 @@ async function waitForOneSignalSDK(): Promise<any | null> {
   return null;
 }
 
-/** Try multiple SDK methods to get the device player / subscription ID */
+/** Poll for the player / subscription ID (up to ~8s) */
 async function pollPlayerId(os: any): Promise<string | null> {
   for (let i = 0; i < 16; i++) {
     const id = readPlayerId(os);
@@ -88,19 +110,16 @@ async function pollPlayerId(os: any): Promise<string | null> {
 
 function readPlayerId(os: any): string | null {
   try {
-    // v16+ SDK: User.PushSubscription.id
     const subId = os?.User?.PushSubscription?.id;
     if (subId) return subId;
   } catch (_) {}
 
   try {
-    // Older SDKs: getUserId
     const legacy = os?.getUserId?.();
     if (typeof legacy === "string" && legacy) return legacy;
   } catch (_) {}
 
   try {
-    // Median / GoNative bridge
     const state = os?.getDeviceState?.();
     if (state?.userId) return state.userId;
   } catch (_) {}
