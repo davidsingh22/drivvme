@@ -556,6 +556,8 @@ serve(async (req) => {
               app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
               filters: [
                 { field: "tag", key: "uid", relation: "=", value: uid },
+                { operator: "AND" },
+                { field: "tag", key: "role", relation: "=", value: "driver" },
               ],
               headings: { en: nearbyDrivers.some(d => d.is_priority) ? "⚡ PRIORITY RIDE REQUEST" : "🚗 New Ride Request" },
               contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
