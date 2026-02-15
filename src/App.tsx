@@ -169,6 +169,24 @@ const OneSignalLinker = () => {
         console.log("🔵 About to call OneSignal.login() for:", userId);
         await OneSignal.login(userId);
         console.log("✅ OneSignal.login() succeeded for:", userId);
+
+        // Fetch the device player ID for reliable native iOS push targeting
+        const playerId = OneSignal?.User?.PushSubscription?.id;
+        console.log("🆔 OneSignal Player ID:", playerId);
+
+        if (playerId) {
+          const { error: upsertErr } = await supabase
+            .from("profiles")
+            .update({ onesignal_player_id: playerId })
+            .eq("user_id", userId);
+          if (upsertErr) {
+            console.error("❌ Failed to upsert player ID:", upsertErr);
+          } else {
+            console.log("✅ Player ID saved to profiles for user:", userId);
+          }
+        } else {
+          console.warn("⚠️ OneSignal player ID not available yet");
+        }
       } catch (e) {
         console.error("❌ OneSignal login failed", e);
       }
