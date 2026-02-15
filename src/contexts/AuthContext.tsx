@@ -412,39 +412,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           await loadUserData(nextSession.user.id);
 
           // OneSignal: fire-and-forget so it never blocks auth/navigation
-          // (Median webview can hang on these calls for minutes)
+          // Use window.OneSignal for native Median/iOS compatibility
           const osUserId = nextSession.user.id;
           setTimeout(() => {
             (async () => {
               try {
-                await OneSignal.Notifications.requestPermission();
-                await OneSignal.login(osUserId);
-                await OneSignal.User.PushSubscription.optIn();
-
-                // Tag user role for targeted push segmentation
-                const currentRoles = rolesRef.current;
-                if (currentRoles.includes('driver')) {
-                  await OneSignal.User.addTag("role", "driver");
-                  console.log("🏷️ OneSignal tagged as driver");
-                } else if (currentRoles.includes('rider')) {
-                  await OneSignal.User.addTag("role", "rider");
-                  console.log("🏷️ OneSignal tagged as rider");
+                const os = (window as any).OneSignalDeferred || (window as any).OneSignal;
+                if (!os) {
+                  // Fallback to react-onesignal SDK
+                  await OneSignal.login(osUserId);
+                  await OneSignal.User.PushSubscription.optIn();
+                  console.log("✅ OneSignal linked (SDK) for:", osUserId);
+                  return;
                 }
 
-                // Save player_id to profiles for server-side push targeting (native iOS + web)
-                const playerId = OneSignal.User.PushSubscription.id;
-                console.log("✅ OneSignal fully initialized for user:", osUserId, "playerId:", playerId);
+                // Native OneSignal (Median / web SDK v16+)
+                if (typeof os.push === 'function' || Array.isArray(os)) {
+                  // OneSignalDeferred queue pattern
+                  os.push(async function(onesignal: any) {
+                    await onesignal.login(osUserId);
+                    console.log("✅ OneSignal login (deferred) for:", osUserId);
+                  });
+                } else if (typeof os.login === 'function') {
+                  await os.login(osUserId);
+                  console.log("✅ OneSignal login (direct) for:", osUserId);
+                } else {
+                  // react-onesignal fallback
+                  await OneSignal.login(osUserId);
+                  console.log("✅ OneSignal login (react-sdk) for:", osUserId);
+                }
 
-                if (playerId) {
-                  const { error: saveErr } = await supabase
-                    .from('profiles')
-                    .update({ onesignal_player_id: playerId } as any)
-                    .eq('user_id', osUserId);
-                  if (saveErr) {
-                    console.warn("⚠️ Failed to save OneSignal player ID:", saveErr);
-                  } else {
-                    console.log("✅ OneSignal player ID saved to profile:", playerId);
+                // Also try react-onesignal for role tagging & player ID
+                try {
+                  await OneSignal.User.PushSubscription.optIn();
+                  const currentRoles = rolesRef.current;
+                  if (currentRoles.includes('driver')) {
+                    await OneSignal.User.addTag("role", "driver");
+                    console.log("🏷️ OneSignal tagged as driver");
+                  } else if (currentRoles.includes('rider')) {
+                    await OneSignal.User.addTag("role", "rider");
+                    console.log("🏷️ OneSignal tagged as rider");
                   }
+
+                  const playerId = OneSignal.User.PushSubscription.id;
+                  if (playerId) {
+                    await supabase
+                      .from('profiles')
+                      .update({ onesignal_player_id: playerId } as any)
+                      .eq('user_id', osUserId);
+                    console.log("✅ OneSignal player ID saved:", playerId);
+                  }
+                } catch (tagErr) {
+                  console.log("⚠️ OneSignal tagging skipped (non-blocking):", tagErr);
                 }
               } catch (e) {
                 console.log("❌ OneSignal init error (non-blocking):", e);
@@ -456,8 +475,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setDriverProfile(null);
           setRoles([]);
 
-          // OneSignal: disassociate device from any user
-          try { OneSignal.logout(); } catch {}
+          // OneSignal: disassociate device from any user (try native first)
+          try {
+            const os = (window as any).OneSignalDeferred || (window as any).OneSignal;
+            if (os && typeof os.push === 'function') {
+              os.push(async function(onesignal: any) { await onesignal.logout(); });
+            } else if (os && typeof os.logout === 'function') {
+              await os.logout();
+            } else {
+              OneSignal.logout();
+            }
+            console.log("✅ OneSignal logout");
+          } catch {}
         }
       } finally {
         setAuthLoading(false);
