@@ -491,111 +491,176 @@ serve(async (req) => {
       console.log(`Created ${inAppNotifications.length} in-app notifications`);
     }
 
-    // Send push notifications
+    // Send push notifications via multiple channels
     const results: Array<{ id: string; success: boolean; reason?: string }> = [];
 
+    // --- Channel 1: OneSignal push notifications (primary) ---
+    const oneSignalApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
+    if (oneSignalApiKey && driverUserIds.length > 0) {
+      try {
+        // Get OneSignal player IDs from profiles
+        const { data: driverProfiles } = await supabase
+          .from("profiles")
+          .select("user_id, onesignal_player_id")
+          .in("user_id", driverUserIds)
+          .not("onesignal_player_id", "is", null);
+
+        const playerIds = driverProfiles
+          ?.map(p => p.onesignal_player_id)
+          .filter(Boolean) as string[] || [];
+
+        // Also send via external_user_ids for drivers without saved player IDs
+        const driversWithPlayerId = new Set(driverProfiles?.map(p => p.user_id) || []);
+        const driversWithoutPlayerId = driverUserIds.filter(id => !driversWithPlayerId.has(id));
+
+        const oneSignalPayload: Record<string, unknown> = {
+          app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
+          headings: { en: nearbyDrivers.some(d => d.is_priority) ? "⚡ PRIORITY RIDE REQUEST" : "🚗 New Ride Request" },
+          contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
+          url: "/driver",
+          priority: 10,
+          ios_sound: "default",
+          android_sound: "default",
+          content_available: true,
+        };
+
+        // Send to player IDs if available
+        if (playerIds.length > 0) {
+          const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Authorization": `Basic ${oneSignalApiKey}`,
+            },
+            body: JSON.stringify({ ...oneSignalPayload, include_player_ids: playerIds }),
+          });
+          const osData = await osRes.json();
+          console.log(`OneSignal push (player_ids) result:`, osData);
+          if (osRes.ok) {
+            results.push(...playerIds.map(id => ({ id, success: true })));
+          }
+        }
+
+        // Send to external user IDs for drivers without player IDs
+        if (driversWithoutPlayerId.length > 0) {
+          const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Authorization": `Basic ${oneSignalApiKey}`,
+            },
+            body: JSON.stringify({ ...oneSignalPayload, include_external_user_ids: driversWithoutPlayerId }),
+          });
+          const osData = await osRes.json();
+          console.log(`OneSignal push (external_ids) result:`, osData);
+          if (osRes.ok) {
+            results.push(...driversWithoutPlayerId.map(id => ({ id, success: true })));
+          }
+        }
+      } catch (osErr) {
+        console.error("OneSignal push error:", osErr);
+      }
+    }
+
+    // --- Channel 2: FCM push notifications (fallback) ---
     if (subscriptions && subscriptions.length > 0 && firebaseProjectId) {
       let accessToken: string;
       try {
         accessToken = await getAccessToken();
       } catch (error) {
         console.error("Failed to get FCM access token:", error);
-        return new Response(JSON.stringify({ 
-          error: "FCM authentication failed",
-          inAppNotifications: inAppNotifications.length,
-          tier,
-        }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        // Don't return error - OneSignal may have already succeeded
+        accessToken = "";
       }
 
-      const pushPromises = subscriptions.map(async (sub) => {
-        const driver = nearbyDrivers.find(d => d.user_id === sub.user_id);
-        if (!driver) return { id: sub.id, success: false, reason: "Driver not in list" };
+      if (accessToken) {
+        const pushPromises = subscriptions.map(async (sub) => {
+          const driver = nearbyDrivers.find(d => d.user_id === sub.user_id);
+          if (!driver) return { id: sub.id, success: false, reason: "Driver not in list" };
 
-        const fcmToken = sub.p256dh;
-        if (!fcmToken || sub.auth !== 'fcm') {
-          return { id: sub.id, success: false, reason: "Not an FCM subscription" };
-        }
-
-        const eta = estimateEtaMinutes(driver.distance_km);
-        const isPriority = driver.is_priority;
-        
-        const title = isPriority 
-          ? "⚡ PRIORITY RIDE • Accept Fast!"
-          : `🚗 New Ride • ${eta} min pickup`;
-        
-        const body = minimumEarnings 
-          ? `💰 $${minimumEarnings.toFixed(2)} earnings\n📍 ${pickupAddress || "Pickup"}`
-          : `📍 ${pickupAddress || "Pickup"} → ${dropoffAddress || "Destination"}`;
-
-        const message: FCMMessageV1 = {
-          message: {
-            token: fcmToken,
-            notification: { title, body },
-            data: {
-              url: "/driver",
-              rideId,
-              type: "new_ride",
-              pickupAddress: pickupAddress || "",
-              dropoffAddress: dropoffAddress || "",
-              estimatedFare: String(estimatedFare || ""),
-              pickupEta: String(eta),
-              minimumEarnings: String(minimumEarnings || ""),
-              isPriority: String(isPriority),
-            },
-            webpush: {
-              notification: {
-                icon: "/favicon.ico",
-                badge: "/favicon.ico",
-                vibrate: [300, 100, 300, 100, 300, 100, 300],
-                requireInteraction: true,
-                tag: `ride-request-${rideId}`,
-              },
-              fcm_options: { link: "/driver" },
-            },
-            android: {
-              priority: "high",
-              notification: {
-                icon: "ic_notification",
-                color: isPriority ? "#F59E0B" : "#10B981",
-                sound: "default",
-                channelId: "ride_requests",
-              },
-            },
-          },
-        };
-
-        try {
-          const response = await fetch(
-            `https://fcm.googleapis.com/v1/projects/${firebaseProjectId}/messages:send`,
-            {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${accessToken}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(message),
-            }
-          );
-
-          if (response.ok) {
-            return { id: sub.id, success: true };
-          } else {
-            const errorText = await response.text();
-            if (response.status === 404 || response.status === 410 || errorText.includes("UNREGISTERED")) {
-              await supabase.from("push_subscriptions").delete().eq("id", sub.id);
-              return { id: sub.id, success: false, reason: "expired" };
-            }
-            return { id: sub.id, success: false, reason: errorText };
+          const fcmToken = sub.p256dh;
+          if (!fcmToken || sub.auth !== 'fcm') {
+            return { id: sub.id, success: false, reason: "Not an FCM subscription" };
           }
-        } catch (e: unknown) {
-          return { id: sub.id, success: false, reason: e instanceof Error ? e.message : String(e) };
-        }
-      });
 
-      results.push(...await Promise.all(pushPromises));
+          const eta = estimateEtaMinutes(driver.distance_km);
+          const isPriority = driver.is_priority;
+          
+          const title = isPriority 
+            ? "⚡ PRIORITY RIDE • Accept Fast!"
+            : `🚗 New Ride • ${eta} min pickup`;
+          
+          const body = minimumEarnings 
+            ? `💰 $${minimumEarnings.toFixed(2)} earnings\n📍 ${pickupAddress || "Pickup"}`
+            : `📍 ${pickupAddress || "Pickup"} → ${dropoffAddress || "Destination"}`;
+
+          const message: FCMMessageV1 = {
+            message: {
+              token: fcmToken,
+              notification: { title, body },
+              data: {
+                url: "/driver",
+                rideId,
+                type: "new_ride",
+                pickupAddress: pickupAddress || "",
+                dropoffAddress: dropoffAddress || "",
+                estimatedFare: String(estimatedFare || ""),
+                pickupEta: String(eta),
+                minimumEarnings: String(minimumEarnings || ""),
+                isPriority: String(isPriority),
+              },
+              webpush: {
+                notification: {
+                  icon: "/favicon.ico",
+                  badge: "/favicon.ico",
+                  vibrate: [300, 100, 300, 100, 300, 100, 300],
+                  requireInteraction: true,
+                  tag: `ride-request-${rideId}`,
+                },
+                fcm_options: { link: "/driver" },
+              },
+              android: {
+                priority: "high",
+                notification: {
+                  icon: "ic_notification",
+                  color: isPriority ? "#F59E0B" : "#10B981",
+                  sound: "default",
+                  channelId: "ride_requests",
+                },
+              },
+            },
+          };
+
+          try {
+            const response = await fetch(
+              `https://fcm.googleapis.com/v1/projects/${firebaseProjectId}/messages:send`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify(message),
+              }
+            );
+
+            if (response.ok) {
+              return { id: sub.id, success: true };
+            } else {
+              const errorText = await response.text();
+              if (response.status === 404 || response.status === 410 || errorText.includes("UNREGISTERED")) {
+                await supabase.from("push_subscriptions").delete().eq("id", sub.id);
+                return { id: sub.id, success: false, reason: "expired" };
+              }
+              return { id: sub.id, success: false, reason: errorText };
+            }
+          } catch (e: unknown) {
+            return { id: sub.id, success: false, reason: e instanceof Error ? e.message : String(e) };
+          }
+        });
+
+        results.push(...await Promise.all(pushPromises));
+      }
     }
 
     const sent = results.filter(r => r.success).length;
