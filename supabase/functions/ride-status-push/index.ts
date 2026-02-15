@@ -84,7 +84,11 @@ async function sendPush(
   if (playerId) {
     osPayload.include_player_ids = [playerId];
   } else {
-    osPayload.include_external_user_ids = [targetUserId];
+    // Fallback: target via uid tag (set by client-side useOneSignalPlayerSync)
+    osPayload.filters = [
+      { field: "tag", key: "uid", relation: "=", value: targetUserId },
+    ];
+    console.log("[ride-status-push] Using tag-based targeting for uid:", targetUserId);
   }
 
   const osRes = await fetch("https://onesignal.com/api/v1/notifications", {

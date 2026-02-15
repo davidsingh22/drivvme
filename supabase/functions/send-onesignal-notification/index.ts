@@ -11,10 +11,10 @@ serve(async (req) => {
   }
 
   try {
-    const { externalUserIds, playerIds, title, message, url } = await req.json();
+    const { externalUserIds, playerIds, tagUids, title, message, url } = await req.json();
 
-    if ((!externalUserIds?.length && !playerIds?.length) || !title || !message) {
-      return new Response(JSON.stringify({ error: "Missing required fields: (externalUserIds or playerIds), title, message" }), {
+    if ((!externalUserIds?.length && !playerIds?.length && !tagUids?.length) || !title || !message) {
+      return new Response(JSON.stringify({ error: "Missing required fields: (externalUserIds, playerIds, or tagUids), title, message" }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -25,7 +25,7 @@ serve(async (req) => {
       throw new Error("ONESIGNAL_REST_API_KEY not configured");
     }
 
-    console.log("[send-onesignal] target playerIds:", playerIds || "none", "| externalUserIds:", externalUserIds || "none");
+    console.log("[send-onesignal] target playerIds:", playerIds || "none", "| externalUserIds:", externalUserIds || "none", "| tagUids:", tagUids || "none");
 
     const payload: Record<string, unknown> = {
       app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
@@ -37,9 +37,13 @@ serve(async (req) => {
       ios_sound: "default",
     };
 
-    // Prefer player IDs (most reliable for native iOS)
+    // Prefer player IDs > tag filters > external user IDs
     if (playerIds?.length) {
       payload.include_player_ids = playerIds;
+    } else if (tagUids?.length === 1) {
+      payload.filters = [
+        { field: "tag", key: "uid", relation: "=", value: tagUids[0] },
+      ];
     } else if (externalUserIds?.length) {
       payload.include_external_user_ids = externalUserIds;
     }
