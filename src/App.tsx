@@ -12,6 +12,7 @@ import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
+import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 
 // Lazy-load all non-landing routes for faster initial page load
 const Login = lazy(() => import("./pages/Login"));
@@ -157,44 +158,7 @@ const LazyFallback = () => (
 // Runs once at app level to sync OneSignal identity + player ID
 const OneSignalLinker = () => {
   useOneSignalSync();
-
-  useEffect(() => {
-    const linkOneSignal = async () => {
-      if (!(window as any).OneSignal) return;
-      const OneSignal = (window as any).OneSignal;
-      try {
-        const { data } = await supabase.auth.getSession();
-        const userId = data?.session?.user?.id;
-        if (!userId) return;
-        console.log("🔵 About to call OneSignal.login() for:", userId);
-        await OneSignal.login(userId);
-        console.log("✅ OneSignal.login() succeeded for:", userId);
-
-        // Fetch the device player ID for reliable native iOS push targeting
-        const playerId = OneSignal?.User?.PushSubscription?.id;
-        console.log("🆔 OneSignal Player ID:", playerId);
-
-        if (playerId) {
-          const { error: upsertErr } = await supabase
-            .from("profiles")
-            .update({ onesignal_player_id: playerId })
-            .eq("user_id", userId);
-          if (upsertErr) {
-            console.error("❌ Failed to upsert player ID:", upsertErr);
-          } else {
-            console.log("✅ Player ID saved to profiles for user:", userId);
-          }
-        } else {
-          console.warn("⚠️ OneSignal player ID not available yet");
-        }
-      } catch (e) {
-        console.error("❌ OneSignal login failed", e);
-      }
-    };
-    const timer = setTimeout(linkOneSignal, 1000);
-    return () => clearTimeout(timer);
-  }, []);
-
+  useOneSignalPlayerSync();
   return null;
 };
 
