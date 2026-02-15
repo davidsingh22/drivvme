@@ -29,6 +29,8 @@ serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
+    console.log("[notify-driver] target user id:", driver_id);
+
     const { data: profile } = await supabase
       .from("profiles")
       .select("onesignal_player_id")
@@ -36,6 +38,7 @@ serve(async (req) => {
       .single();
 
     const playerId = profile?.onesignal_player_id;
+    console.log("[notify-driver] onesignal_player_id", playerId ? `found: ${playerId}` : "missing");
 
     const payload: Record<string, unknown> = {
       app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
@@ -48,10 +51,8 @@ serve(async (req) => {
 
     if (playerId) {
       payload.include_player_ids = [playerId];
-      console.log("[notify-driver] Sending via player_id:", playerId);
     } else {
       payload.include_external_user_ids = [driver_id];
-      console.log("[notify-driver] Fallback: sending via external_user_id:", driver_id);
     }
 
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -64,6 +65,7 @@ serve(async (req) => {
     });
 
     const data = await res.json();
+    console.log("[notify-driver] onesignal response status:", res.status, JSON.stringify(data));
 
     if (!res.ok) {
       return new Response(JSON.stringify({ error: `OneSignal error: ${res.status}`, details: data }), {
