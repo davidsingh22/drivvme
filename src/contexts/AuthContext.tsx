@@ -421,6 +421,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 await OneSignal.login(osUserId);
                 await OneSignal.User.PushSubscription.optIn();
 
+                // Tag user role for targeted push segmentation
+                const currentRoles = rolesRef.current;
+                if (currentRoles.includes('driver')) {
+                  await OneSignal.User.addTag("role", "driver");
+                  console.log("🏷️ OneSignal tagged as driver");
+                } else if (currentRoles.includes('rider')) {
+                  await OneSignal.User.addTag("role", "rider");
+                  console.log("🏷️ OneSignal tagged as rider");
+                }
+
                 // Save player_id to profiles for server-side push targeting (native iOS + web)
                 const playerId = OneSignal.User.PushSubscription.id;
                 console.log("✅ OneSignal fully initialized for user:", osUserId, "playerId:", playerId);
