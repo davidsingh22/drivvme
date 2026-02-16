@@ -13,6 +13,7 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
+import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
 
 // Lazy-load all non-landing routes for faster initial page load
 const Login = lazy(() => import("./pages/Login"));
@@ -248,6 +249,10 @@ const App = () => {
     };
     window.addEventListener("unhandledrejection", handleRejection);
     return () => window.removeEventListener("unhandledrejection", handleRejection);
+  }, []);
+
+  useEffect(() => {
+    initOneSignalAuthLink();
   }, []);
 
   return (
