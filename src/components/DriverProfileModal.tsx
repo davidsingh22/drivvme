@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Camera, Loader2, User, Bug } from 'lucide-react';
+import ProfileDebugInfo from '@/components/ProfileDebugInfo';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -283,6 +284,9 @@ const DriverProfileModal = ({ open, onOpenChange }: DriverProfileModalProps) => 
 
         {/* OneSignal Debug Section */}
         <OneSignalDebugPanel userId={user?.id} />
+
+        {/* Quick Debug IDs */}
+        <ProfileDebugInfo userId={user?.id} />
 
         <div className="flex gap-3">
           <Button
