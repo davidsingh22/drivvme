@@ -14,6 +14,7 @@ import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
+import { initMedianOneSignalAuthLink } from "@/lib/medianOneSignalAuthLink";
 
 // Lazy-load all non-landing routes for faster initial page load
 const Login = lazy(() => import("./pages/Login"));
@@ -253,6 +254,7 @@ const App = () => {
 
   useEffect(() => {
     initOneSignalAuthLink();
+    initMedianOneSignalAuthLink();
   }, []);
 
   return (
