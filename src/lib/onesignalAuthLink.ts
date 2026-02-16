@@ -4,30 +4,28 @@ let lastExternalId: string | null = null;
 
 /**
  * Standalone OneSignal ↔ Supabase auth linker.
- * Calls OneSignal.login(uid) on sign-in and OneSignal.logout() on sign-out.
- * Deduplicates so repeated auth events don't re-trigger login().
+ * Uses OneSignalDeferred queue so it works even if the SDK hasn't loaded yet.
  */
 export function initOneSignalAuthLink() {
-  if (!window.OneSignal) {
-    console.log("[OneSignalAuthLink] OneSignal not ready yet");
-    return;
-  }
+  (window as any).OneSignalDeferred = (window as any).OneSignalDeferred || [];
 
-  supabase.auth.onAuthStateChange(async (_event, session) => {
-    try {
-      const uid = session?.user?.id;
-      if (uid) {
-        if (lastExternalId === uid) return;
-        await window.OneSignal.login(uid);
-        lastExternalId = uid;
-        console.log("✅ OneSignal External ID linked:", uid);
-      } else {
-        lastExternalId = null;
-        await window.OneSignal.logout();
-        console.log("✅ OneSignal logged out");
+  supabase.auth.onAuthStateChange((_event, session) => {
+    (window as any).OneSignalDeferred.push(async (OneSignal: any) => {
+      try {
+        const uid = session?.user?.id;
+        if (uid) {
+          if (lastExternalId === uid) return;
+          await OneSignal.login(uid);
+          lastExternalId = uid;
+          console.log("✅ OneSignal External ID linked:", uid);
+        } else {
+          lastExternalId = null;
+          await OneSignal.logout();
+          console.log("✅ OneSignal logged out");
+        }
+      } catch (e) {
+        console.log("❌ OneSignal login/logout error:", e);
       }
-    } catch (e) {
-      console.log("❌ OneSignal login/logout error:", e);
-    }
+    });
   });
 }
