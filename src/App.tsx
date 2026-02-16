@@ -34,6 +34,7 @@ const LiveDriversMap = lazy(() => import("@/pages/admin/LiveDriversMap"));
 const LiveRidersMap = lazy(() => import("@/pages/admin/LiveRidersMap"));
 const DriverLive = lazy(() => import("./pages/DriverLive"));
 const NotFound = lazy(() => import("./pages/NotFound"));
+const Debug = lazy(() => import("./pages/Debug"));
 const DriverFloatingGPSButton = lazy(() => import("@/components/DriverFloatingGPSButton"));
 
 const queryClient = new QueryClient();
@@ -206,6 +207,7 @@ const AppRoutes = () => {
         <Route path="/admin/driver-documents" element={<AdminDriverDocuments />} />
         <Route path="/admin/driver-documents/:driverId" element={<AdminDriverDocumentDetail />} />
         <Route path="/driver-live" element={<DriverLive />} />
+        <Route path="/debug" element={<Debug />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
       </Suspense>
