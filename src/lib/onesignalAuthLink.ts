@@ -5,6 +5,7 @@ let lastExternalId: string | null = null;
 /**
  * Standalone OneSignal ↔ Supabase auth linker.
  * Uses OneSignalDeferred queue so it works even if the SDK hasn't loaded yet.
+ * Calls OneSignal.login(uid) to set the External ID and merge subscriptions.
  */
 export function initOneSignalAuthLink() {
   (window as any).OneSignalDeferred = (window as any).OneSignalDeferred || [];
