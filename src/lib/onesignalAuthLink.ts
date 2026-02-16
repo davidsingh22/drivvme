@@ -31,29 +31,21 @@ export function initOneSignalAuthLink() {
   supabase.auth.onAuthStateChange((_event, session) => {
     const uid = session?.user?.id;
 
-    if (uid) {
-      if (lastExternalId === uid) return;
-      waitForOneSignal()
-        .then(async (OneSignal) => {
+    waitForOneSignal()
+      .then(async (OneSignal) => {
+        if (uid) {
+          if (lastExternalId === uid) return;
           await OneSignal.login(uid);
           lastExternalId = uid;
-          console.log("✅ OneSignal MERGED External ID + device:", uid);
-        })
-        .catch((err) => {
-          console.log("❌ OneSignal merge failed:", err.message);
-        });
-    } else {
-      lastExternalId = null;
-      // Use deferred queue for logout since SDK may not be ready
-      (window as any).OneSignalDeferred = (window as any).OneSignalDeferred || [];
-      (window as any).OneSignalDeferred.push(async (OneSignal: any) => {
-        try {
+          console.log("✅ OneSignal External ID set:", uid);
+        } else {
+          lastExternalId = null;
           await OneSignal.logout();
           console.log("✅ OneSignal logged out");
-        } catch (e) {
-          console.log("❌ OneSignal logout error:", e);
         }
+      })
+      .catch((e) => {
+        console.log("❌ OneSignal External ID error:", (e as any)?.message || e);
       });
-    }
   });
 }
