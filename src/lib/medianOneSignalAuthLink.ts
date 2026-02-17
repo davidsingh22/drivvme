@@ -20,7 +20,12 @@ export function initMedianOneSignalAuthLink() {
 
       if (uid) {
         if (lastId === uid) return;
-        median.onesignal.externalUserId.set(uid);
+        try {
+          median.onesignal.externalUserId.set(uid);
+        } catch {
+          // Nuclear fallback: deep-link scheme
+          window.location.href = `gonative://onesignal/externalUserId/set?externalId=${uid}`;
+        }
         lastId = uid;
         console.log("✅ Median Bridge: External ID set to", uid);
       } else {
