@@ -20,14 +20,13 @@ export function initMedianOneSignalAuthLink() {
 
       if (uid) {
         if (lastId === uid) return;
-        await median.onesignal.login(uid);
+        median.onesignal.externalUserId.set(uid);
         lastId = uid;
-        const info = await median.onesignal.info();
-        console.log("✅ Median OneSignal linked:", info);
+        console.log("✅ Median Bridge: External ID set to", uid);
       } else {
         lastId = null;
-        await median.onesignal.logout();
-        console.log("✅ Median OneSignal logged out");
+        median.onesignal.externalUserId.remove();
+        console.log("✅ Median OneSignal external ID removed");
       }
     } catch (e) {
       console.log("❌ Median OneSignal error:", e);
