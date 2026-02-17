@@ -37,9 +37,9 @@ function getNotificationConfig(payload: RidePayload, driverName?: string) {
 
   switch (new_status) {
     case "driver_assigned":
-      return { targetUserId: rider_id, title: "Driver Assigned 🚗", message: "A driver has been assigned to your ride!" };
+      return { targetUserId: rider_id, title: `${name} Is On The Way 🚗`, message: `${name} has accepted your ride and is heading to pick you up!` };
     case "driver_en_route":
-      return { targetUserId: rider_id, title: "Driver On The Way 🚗", message: "Your driver is on the way to pick you up." };
+      return { targetUserId: rider_id, title: `${name} Is On The Way 🚗`, message: `${name} is on the way to pick you up.` };
     case "arrived":
       return { targetUserId: rider_id, title: `${name} Has Arrived 📍`, message: `${name} has arrived! Please meet them at the pickup location.` };
     case "in_progress":
@@ -125,7 +125,7 @@ serve(async (req) => {
 
     // Fetch driver name for personalized notifications
     let driverName: string | undefined;
-    if (payload.new_status === "arrived" && payload.driver_id) {
+    if (["driver_assigned", "driver_en_route", "arrived"].includes(payload.new_status) && payload.driver_id) {
       driverName = await getDriverFirstName(payload.driver_id);
       console.log("[ride-status-push] Driver name:", driverName);
     }
