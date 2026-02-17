@@ -95,13 +95,18 @@ async function sendPush(
 }
 
 serve(async (req) => {
+  console.log("Function ride-status-push was called!");
+  console.log("[ride-status-push] method:", req.method, "url:", req.url);
+
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const payload: RidePayload = await req.json();
-    console.log("[ride-status-push] Received payload:", JSON.stringify(payload));
+    const rawBody = await req.text();
+    console.log("[ride-status-push] Raw body:", rawBody);
+    const payload: RidePayload = JSON.parse(rawBody);
+    console.log("[ride-status-push] Parsed payload:", JSON.stringify(payload));
 
     const config = getNotificationConfig(payload);
     if (!config || !config.targetUserId) {
