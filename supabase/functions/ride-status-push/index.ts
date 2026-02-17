@@ -17,8 +17,23 @@ interface RidePayload {
   driver_id: string | null;
 }
 
-function getNotificationConfig(payload: RidePayload) {
+async function getDriverFirstName(driverId: string): Promise<string> {
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const { data } = await supabase
+    .from("profiles")
+    .select("first_name")
+    .eq("user_id", driverId)
+    .single();
+
+  return data?.first_name || "Your driver";
+}
+
+function getNotificationConfig(payload: RidePayload, driverName?: string) {
   const { new_status, rider_id, driver_id } = payload;
+  const name = driverName || "Your driver";
 
   switch (new_status) {
     case "driver_assigned":
@@ -26,7 +41,7 @@ function getNotificationConfig(payload: RidePayload) {
     case "driver_en_route":
       return { targetUserId: rider_id, title: "Driver On The Way 🚗", message: "Your driver is on the way to pick you up." };
     case "arrived":
-      return { targetUserId: rider_id, title: "Driver Has Arrived 📍", message: "Your driver is here! Head to the pickup point." };
+      return { targetUserId: rider_id, title: `${name} Has Arrived 📍`, message: `${name} has arrived! Please meet them at the pickup location.` };
     case "in_progress":
       return { targetUserId: rider_id, title: "Ride Started 🛣️", message: "Your ride has started. Enjoy the trip!" };
     case "completed":
@@ -108,7 +123,14 @@ serve(async (req) => {
     const payload: RidePayload = JSON.parse(rawBody);
     console.log("[ride-status-push] Parsed payload:", JSON.stringify(payload));
 
-    const config = getNotificationConfig(payload);
+    // Fetch driver name for personalized notifications
+    let driverName: string | undefined;
+    if (payload.new_status === "arrived" && payload.driver_id) {
+      driverName = await getDriverFirstName(payload.driver_id);
+      console.log("[ride-status-push] Driver name:", driverName);
+    }
+
+    const config = getNotificationConfig(payload, driverName);
     if (!config || !config.targetUserId) {
       console.log("[ride-status-push] No notification needed for status:", payload.new_status);
       return new Response(JSON.stringify({ skipped: true }), {
