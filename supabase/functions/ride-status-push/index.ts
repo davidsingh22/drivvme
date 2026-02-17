@@ -65,31 +65,19 @@ async function sendPush(
   const restApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
   if (!restApiKey) throw new Error("ONESIGNAL_REST_API_KEY not configured");
 
-  console.log("[ride-status-push] target user id:", targetUserId);
-
-  // Try player ID first (most reliable for native iOS)
-  const playerId = await getPlayerIdFromProfiles(targetUserId);
-  console.log("[ride-status-push] onesignal_player_id", playerId ? `found: ${playerId}` : "missing");
+  console.log("[ride-status-push] target external user id:", targetUserId);
 
   const osPayload: Record<string, unknown> = {
     app_id: ONESIGNAL_APP_ID,
-    headings: { en: title },
-    contents: { en: message },
-    content_available: true,
-    ios_sound: "default",
+    include_external_user_ids: [targetUserId],
+    headings: { en: String(title) },
+    contents: { en: String(message) },
     priority: 10,
+    content_available: true,
+    mutable_content: true,
+    ios_sound: "default",
     data,
   };
-
-  if (playerId) {
-    osPayload.include_player_ids = [playerId];
-  } else {
-    // Fallback: target via uid tag (set by client-side useOneSignalPlayerSync)
-    osPayload.filters = [
-      { field: "tag", key: "uid", relation: "=", value: targetUserId },
-    ];
-    console.log("[ride-status-push] Using tag-based targeting for uid:", targetUserId);
-  }
 
   const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
     method: "POST",
