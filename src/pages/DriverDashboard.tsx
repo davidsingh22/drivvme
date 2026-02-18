@@ -896,41 +896,43 @@ const DriverDashboard = () => {
     <div className="min-h-screen bg-background">
 
       <Navbar />
+
+      {/* TEMPORARY: Force Notifications button for iOS debugging - fixed position so it's always visible */}
+      <div className="fixed top-16 left-0 right-0 z-[9999] p-3 bg-destructive">
+        <Button
+          variant="destructive"
+          className="w-full text-lg py-6 font-bold bg-red-600 hover:bg-red-700 text-white"
+          onClick={async () => {
+            toast({
+              title: "📲 Notifications",
+              description: "Attempting to enable notifications...",
+            });
+            const median = (window as any).median;
+            if (typeof median !== 'undefined' && median?.onesignal) {
+              console.log('[FORCE-NOTIF] Calling median.onesignal.register()...');
+              try { await median.onesignal.register(); } catch (e) { console.warn(e); }
+              await new Promise(r => setTimeout(r, 1000));
+              let info = null;
+              try { info = median.onesignal.info ? await median.onesignal.info() : null; } catch (e) { console.warn(e); }
+              console.log('[FORCE-NOTIF] median.onesignal.info() =', JSON.stringify(info));
+              toast({
+                title: "📲 Check Settings",
+                description: "If no Apple popup appeared, go to Settings > Notifications > Drivveme and turn it on.",
+              });
+            } else {
+              try { await OneSignal.Notifications.requestPermission(); } catch (err) { console.error('[FORCE-NOTIF] web error', err); }
+              toast({
+                title: "📲 Check Settings",
+                description: "If no browser popup appeared, check your browser notification settings.",
+              });
+            }
+          }}
+        >
+          🔴 FORCE NOTIFICATIONS
+        </Button>
+      </div>
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
-        {/* TEMPORARY: Force Notifications button for iOS debugging */}
-        <div className="w-full p-3 bg-destructive border-b border-destructive/30 absolute top-16 left-0 right-0 z-50">
-          <Button
-            variant="destructive"
-            className="w-full text-lg py-6 font-bold bg-red-600 hover:bg-red-700 text-white"
-            onClick={async () => {
-              const median = (window as any).median;
-              if (typeof median !== 'undefined' && median?.onesignal) {
-                console.log('[FORCE-NOTIF] Calling median.onesignal.register()...');
-                await median.onesignal.register();
-                await new Promise(r => setTimeout(r, 1000));
-                const info = median.onesignal.info ? await median.onesignal.info() : null;
-                console.log('[FORCE-NOTIF] median.onesignal.info() =', JSON.stringify(info));
-                toast({
-                  title: "📲 Notifications",
-                  description: "If you don't see an Apple popup, go to Settings > Notifications > Drivveme and turn it on manually.",
-                });
-              } else {
-                try {
-                  await OneSignal.Notifications.requestPermission();
-                } catch (err) {
-                  console.error('[FORCE-NOTIF] web error', err);
-                }
-                toast({
-                  title: "📲 Notifications",
-                  description: "If you don't see a browser popup, check your browser notification settings.",
-                });
-              }
-            }}
-          >
-            🔴 FORCE NOTIFICATIONS
-          </Button>
-        </div>
         {/* Map - takes 65% on mobile, flex-[2] on desktop */}
         <div className="flex-[2] min-h-[60vh] lg:min-h-0 relative">
           <MapComponent
