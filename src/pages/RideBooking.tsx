@@ -324,7 +324,12 @@ const RideBooking = () => {
     return null;
   }, [mapboxToken, language]);
 
-  // Auto-detect GPS location on mount and set as default pickup
+  // Persist last known route for session restoration
+  useEffect(() => {
+    try { localStorage.setItem('last_route', '/ride'); } catch {}
+  }, []);
+
+  // Auto-detect GPS location on mount — Uber-style: silent, fast, no prompts
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
     if (!navigator.geolocation) {
@@ -332,68 +337,68 @@ const RideBooking = () => {
       return;
     }
     hasAutoDetectedLocation.current = true;
-    let retryCount = 0;
-    const maxRetries = 3;
-    const attemptReverseGeocode = async (lat: number, lng: number) => {
-      const address = await reverseGeocode(lat, lng);
-      if (address) {
-        setPickupAddress(address);
-        setPickup({
-          address,
-          lat,
-          lng
-        });
+
+    // Check permission silently first (Permissions API)
+    const checkAndTrack = async () => {
+      try {
+        const perm = await navigator.permissions?.query({ name: 'geolocation' });
+        if (perm && perm.state === 'denied') {
+          // Permission denied — skip silently, no prompts
+          setIsDetectingLocation(false);
+          return;
+        }
+      } catch {
+        // Permissions API not supported — proceed with geolocation call
+      }
+
+      let retryCount = 0;
+      const maxRetries = 3;
+      const attemptReverseGeocode = async (lat: number, lng: number) => {
+        const address = await reverseGeocode(lat, lng);
+        if (address) {
+          setPickupAddress(address);
+          setPickup({ address, lat, lng });
+          setIsDetectingLocation(false);
+          return;
+        }
+        if (retryCount < maxRetries && mapboxToken) {
+          retryCount++;
+          setTimeout(() => attemptReverseGeocode(lat, lng), 800);
+          return;
+        }
+        const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        setPickupAddress(coordAddress);
+        setPickup({ address: coordAddress, lat, lng });
         setIsDetectingLocation(false);
-        return;
-      }
+      };
 
-      // Retry if geocoding failed and we have retries left
-      if (retryCount < maxRetries && mapboxToken) {
-        retryCount++;
-        console.log(`[RideBooking] Reverse geocode retry ${retryCount}/${maxRetries}`);
-        setTimeout(() => attemptReverseGeocode(lat, lng), 1000);
-        return;
-      }
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
 
-      // Final fallback: use coordinates as readable address
-      const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      setPickupAddress(coordAddress);
-      setPickup({
-        address: coordAddress,
-        lat,
-        lng
-      });
-      setIsDetectingLocation(false);
+          // Store coords immediately — map centers instantly
+          const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
+          setPickup({ address: tempAddress, lat, lng });
+          setPickupAddress(tempAddress);
+
+          if (!mapboxToken) return;
+          await attemptReverseGeocode(lat, lng);
+        },
+        () => {
+          // Silent failure — no toast, no prompt
+          setIsDetectingLocation(false);
+        },
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 120000 }
+      );
     };
-    navigator.geolocation.getCurrentPosition(async position => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
 
-      // Always store coords immediately so pickup is never null
-      const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
-      setPickup({
-        address: tempAddress,
-        lat,
-        lng
-      });
-      setPickupAddress(tempAddress);
+    checkAndTrack();
 
-      // Wait for mapboxToken if not available yet - effect below will resolve
-      if (!mapboxToken) return;
-      await attemptReverseGeocode(lat, lng);
-    }, error => {
-      console.log('[RideBooking] GPS auto-detect failed:', error.message);
-      setIsDetectingLocation(false);
-    }, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 60000
-    });
-
-    // Safety timeout: never show detecting overlay for more than 6 seconds
+    // Safety timeout: never show detecting overlay for more than 4 seconds
     const safetyTimer = setTimeout(() => {
       setIsDetectingLocation(false);
-    }, 6000);
+    }, 4000);
     return () => clearTimeout(safetyTimer);
   }, [mapboxToken, language, reverseGeocode]);
 

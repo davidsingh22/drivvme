@@ -494,9 +494,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const permStatus = info?.permissionStatus || info?.notificationPermission || 'unknown';
                     const subscribed = info?.subscribed ?? info?.isSubscribed ?? 'unknown';
                     const pushToken = info?.pushToken || info?.deviceToken || 'none';
-                    const msg = `✅ Bridge Ready!\nPlayer ID: ${playerId}\nPermission: ${permStatus}\nSubscribed: ${subscribed}\nPush Token: ${pushToken}\nApp Group: group.co.median.ios.nmdjrzl.onesignal\n\nFull: ${JSON.stringify(info, null, 2)}`;
-                    console.log('[OS-SYNC] Final alert:', msg);
-                    window.alert(msg);
+                    console.log('[OS-SYNC] ✅ Bridge ready. Player ID:', playerId, 'Permission:', permStatus, 'Subscribed:', subscribed);
                   } else {
                     // Detailed timeout diagnostic
                     const diagParts: string[] = [
@@ -515,9 +513,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       '4. APNs certificate uploaded to OneSignal dashboard',
                       '5. Rebuild & reinstall via Xcode (not just reload)',
                     ];
-                    const diagMsg = diagParts.join('\n');
-                    console.log('[OS-SYNC] ❌ Timeout diagnostic:', diagMsg);
-                    window.alert(diagMsg);
+                    console.log('[OS-SYNC] ❌ Timeout diagnostic:', diagParts.join(' | '));
                   }
                 } else {
                   console.log('[OS-SYNC] No Median bridge, using web SDK path');

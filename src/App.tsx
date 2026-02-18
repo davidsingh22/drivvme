@@ -216,11 +216,11 @@ const AppRoutes = () => {
 };
 
 const RouteRestorer = () => {
-  const { session, roles, authLoading } = useAuth();
+  const { session, roles, authLoading, isDriver, isRider } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // If a driver session exists, restore them to /driver on cold start or iOS reload.
+  // Restore logged-in users to their dashboard on cold start / iOS reload.
   useEffect(() => {
     if (authLoading) return;
     if (!session) return;
@@ -235,12 +235,24 @@ const RouteRestorer = () => {
     })();
 
     if (last === '/driver') {
-      // If the driver last used /driver, restore them there immediately on iOS reload.
-      if (roles.length === 0 || roles.includes('driver')) {
+      if (roles.length === 0 || isDriver) {
         navigate('/driver', { replace: true });
+        return;
       }
     }
-  }, [authLoading, session, roles, location.pathname, navigate]);
+
+    // Riders: restore to /ride on cold start
+    if (last === '/ride' || isRider) {
+      navigate('/ride', { replace: true });
+      return;
+    }
+
+    // Fallback: any authenticated user with roles goes to their dashboard
+    if (roles.length > 0) {
+      if (isDriver) navigate('/driver', { replace: true });
+      else navigate('/ride', { replace: true });
+    }
+  }, [authLoading, session, roles, isDriver, isRider, location.pathname, navigate]);
 
   return null;
 };
