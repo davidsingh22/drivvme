@@ -4,24 +4,26 @@ let lastId: string | null = null;
 
 /**
  * Median-native OneSignal auth linker.
- * Uses window.median.onesignal bridge (only available inside Median/GoNative app).
- * Falls back silently when not running in the native wrapper.
+ * Registers a `median_library_ready` callback so the bridge is guaranteed
+ * to be available, then uses `median.onesignal.externalUserId.set()`.
+ * Falls back to the gonative:// deep-link scheme if the JS bridge throws.
  */
 export function initMedianOneSignalAuthLink() {
-  supabase.auth.onAuthStateChange(async (_event, session) => {
+  // Queue: auth changes that arrive before the bridge is ready
+  let pendingUid: string | null | undefined = undefined;
+
+  const applyExternalId = (uid: string | null) => {
     try {
-      if (!(window as any).median?.onesignal) {
+      const median = (window as any).median;
+      if (!median?.onesignal) {
         console.log("Median OneSignal bridge not available (not in app).");
         return;
       }
 
-      const median = (window as any).median;
-      const uid = session?.user?.id;
-
       if (uid) {
         if (lastId === uid) return;
         try {
-          median.onesignal.externalUserId.set(uid);
+          median.onesignal.externalUserId.set({ externalId: uid });
         } catch {
           // Nuclear fallback: deep-link scheme
           window.location.href = `gonative://onesignal/externalUserId/set?externalId=${uid}`;
@@ -30,11 +32,35 @@ export function initMedianOneSignalAuthLink() {
         console.log("✅ Median Bridge: External ID set to", uid);
       } else {
         lastId = null;
-        median.onesignal.externalUserId.remove();
+        try {
+          median.onesignal.externalUserId.remove();
+        } catch {
+          // ignore
+        }
         console.log("✅ Median OneSignal external ID removed");
       }
     } catch (e) {
       console.log("❌ Median OneSignal error:", e);
+    }
+  };
+
+  // Register the Median library-ready callback
+  (window as any).median_library_ready = () => {
+    console.log("✅ Median library ready");
+    if (pendingUid !== undefined) {
+      applyExternalId(pendingUid);
+      pendingUid = undefined;
+    }
+  };
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    const uid = session?.user?.id ?? null;
+
+    if ((window as any).median?.onesignal) {
+      applyExternalId(uid);
+    } else {
+      // Bridge not ready yet — queue for median_library_ready
+      pendingUid = uid;
     }
   });
 }
