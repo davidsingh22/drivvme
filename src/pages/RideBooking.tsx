@@ -1034,20 +1034,32 @@ const RideBooking = () => {
     }
     setStep('searching');
 
-    // Call test-driver-push to get the OneSignal notification ID for confirmation
+    // Directly call the broadcast push and surface full result/error
     let sentId: string | null = null;
+    let pushError: string | null = null;
+    let recipients = 0;
     try {
-      const { data } = await supabase.functions.invoke('test-driver-push');
-      sentId = data?.onesignal_id || null;
-    } catch (e) {
-      console.error('OneSignal broadcast check failed', e);
+      const { data, error } = await supabase.functions.invoke('test-driver-push');
+      if (error) {
+        pushError = error.message || 'Edge function error';
+      } else if (data?.errors) {
+        pushError = Array.isArray(data.errors) ? data.errors.join(', ') : String(data.errors);
+      } else {
+        sentId = data?.onesignal_id || null;
+        recipients = data?.recipients || 0;
+      }
+    } catch (e: any) {
+      pushError = e?.message || 'Unknown push error';
     }
 
     toast({
-      title: '🔍 Searching for nearby drivers...',
-      description: sentId
-        ? `Push sent! OneSignal ID: ${sentId}`
-        : 'Push sent via trigger. Waiting for OneSignal confirmation...',
+      title: pushError
+        ? '⚠️ Push notification failed'
+        : '🔍 Searching for nearby drivers...',
+      description: pushError
+        ? `OneSignal error: ${pushError}`
+        : `Push sent to ${recipients} device(s). ID: ${sentId || 'N/A'}`,
+      variant: pushError ? 'destructive' : 'default',
     });
   };
   const handlePaymentCancel = async () => {
