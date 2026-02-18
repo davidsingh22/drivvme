@@ -983,17 +983,17 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // Safety timeout — 12s max for ride creation
+    // Safety timeout — 20s max for ride creation (mobile networks can be slow)
     const safetyTimeout = window.setTimeout(() => {
-      console.error('[Payment] Safety timeout fired — ride creation took >12s');
+      console.error('[Payment] Safety timeout fired — ride creation took >20s');
       setIsSubmitting(false);
       toast({
         title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
-        description: language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.',
+        description: language === 'fr' ? 'Connexion lente. Veuillez réessayer.' : 'Slow connection. Please try again.',
         variant: 'destructive'
       });
       setStep('estimate');
-    }, 12000);
+    }, 20000);
 
     try {
       console.log('[Payment] Starting ride creation...');
