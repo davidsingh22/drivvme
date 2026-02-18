@@ -1034,32 +1034,8 @@ const RideBooking = () => {
     }
     setStep('searching');
 
-    // Directly call the broadcast push and surface full result/error
-    let sentId: string | null = null;
-    let pushError: string | null = null;
-    let recipients = 0;
-    try {
-      const { data, error } = await supabase.functions.invoke('test-driver-push');
-      if (error) {
-        pushError = error.message || 'Edge function error';
-      } else if (data?.errors) {
-        pushError = Array.isArray(data.errors) ? data.errors.join(', ') : String(data.errors);
-      } else {
-        sentId = data?.onesignal_id || null;
-        recipients = data?.recipients || 0;
-      }
-    } catch (e: any) {
-      pushError = e?.message || 'Unknown push error';
-    }
-
     toast({
-      title: pushError
-        ? '⚠️ Push notification failed'
-        : '🔍 Searching for nearby drivers...',
-      description: pushError
-        ? `OneSignal error: ${pushError}`
-        : `Push sent to ${recipients} device(s). ID: ${sentId || 'N/A'}`,
-      variant: pushError ? 'destructive' : 'default',
+      title: language === 'fr' ? '🔍 Recherche de chauffeurs...' : '🔍 Searching for nearby drivers...',
     });
   };
   const handlePaymentCancel = async () => {
@@ -1502,29 +1478,6 @@ const RideBooking = () => {
                 </Button>
               </motion.div>}
 
-            {/* TEST: Send push to all drivers */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/20 mt-1"
-              onClick={async () => {
-                toast({ title: "📡 Sending test push...", description: "Targeting all role:driver users via OneSignal" });
-                try {
-                  const { data, error } = await supabase.functions.invoke('test-driver-push');
-                  if (error) throw error;
-                  const result = data as { success: boolean; recipients: number; onesignal_id: string | null; errors: any };
-                  if (result.success) {
-                    toast({ title: "✅ Push Sent!", description: `Delivered to ${result.recipients} driver device(s). ID: ${result.onesignal_id?.slice(0, 8) ?? 'n/a'}` });
-                  } else {
-                    toast({ title: "⚠️ OneSignal Error", description: JSON.stringify(result.errors || 'Unknown error'), variant: "destructive" });
-                  }
-                } catch (err: any) {
-                  toast({ title: "❌ Failed", description: err.message || 'Network error', variant: "destructive" });
-                }
-              }}
-            >
-              🧪 Test Push → All Drivers
-            </Button>
           </div>
         </motion.div>
 
