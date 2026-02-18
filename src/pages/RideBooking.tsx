@@ -1035,7 +1035,7 @@ const RideBooking = () => {
     setStep('searching');
     toast({
       title: '🔍 Searching for nearby drivers...',
-      description: 'Payment confirmed! Drivers near you are being notified.',
+      description: 'Targeting tag: role = "driver" (lowercase). Notifying via OneSignal filters.',
     });
   };
   const handlePaymentCancel = async () => {
