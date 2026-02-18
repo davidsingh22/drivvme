@@ -433,63 +433,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     console.log('[OS-SYNC] Step 1 ❌: register() failed:', regErr);
                   }
 
-                  // === 2-second delay to let native bridge fully initialize ===
-                  console.log('[OS-SYNC] Waiting 2s for bridge init...');
-                  await new Promise(resolve => setTimeout(resolve, 2000));
+                  // === Poll for device info up to 5 times (2s apart) ===
+                  let info: any = null;
+                  let bridgeReady = false;
+                  const maxAttempts = 5;
 
-                  // === STEP 2: Identity Sync via Median bridge ===
-                  console.log('[OS-SYNC] Step 2: Calling median.onesignal.login(', osUserId, ')...');
-                  try {
-                    await median.onesignal.login(osUserId);
-                    console.log('[OS-SYNC] Step 2 ✅: login() completed');
-                  } catch (loginErr) {
-                    console.log('[OS-SYNC] Step 2 ❌: login() failed:', loginErr);
-                  }
+                  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                    console.log(`[OS-SYNC] Polling attempt ${attempt}/${maxAttempts}...`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
 
-                  // === Show device info & retry if empty ===
-                  try {
-                    let info = median.onesignal.info ? await median.onesignal.info() : null;
-                    console.log('[OS-SYNC] Device info (1st check):', JSON.stringify(info));
-
-                    const isEmpty = !info || (typeof info === 'object' && Object.keys(info).length === 0);
-                    if (isEmpty) {
-                      console.log('[OS-SYNC] ⚠️ info() empty — retrying register in 3s...');
-                      await new Promise(resolve => setTimeout(resolve, 3000));
-
-                      try {
-                        await median.onesignal.register();
-                        console.log('[OS-SYNC] Retry register() ✅');
-                      } catch (retryErr) {
-                        console.log('[OS-SYNC] Retry register() ❌:', retryErr);
-                      }
-
-                      await new Promise(resolve => setTimeout(resolve, 2000));
-
-                      try {
-                        await median.onesignal.login(osUserId);
-                        console.log('[OS-SYNC] Retry login() ✅');
-                      } catch (retryLoginErr) {
-                        console.log('[OS-SYNC] Retry login() ❌:', retryLoginErr);
-                      }
-
+                    try {
                       info = median.onesignal.info ? await median.onesignal.info() : null;
-                      console.log('[OS-SYNC] Device info (2nd check):', JSON.stringify(info));
+                      console.log(`[OS-SYNC] info() attempt ${attempt}:`, JSON.stringify(info));
+                    } catch (infoErr) {
+                      console.log(`[OS-SYNC] info() error attempt ${attempt}:`, infoErr);
                     }
 
-                    const isEmpty2 = !info || (typeof info === 'object' && Object.keys(info).length === 0);
-                    const permStatus = info?.permissionStatus || info?.notificationPermission || 'unknown';
+                    const isEmpty = !info || (typeof info === 'object' && Object.keys(info).length === 0);
+                    if (!isEmpty) {
+                      bridgeReady = true;
+                      break;
+                    }
+                  }
+
+                  if (bridgeReady) {
+                    // === STEP 2: Identity Sync ===
+                    console.log('[OS-SYNC] Step 2: Calling median.onesignal.login(', osUserId, ')...');
+                    try {
+                      await median.onesignal.login(osUserId);
+                      console.log('[OS-SYNC] Step 2 ✅: login() completed');
+                    } catch (loginErr) {
+                      console.log('[OS-SYNC] Step 2 ❌: login() failed:', loginErr);
+                    }
+
+                    // === STEP 2b: Role tag via native bridge ===
+                    const roleForTag = currentRoles.includes('driver') ? 'driver' : 'rider';
+                    try {
+                      const osObj = (window as any).OneSignal;
+                      if (osObj?.User?.addTag) {
+                        await osObj.User.addTag('role', roleForTag);
+                        console.log('[OS-SYNC] Step 2b ✅: addTag("role","' + roleForTag + '")');
+                      }
+                    } catch (tagErr) {
+                      console.log('[OS-SYNC] Step 2b ❌: addTag failed:', tagErr);
+                    }
+
                     const playerId = info?.oneSignalId || info?.playerId || info?.userId || 'none';
+                    const permStatus = info?.permissionStatus || info?.notificationPermission || 'unknown';
                     const subscribed = info?.subscribed ?? info?.isSubscribed ?? 'unknown';
-
-                    const msg = isEmpty2
-                      ? `❌ Bridge still empty after retry.\nPermission: ${permStatus}\nPossible causes:\n- Native push not configured in Xcode\n- APNs certificate missing\n- OneSignal App ID mismatch`
-                      : `✅ OneSignal Device Info:\nPlayer ID: ${playerId}\nPermission: ${permStatus}\nSubscribed: ${subscribed}\nFull: ${JSON.stringify(info, null, 2)}`;
-
+                    const msg = `✅ OneSignal Device Info:\nPlayer ID: ${playerId}\nPermission: ${permStatus}\nSubscribed: ${subscribed}\nFull: ${JSON.stringify(info, null, 2)}`;
                     console.log('[OS-SYNC] Final alert:', msg);
                     window.alert(msg);
-                  } catch (infoErr) {
-                    window.alert('OneSignal info() error: ' + String(infoErr));
-                    console.log('[OS-SYNC] info() exception:', infoErr);
+                  } else {
+                    console.log('[OS-SYNC] ❌ Bridge timeout after 10s');
+                    window.alert('Native Bridge Timeout - Check Xcode App Groups');
                   }
                 } else {
                   console.log('[OS-SYNC] No Median bridge, using web SDK path');
