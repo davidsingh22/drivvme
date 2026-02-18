@@ -891,23 +891,29 @@ const RideBooking = () => {
   }, [pickup, toast, mapboxToken]);
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(position => {
+    const currentLocLabel = language === 'fr' ? 'Position actuelle' : 'Current Location';
+    setPickupAddress(currentLocLabel);
+    navigator.geolocation.getCurrentPosition(async (position) => {
       const lat = position.coords.latitude;
       const lng = position.coords.longitude;
-      const fallbackAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      setPickupAddress(fallbackAddress);
-      setPickup({
-        address: fallbackAddress,
-        lat,
-        lng
-      });
+      setPickup({ address: currentLocLabel, lat, lng });
+      // Reverse geocode to get real address
+      const address = await reverseGeocode(lat, lng);
+      if (address) {
+        setPickupAddress(address);
+        setPickup({ address, lat, lng });
+      } else {
+        const fallback = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+        setPickupAddress(fallback);
+        setPickup({ address: fallback, lat, lng });
+      }
     }, () => {
       toast({
         title: 'Location error',
         description: 'Unable to get your current location',
         variant: 'destructive'
       });
-    });
+    }, { enableHighAccuracy: true, timeout: 5000, maximumAge: 120000 });
   };
   const calculateRoute = useCallback(async () => {
     if (!pickup || !dropoff) return;
@@ -1347,7 +1353,17 @@ const RideBooking = () => {
         <div className="absolute inset-0 z-10" style={{
         opacity: 0.85
       }}>
-          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} />
+          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} onMapClick={async (lat, lng) => {
+            // When user taps the map, move pickup pin and reverse geocode
+            const tempAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            setPickup({ address: tempAddress, lat, lng });
+            setPickupAddress(tempAddress);
+            const address = await reverseGeocode(lat, lng);
+            if (address) {
+              setPickupAddress(address);
+              setPickup({ address, lat, lng });
+            }
+          }} />
         </div>
             
         {/* Compact Frosted Top Bar */}
