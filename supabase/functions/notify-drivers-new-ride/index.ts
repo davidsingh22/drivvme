@@ -220,8 +220,6 @@ async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string):
     priority: 10,
     ttl: 3600,
     ios_sound: "default",
-    android_sound: "default",
-    android_channel_id: "ride_requests",
     content_available: true,
     mutable_content: true,
   };
