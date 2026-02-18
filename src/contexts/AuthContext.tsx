@@ -426,15 +426,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   return;
                 }
 
+                // Determine role tag for native path
+                const currentRoles = rolesRef.current;
+                const roleTag = currentRoles.includes('driver') ? 'driver' : currentRoles.includes('rider') ? 'rider' : null;
+
                 // Native OneSignal (Median / web SDK v16+)
                 if (typeof os.push === 'function' || Array.isArray(os)) {
                   // OneSignalDeferred queue pattern
                   os.push(async function(onesignal: any) {
                     await onesignal.login(osUserId);
+                    if (roleTag) {
+                      await onesignal.User.addTag("role", roleTag);
+                      console.log("🏷️ OneSignal tagged (deferred native):", roleTag);
+                    }
                     console.log("✅ OneSignal login (deferred) for:", osUserId);
                   });
                 } else if (typeof os.login === 'function') {
                   await os.login(osUserId);
+                  if (roleTag && os.User?.addTag) {
+                    await os.User.addTag("role", roleTag);
+                    console.log("🏷️ OneSignal tagged (direct native):", roleTag);
+                  }
                   console.log("✅ OneSignal login (direct) for:", osUserId);
                 } else {
                   // react-onesignal fallback
