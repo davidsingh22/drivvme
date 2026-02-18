@@ -79,15 +79,16 @@ export function RideOfferModal({
     }
   }, [open, ride?.id, countdownSeconds]);
 
-  // Countdown timer — use ref for onDecline to avoid restarting interval on every render
+  // Persistent alert — NO auto-timeout. Driver must manually accept or decline.
+  // Timer is display-only (counts up to show how long the offer has been open).
   useEffect(() => {
     if (!open) return;
 
     timerRef.current = window.setInterval(() => {
       setTimeLeft((prev) => {
+        // Count down but never auto-decline — just stop at 0
         if (prev <= 1) {
           if (timerRef.current) clearInterval(timerRef.current);
-          onDeclineRef.current();
           return 0;
         }
         return prev - 1;
@@ -192,7 +193,7 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Route Info — pickup only, no destination revealed */}
+                {/* Route Info — pickup + destination addresses */}
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
                   <div className="flex items-start gap-3">
                     <div className="mt-1 h-3 w-3 rounded-full bg-success flex-shrink-0" />
@@ -201,6 +202,30 @@ export function RideOfferModal({
                       <p className="text-white font-medium line-clamp-2">{ride.pickup_address}</p>
                     </div>
                   </div>
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1 h-3 w-3 rounded-full bg-destructive flex-shrink-0" />
+                    <div>
+                      <p className="text-white/60 text-xs mb-0.5">{language === 'fr' ? 'Destination' : 'Destination'}</p>
+                      <p className="text-white font-medium line-clamp-2">{ride.dropoff_address}</p>
+                    </div>
+                  </div>
+                  {/* Duration and distance */}
+                  {(ride.estimated_duration_minutes || ride.distance_km) && (
+                    <div className="flex items-center gap-4 pt-2 border-t border-white/10">
+                      {ride.estimated_duration_minutes && (
+                        <div className="flex items-center gap-1.5 text-white/70 text-sm">
+                          <Clock className="h-4 w-4" />
+                          <span>{Math.round(ride.estimated_duration_minutes)} min</span>
+                        </div>
+                      )}
+                      {ride.distance_km && (
+                        <div className="flex items-center gap-1.5 text-white/70 text-sm">
+                          <MapPin className="h-4 w-4" />
+                          <span>{ride.distance_km.toFixed(1)} km</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Drivveme vs Uber Comparison */}

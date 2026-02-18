@@ -374,6 +374,46 @@ const DriverDashboard = () => {
     restoreActiveRide();
   }, [session?.user?.id]);
 
+  // Check for pending ride offers on mount/resume (deep-link from notification)
+  useEffect(() => {
+    const driverId = session?.user?.id;
+    if (!driverId || !isOnline) return;
+    if (currentRideRef.current || newRideAlertOpenRef.current) return;
+
+    const checkPendingOffers = async () => {
+      // Look for recent unread new_ride notifications
+      const { data: notifications } = await supabase
+        .from('notifications')
+        .select('ride_id')
+        .eq('user_id', driverId)
+        .eq('type', 'new_ride')
+        .eq('is_read', false)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const rideId = notifications?.[0]?.ride_id;
+      if (!rideId) return;
+
+      // Check if this ride is still available
+      const { data: ride } = await supabase
+        .from('rides')
+        .select('*')
+        .eq('id', rideId)
+        .eq('status', 'searching')
+        .maybeSingle();
+
+      if (!ride) return;
+
+      console.log('[DriverDashboard] Restored pending ride offer from notification:', ride.id);
+      setCachedAlertRide(ride);
+      setNewRideAlertRideId(ride.id);
+      setNewRideAlertOpen(true);
+      alertStartTimeRef.current = Date.now();
+    };
+
+    checkPendingOffers();
+  }, [session?.user?.id, isOnline]);
+
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
