@@ -374,13 +374,15 @@ const DriverDashboard = () => {
     restoreActiveRide();
   }, [session?.user?.id]);
 
-  // Check for pending ride offers on mount/resume (deep-link from notification)
+  // Check for pending ride offers on mount/resume AND poll every 5s while idle
   useEffect(() => {
     const driverId = session?.user?.id;
     if (!driverId || !isOnline) return;
-    if (currentRideRef.current || newRideAlertOpenRef.current) return;
 
     const checkPendingOffers = async () => {
+      // Skip if driver is already busy with a ride or alert
+      if (currentRideRef.current || newRideAlertOpenRef.current) return;
+
       // Look for recent unread new_ride notifications
       const { data: notifications } = await supabase
         .from('notifications')
@@ -411,7 +413,13 @@ const DriverDashboard = () => {
       alertStartTimeRef.current = Date.now();
     };
 
+    // Run immediately
     checkPendingOffers();
+
+    // Poll every 5 seconds as a fallback in case realtime misses the insert
+    const interval = window.setInterval(checkPendingOffers, 5000);
+
+    return () => window.clearInterval(interval);
   }, [session?.user?.id, isOnline]);
 
   // GPS location is now handled by useDriverGPSStreaming hook
