@@ -213,7 +213,7 @@ async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string):
     filters: [
       { field: "tag", key: "role", relation: "=", value: "driver" },
     ],
-    foreground_notification_presentation_option: ["badge", "sound", "alert"],
+    // No foreground presentation — let the app's internal UI handle the alert with beep + modal
     headings: { en: "New Ride Request Nearby! 🚗" },
     contents: { en: "A new ride request is available near you. Tap to view details!" },
     data: { ride_id: rideId, type: "new_ride", targetUrl: "/driver-dashboard" },
