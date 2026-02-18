@@ -1033,9 +1033,21 @@ const RideBooking = () => {
       }
     }
     setStep('searching');
+
+    // Call test-driver-push to get the OneSignal notification ID for confirmation
+    let sentId: string | null = null;
+    try {
+      const { data } = await supabase.functions.invoke('test-driver-push');
+      sentId = data?.onesignal_id || null;
+    } catch (e) {
+      console.error('OneSignal broadcast check failed', e);
+    }
+
     toast({
       title: '🔍 Searching for nearby drivers...',
-      description: 'Targeting tag: role = "driver" (lowercase). Notifying via OneSignal filters.',
+      description: sentId
+        ? `Push sent! OneSignal ID: ${sentId}`
+        : 'Push sent via trigger. Waiting for OneSignal confirmation...',
     });
   };
   const handlePaymentCancel = async () => {

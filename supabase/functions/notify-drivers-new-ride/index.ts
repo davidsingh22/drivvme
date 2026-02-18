@@ -209,10 +209,13 @@ async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string):
 
   const payload: Record<string, unknown> = {
     app_id: appId,
-    // Target drivers using tag filter (role = driver)
+    // Broadcast to ALL subscribed users with role=driver tag
+    included_segments: ["All"],
     filters: [
       { field: "tag", key: "role", relation: "=", value: "driver" },
     ],
+    // Force banners even when app is in foreground
+    foreground_notification_presentation_option: ["badge", "sound", "alert"],
     headings: { en: "New Ride Request Nearby! 🚗" },
     contents: { en: "A new ride request is available near you. Tap to view details!" },
     data: { ride_id: rideId, type: "new_ride", targetUrl: "/driver-dashboard" },
@@ -238,9 +241,11 @@ async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string):
     console.log("OneSignal driver alert result:", JSON.stringify(result));
 
     if (!res.ok) {
-      return { success: false, error: result?.errors?.[0] || `HTTP ${res.status}` };
+      return { success: false, error: result?.errors?.[0] || `HTTP ${res.status}`, onesignal_id: null };
     }
-    return { success: true };
+    const onesignalId = result?.id || null;
+    console.log("[notify-drivers-new-ride] OneSignal notification ID:", onesignalId, "recipients:", result?.recipients);
+    return { success: true, onesignal_id: onesignalId, recipients: result?.recipients || 0 };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("OneSignal driver alert failed:", msg);
