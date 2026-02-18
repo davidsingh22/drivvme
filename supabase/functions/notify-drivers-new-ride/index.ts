@@ -203,12 +203,9 @@ async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string):
     return { success: false, error: "Missing OneSignal API key" };
   }
 
-  // Use ONESIGNAL_APP_ID if set, otherwise skip
-  const appId = Deno.env.get("ONESIGNAL_APP_ID");
-  if (!appId) {
-    console.error("ONESIGNAL_APP_ID not configured");
-    return { success: false, error: "Missing OneSignal App ID" };
-  }
+  // Use ONESIGNAL_APP_ID env var, fall back to hardcoded value
+  const appId = Deno.env.get("ONESIGNAL_APP_ID") || "5a6c4131-8faa-4969-b5c4-5a09033c8e2a";
+  console.log("[notify-drivers-new-ride] Using OneSignal app_id:", appId);
 
   const payload: Record<string, unknown> = {
     app_id: appId,
