@@ -895,6 +895,39 @@ const DriverDashboard = () => {
   return (
     <div className="min-h-screen bg-background">
 
+      {/* TEMPORARY: Force Notifications button for iOS debugging */}
+      <div className="w-full p-3 bg-destructive/10 border-b border-destructive/30">
+        <Button
+          variant="destructive"
+          className="w-full text-lg py-6 font-bold"
+          onClick={async () => {
+            const median = (window as any).median;
+            if (typeof median !== 'undefined' && median?.onesignal) {
+              console.log('[FORCE-NOTIF] Calling median.onesignal.register()...');
+              await median.onesignal.register();
+              await new Promise(r => setTimeout(r, 1000));
+              const info = median.onesignal.info ? await median.onesignal.info() : null;
+              console.log('[FORCE-NOTIF] median.onesignal.info() =', JSON.stringify(info));
+              window.alert(
+                'If you do not see an Apple popup, go to Settings > Notifications > Drivveme and turn it on manually.'
+              );
+            } else {
+              // Web fallback
+              try {
+                await OneSignal.Notifications.requestPermission();
+              } catch (err) {
+                console.error('[FORCE-NOTIF] web error', err);
+              }
+              window.alert(
+                'If you do not see a browser popup, check your browser notification settings.'
+              );
+            }
+          }}
+        >
+          🔴 FORCE NOTIFICATIONS
+        </Button>
+      </div>
+
       <DriverBeepFix
         incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
         onTimeout={() => {
