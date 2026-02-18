@@ -193,70 +193,13 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Route Info — pickup + destination addresses */}
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+                {/* Route Info — pickup only (destination hidden per dispatch strategy) */}
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="flex items-start gap-3">
                     <div className="mt-1 h-3 w-3 rounded-full bg-success flex-shrink-0" />
                     <div>
                       <p className="text-white/60 text-xs mb-0.5">{language === 'fr' ? 'Ramassage' : 'Pickup'}</p>
                       <p className="text-white font-medium line-clamp-2">{ride.pickup_address}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <div className="mt-1 h-3 w-3 rounded-full bg-destructive flex-shrink-0" />
-                    <div>
-                      <p className="text-white/60 text-xs mb-0.5">{language === 'fr' ? 'Destination' : 'Destination'}</p>
-                      <p className="text-white font-medium line-clamp-2">{ride.dropoff_address}</p>
-                    </div>
-                  </div>
-                  {/* Duration and distance */}
-                  {(ride.estimated_duration_minutes || ride.distance_km) && (
-                    <div className="flex items-center gap-4 pt-2 border-t border-white/10">
-                      {ride.estimated_duration_minutes && (
-                        <div className="flex items-center gap-1.5 text-white/70 text-sm">
-                          <Clock className="h-4 w-4" />
-                          <span>{Math.round(ride.estimated_duration_minutes)} min</span>
-                        </div>
-                      )}
-                      {ride.distance_km && (
-                        <div className="flex items-center gap-1.5 text-white/70 text-sm">
-                          <MapPin className="h-4 w-4" />
-                          <span>{ride.distance_km.toFixed(1)} km</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Drivveme vs Uber Comparison */}
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Drivveme Box - animated green border */}
-                  <div className="animated-border-green drivveme-glow p-4">
-                    <div className="text-white/70 text-sm flex items-center gap-2">
-                      <Car className="h-4 w-4 text-primary" />
-                      Drivveme
-                    </div>
-                    <div className="mt-2 text-3xl font-extrabold text-success">
-                      ${driverEarnings.toFixed(2)}
-                    </div>
-                    <div className="text-success text-sm font-medium">
-                      {language === 'fr' ? 'Vous gagnez' : 'You earn'}
-                    </div>
-                  </div>
-
-                  {/* Uber Box - animated white border */}
-                  <div className={`animated-border-white ${showUberShimmer ? 'uber-shimmer' : ''} p-4`}>
-                    <div className="text-white/70 text-sm">Uber</div>
-                    <div className="mt-2 text-xl font-bold text-white">
-                      {language === 'fr' ? 'Seulement' : 'Only'} ${uberEstimatedEarnings.toFixed(2)} <span className="text-white/60 text-sm">est</span>
-                    </div>
-                    <div className="text-sm mt-1">
-                      <span className="uber-fee-glow">
-                        {language === 'fr' 
-                          ? `Uber prend ~$${uberEstimatedCut.toFixed(2)} est`
-                          : `Uber typically takes ~$${uberEstimatedCut.toFixed(2)} est`
-                        }
-                      </span>
                     </div>
                   </div>
                 </div>
@@ -290,7 +233,7 @@ export function RideOfferModal({
                   className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl"
                 >
                   <X className="h-5 w-5 mr-2" />
-                  {language === 'fr' ? 'Non merci — Passer' : 'No thanks — Skip'}
+                  {language === 'fr' ? 'Refuser la course' : 'Decline Ride'}
                 </Button>
                 <p className="text-center text-white/40 text-xs">
                   {language === 'fr' 
