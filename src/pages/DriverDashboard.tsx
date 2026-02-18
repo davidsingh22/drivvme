@@ -911,18 +911,20 @@ const DriverDashboard = () => {
                 await new Promise(r => setTimeout(r, 1000));
                 const info = median.onesignal.info ? await median.onesignal.info() : null;
                 console.log('[FORCE-NOTIF] median.onesignal.info() =', JSON.stringify(info));
-                window.alert(
-                  'If you do not see an Apple popup, go to Settings > Notifications > Drivveme and turn it on manually.'
-                );
+                toast({
+                  title: "📲 Notifications",
+                  description: "If you don't see an Apple popup, go to Settings > Notifications > Drivveme and turn it on manually.",
+                });
               } else {
                 try {
                   await OneSignal.Notifications.requestPermission();
                 } catch (err) {
                   console.error('[FORCE-NOTIF] web error', err);
                 }
-                window.alert(
-                  'If you do not see a browser popup, check your browser notification settings.'
-                );
+                toast({
+                  title: "📲 Notifications",
+                  description: "If you don't see a browser popup, check your browser notification settings.",
+                });
               }
             }}
           >
