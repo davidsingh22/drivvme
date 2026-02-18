@@ -445,6 +445,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   } catch (loginErr) {
                     console.log('[OS-SYNC] Step 2 ❌: login() failed:', loginErr);
                   }
+
+                  // === Show device info for verification ===
+                  try {
+                    const info = median.onesignal.info ? median.onesignal.info() : null;
+                    console.log('[OS-SYNC] Device info:', JSON.stringify(info));
+                    window.alert('OneSignal Device Info:\n' + JSON.stringify(info, null, 2));
+                  } catch (infoErr) {
+                    window.alert('OneSignal info() not available: ' + infoErr);
+                  }
                 } else {
                   console.log('[OS-SYNC] No Median bridge, using web SDK path');
                 }
