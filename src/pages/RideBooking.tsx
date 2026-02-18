@@ -1477,6 +1477,30 @@ const RideBooking = () => {
                   {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
                 </Button>
               </motion.div>}
+
+            {/* TEST: Send push to all drivers */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/20 mt-1"
+              onClick={async () => {
+                toast({ title: "📡 Sending test push...", description: "Targeting all role:driver users via OneSignal" });
+                try {
+                  const { data, error } = await supabase.functions.invoke('test-driver-push');
+                  if (error) throw error;
+                  const result = data as { success: boolean; recipients: number; onesignal_id: string | null; errors: any };
+                  if (result.success) {
+                    toast({ title: "✅ Push Sent!", description: `Delivered to ${result.recipients} driver device(s). ID: ${result.onesignal_id?.slice(0, 8) ?? 'n/a'}` });
+                  } else {
+                    toast({ title: "⚠️ OneSignal Error", description: JSON.stringify(result.errors || 'Unknown error'), variant: "destructive" });
+                  }
+                } catch (err: any) {
+                  toast({ title: "❌ Failed", description: err.message || 'Network error', variant: "destructive" });
+                }
+              }}
+            >
+              🧪 Test Push → All Drivers
+            </Button>
           </div>
         </motion.div>
 
