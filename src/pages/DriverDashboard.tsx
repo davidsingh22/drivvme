@@ -895,71 +895,40 @@ const DriverDashboard = () => {
   return (
     <div className="min-h-screen bg-background">
 
-      {/* TEMPORARY: Force Notifications button for iOS debugging */}
-      <div className="w-full p-3 bg-destructive/10 border-b border-destructive/30">
-        <Button
-          variant="destructive"
-          className="w-full text-lg py-6 font-bold"
-          onClick={async () => {
-            const median = (window as any).median;
-            if (typeof median !== 'undefined' && median?.onesignal) {
-              console.log('[FORCE-NOTIF] Calling median.onesignal.register()...');
-              await median.onesignal.register();
-              await new Promise(r => setTimeout(r, 1000));
-              const info = median.onesignal.info ? await median.onesignal.info() : null;
-              console.log('[FORCE-NOTIF] median.onesignal.info() =', JSON.stringify(info));
-              window.alert(
-                'If you do not see an Apple popup, go to Settings > Notifications > Drivveme and turn it on manually.'
-              );
-            } else {
-              // Web fallback
-              try {
-                await OneSignal.Notifications.requestPermission();
-              } catch (err) {
-                console.error('[FORCE-NOTIF] web error', err);
-              }
-              window.alert(
-                'If you do not see a browser popup, check your browser notification settings.'
-              );
-            }
-          }}
-        >
-          🔴 FORCE NOTIFICATIONS
-        </Button>
-      </div>
-
-      <DriverBeepFix
-        incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
-        onTimeout={() => {
-          setNewRideAlertOpen(false);
-          setCachedAlertRide(null);
-          setNewRideAlertRideId(null);
-          alertStartTimeRef.current = null;
-        }}
-        timeoutSeconds={25}
-      />
-
-      <RideOfferModal
-        open={newRideAlertOpen}
-        ride={alertRide}
-        countdownSeconds={20}
-        driverLocation={driverLocation}
-        onDecline={() => {
-          setNewRideAlertOpen(false);
-          setCachedAlertRide(null);
-          setNewRideAlertRideId(null);
-          alertStartTimeRef.current = null;
-        }}
-        onAccept={() => {
-          // Use cached ride data for acceptance (persists even if ride was removed from availableRides)
-          if (cachedAlertRide) {
-            acceptRide(cachedAlertRide);
-          }
-        }}
-      />
       <Navbar />
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
+        {/* TEMPORARY: Force Notifications button for iOS debugging */}
+        <div className="w-full p-3 bg-destructive border-b border-destructive/30 absolute top-16 left-0 right-0 z-50">
+          <Button
+            variant="destructive"
+            className="w-full text-lg py-6 font-bold bg-red-600 hover:bg-red-700 text-white"
+            onClick={async () => {
+              const median = (window as any).median;
+              if (typeof median !== 'undefined' && median?.onesignal) {
+                console.log('[FORCE-NOTIF] Calling median.onesignal.register()...');
+                await median.onesignal.register();
+                await new Promise(r => setTimeout(r, 1000));
+                const info = median.onesignal.info ? await median.onesignal.info() : null;
+                console.log('[FORCE-NOTIF] median.onesignal.info() =', JSON.stringify(info));
+                window.alert(
+                  'If you do not see an Apple popup, go to Settings > Notifications > Drivveme and turn it on manually.'
+                );
+              } else {
+                try {
+                  await OneSignal.Notifications.requestPermission();
+                } catch (err) {
+                  console.error('[FORCE-NOTIF] web error', err);
+                }
+                window.alert(
+                  'If you do not see a browser popup, check your browser notification settings.'
+                );
+              }
+            }}
+          >
+            🔴 FORCE NOTIFICATIONS
+          </Button>
+        </div>
         {/* Map - takes 65% on mobile, flex-[2] on desktop */}
         <div className="flex-[2] min-h-[60vh] lg:min-h-0 relative">
           <MapComponent
