@@ -417,6 +417,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setTimeout(() => {
             (async () => {
               try {
+                const median = (window as any).median;
+                console.log('NATIVE_BRIDGE_TEST: checking median...', typeof median);
+                window.alert('Bridge Status: ' + (typeof median !== 'undefined'));
                 const os = (window as any).OneSignalDeferred || (window as any).OneSignal;
                 if (!os) {
                   // Fallback to react-onesignal SDK
