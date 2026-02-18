@@ -975,8 +975,9 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // Safety timeout — if ride creation takes >30s, stop spinner and let user retry
+    // Safety timeout — 12s max for ride creation
     const safetyTimeout = window.setTimeout(() => {
+      console.error('[Payment] Safety timeout fired — ride creation took >12s');
       setIsSubmitting(false);
       toast({
         title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
@@ -984,93 +985,103 @@ const RideBooking = () => {
         variant: 'destructive'
       });
       setStep('estimate');
-    }, 30000);
+    }, 12000);
 
-    // Create the ride in the background as fast as possible.
-    // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
-    (async () => {
-      try {
-        const {
-          data: {
-            session
-          }
-        } = await supabase.auth.getSession();
-        if (!session) {
-          toast({
-            title: 'Session expired',
-            description: 'Please sign in again to continue.',
-            variant: 'destructive'
-          });
-          setStep('estimate');
-          navigate('/login');
-          return;
+    try {
+      console.log('[Payment] Starting ride creation...');
+      const {
+        data: {
+          session
         }
-
-        // Test accounts create ride directly with 'searching' status
-        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-        const {
-          data: ride,
-          error: rideErr
-        } = await supabase.from('rides').insert({
-          rider_id: user.id,
-          pickup_address: pickup.address,
-          pickup_lat: pickup.lat,
-          pickup_lng: pickup.lng,
-          dropoff_address: dropoff.address,
-          dropoff_lat: dropoff.lat,
-          dropoff_lng: dropoff.lng,
-          distance_km: distanceKm,
-          estimated_duration_minutes: Math.round(durationMinutes),
-          estimated_fare: fareEstimate.total,
-          promo_discount: fareEstimate.promoDiscount,
-          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-          gst_amount: fareEstimate.gstAmount,
-          qst_amount: fareEstimate.qstAmount,
-          platform_fee: fareEstimate.platformFee,
-          status: rideStatus
-        }).select('*').single();
-        if (rideErr || !ride?.id) {
-          console.error('Ride insert error:', rideErr);
-          throw new Error(rideErr?.message || 'Ride creation failed');
-        }
-
-        // Optional rider notification (non-blocking)
-        void supabase.from('notifications').insert({
-          user_id: user.id,
-          ride_id: ride.id,
-          type: 'ride_booked',
-          title: skipPayment ? 'Test ride created' : 'Payment required',
-          message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
-        });
-        setCurrentRide(ride);
-        updateRide(ride);
-
-        // Test accounts go directly to searching (escalation hook will handle notifications)
-        if (skipPayment) {
-          // Increment free rides counter for limited test accounts
-          if (!isUnlimited && freeRidesLeft > 0 && user.email) {
-            incrementFreeRidesUsed(user.email);
-          }
-          setStep('searching');
-          const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
-          toast({
-            title: 'Test mode',
-            description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
-          });
-        }
-      } catch (err: any) {
-        console.error('Error creating ride:', err);
+      } = await supabase.auth.getSession();
+      if (!session) {
+        window.clearTimeout(safetyTimeout);
+        setIsSubmitting(false);
         toast({
-          title: 'Error booking ride',
-          description: err.message,
+          title: 'Session expired',
+          description: 'Please sign in again to continue.',
           variant: 'destructive'
         });
         setStep('estimate');
-      } finally {
-        window.clearTimeout(safetyTimeout);
-        setIsSubmitting(false);
+        navigate('/login');
+        return;
       }
-    })();
+
+      console.log('[Payment] Session OK, inserting ride...');
+      const rideStatus = skipPayment ? 'searching' : 'pending_payment';
+      const {
+        data: ride,
+        error: rideErr
+      } = await supabase.from('rides').insert({
+        rider_id: user.id,
+        pickup_address: pickup.address,
+        pickup_lat: pickup.lat,
+        pickup_lng: pickup.lng,
+        dropoff_address: dropoff.address,
+        dropoff_lat: dropoff.lat,
+        dropoff_lng: dropoff.lng,
+        distance_km: distanceKm,
+        estimated_duration_minutes: Math.round(durationMinutes),
+        estimated_fare: fareEstimate.total,
+        promo_discount: fareEstimate.promoDiscount,
+        subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+        gst_amount: fareEstimate.gstAmount,
+        qst_amount: fareEstimate.qstAmount,
+        platform_fee: fareEstimate.platformFee,
+        status: rideStatus
+      }).select('*').single();
+
+      window.clearTimeout(safetyTimeout);
+
+      if (rideErr || !ride?.id) {
+        console.error('[Payment] Ride insert FAILED:', rideErr);
+        setIsSubmitting(false);
+        toast({
+          title: 'Error booking ride',
+          description: rideErr?.message || 'Ride creation failed. Please try again.',
+          variant: 'destructive'
+        });
+        setStep('estimate');
+        return;
+      }
+
+      console.log('[Payment] Ride created:', ride.id, 'status:', ride.status);
+
+      // Optional rider notification (non-blocking)
+      void supabase.from('notifications').insert({
+        user_id: user.id,
+        ride_id: ride.id,
+        type: 'ride_booked',
+        title: skipPayment ? 'Test ride created' : 'Payment required',
+        message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
+      });
+      setCurrentRide(ride);
+      updateRide(ride);
+      setIsSubmitting(false);
+
+      // Test accounts go directly to searching
+      if (skipPayment) {
+        if (!isUnlimited && freeRidesLeft > 0 && user.email) {
+          incrementFreeRidesUsed(user.email);
+        }
+        setStep('searching');
+        const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
+        toast({
+          title: 'Test mode',
+          description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
+        });
+      }
+    } catch (err: any) {
+      window.clearTimeout(safetyTimeout);
+      console.error('[Payment] Error creating ride:', err);
+      setIsSubmitting(false);
+      toast({
+        title: 'Error booking ride',
+        description: err.message || 'Something went wrong. Please try again.',
+        variant: 'destructive'
+      });
+      setStep('estimate');
+    }
   };
   const handlePaymentSuccess = async () => {
     // Payment succeeded – transition ride status to searching so drivers can see it
