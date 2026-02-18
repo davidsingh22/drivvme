@@ -898,35 +898,6 @@ const DriverDashboard = () => {
 
       <Navbar />
 
-      {/* Activate Driver Alerts button */}
-      <div className="fixed top-16 left-0 right-0 z-[9999] p-3 bg-primary/90 backdrop-blur-sm">
-        <Button
-          className="w-full text-lg py-6 font-bold"
-          onClick={async () => {
-            toast({ title: "📲 Activating...", description: "Requesting notification permission..." });
-            const median = (window as any).median;
-            if (typeof median !== 'undefined' && median?.onesignal) {
-              console.log('[ACTIVATE-ALERTS] Calling median.onesignal.register()...');
-              try { await median.onesignal.register(); } catch (e) { console.warn('[ACTIVATE-ALERTS] register error', e); }
-              await new Promise(r => setTimeout(r, 1500));
-              let info: any = null;
-              try { info = median.onesignal.info ? await median.onesignal.info() : null; } catch (e) { console.warn(e); }
-              console.log('[ACTIVATE-ALERTS] info =', JSON.stringify(info));
-              const optedIn = info?.subscription?.optedIn === true;
-              if (optedIn) {
-                toast({ title: "✅ Notifications Active!", description: "You will now receive ride alerts." });
-              } else {
-                setShowNotifSettingsModal(true);
-              }
-            } else {
-              try { await OneSignal.Notifications.requestPermission(); } catch (err) { console.error('[ACTIVATE-ALERTS] web error', err); }
-              toast({ title: "📲 Check Settings", description: "If no browser popup appeared, check your browser notification settings." });
-            }
-          }}
-        >
-          🚀 Activate Driver Alerts
-        </Button>
-      </div>
 
       {/* iOS Settings Modal */}
       {showNotifSettingsModal && (
@@ -1138,69 +1109,6 @@ const DriverDashboard = () => {
               </div>
             </Card>
 
-            {/* Enable Driver Alerts — double-register + permission check */}
-            <Button
-              variant="destructive"
-              className="w-full mb-3 text-lg py-6 font-bold"
-              onClick={async () => {
-                const median = (window as any).median;
-                if (typeof median !== 'undefined' && median?.onesignal) {
-                  try {
-                    // First register call
-                    console.log('[DriverAlerts] register() call #1');
-                    await median.onesignal.register();
-                    // 1-second delay
-                    await new Promise(r => setTimeout(r, 1000));
-                    // Second register call
-                    console.log('[DriverAlerts] register() call #2');
-                    await median.onesignal.register();
-                    // Wait 3 seconds then check permission
-                    await new Promise(r => setTimeout(r, 3000));
-                    const info = median.onesignal.info ? await median.onesignal.info() : null;
-                    const perm = info?.permission;
-                    const hasId = info && Object.keys(info).length > 0;
-
-                    if (perm === true || perm === 'granted' || perm === 1) {
-                      // Permission granted — proceed with identity + tag
-                      if (user?.id) {
-                        await median.onesignal.login(user.id);
-                        const osObj = (window as any).OneSignal;
-                        if (osObj?.User?.addTag) {
-                          await osObj.User.addTag('role', 'driver');
-                        }
-                      }
-                      const playerId = info?.oneSignalId || info?.playerId || info?.userId || 'none';
-                      window.alert(`✅ Alerts enabled!\nPlayer ID: ${playerId}`);
-                    } else if (hasId) {
-                      // Bridge responded but permission not granted
-                      window.alert(
-                        '⚠️ Please go to iPhone Settings > Notifications > Drivveme and toggle "Allow Notifications" ON manually.'
-                      );
-                    } else {
-                      // Bridge returned empty
-                      window.alert(
-                        '⚠️ Please go to iPhone Settings > Notifications > Drivveme and toggle "Allow Notifications" ON manually.'
-                      );
-                    }
-                  } catch (err) {
-                    window.alert('❌ Error: ' + String(err));
-                  }
-                } else {
-                  // Web fallback
-                  try {
-                    await OneSignal.Notifications.requestPermission();
-                    if (user?.id) {
-                      await OneSignal.User.addTag('role', 'driver');
-                    }
-                    toast({ title: language === 'fr' ? 'Alertes activées' : 'Alerts enabled' });
-                  } catch (err) {
-                    window.alert('Error: ' + String(err));
-                  }
-                }
-              }}
-            >
-              🔴 {language === 'fr' ? 'Activer les alertes chauffeur' : 'Enable Driver Alerts'}
-            </Button>
 
             {/* Push Notifications (critical for new ride alerts when app is backgrounded) */}
             {!pushSubscribed && (
