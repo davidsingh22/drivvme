@@ -196,25 +196,23 @@ async function getAccessToken(): Promise<string> {
 }
 
 // Send OneSignal notification to all drivers via tag filter
-async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string): Promise<{ success: boolean; error?: string }> {
+async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string): Promise<{ success: boolean; error?: string; onesignal_id?: string | null; recipients?: number }> {
   const apiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
   if (!apiKey) {
     console.error("ONESIGNAL_REST_API_KEY not configured");
-    return { success: false, error: "Missing OneSignal API key" };
+    return { success: false, error: "Missing OneSignal API key", onesignal_id: null };
   }
 
-  // Use ONESIGNAL_APP_ID env var, fall back to hardcoded value
-  const appId = Deno.env.get("ONESIGNAL_APP_ID") || "5a6c4131-8faa-4969-b5c4-5a09033c8e2a";
-  console.log("[notify-drivers-new-ride] Using OneSignal app_id:", appId);
+  // Hardcoded app_id — same one that works in test-driver-push
+  const appId = "5a6c4131-8faa-4969-b5c4-5a09033c8e2a";
+  console.log("[notify-drivers-new-ride] Using hardcoded OneSignal app_id:", appId);
 
-  const payload: Record<string, unknown> = {
+  // Hardcoded tag filter only — NO included_segments (they conflict with filters)
+  const payload = {
     app_id: appId,
-    // Broadcast to ALL subscribed users with role=driver tag
-    included_segments: ["All"],
     filters: [
       { field: "tag", key: "role", relation: "=", value: "driver" },
     ],
-    // Force banners even when app is in foreground
     foreground_notification_presentation_option: ["badge", "sound", "alert"],
     headings: { en: "New Ride Request Nearby! 🚗" },
     contents: { en: "A new ride request is available near you. Tap to view details!" },
@@ -227,29 +225,37 @@ async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string):
     mutable_content: true,
   };
 
+  console.log("[notify-drivers-new-ride] OneSignal payload:", JSON.stringify(payload));
+
   try {
     const res = await fetch("https://onesignal.com/api/v1/notifications", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": "application/json; charset=utf-8",
         Authorization: `Basic ${apiKey}`,
       },
       body: JSON.stringify(payload),
     });
 
     const result = await res.json();
-    console.log("OneSignal driver alert result:", JSON.stringify(result));
+    console.log("[notify-drivers-new-ride] OneSignal status:", res.status, "response:", JSON.stringify(result));
+    console.log("[notify-drivers-new-ride] Matched devices (recipients):", result?.recipients ?? "N/A");
 
-    if (!res.ok) {
-      return { success: false, error: result?.errors?.[0] || `HTTP ${res.status}`, onesignal_id: null };
+    if (!res.ok || result?.errors?.length) {
+      const errorMsg = result?.errors?.join(", ") || `HTTP ${res.status}`;
+      console.error("[notify-drivers-new-ride] OneSignal ERROR:", errorMsg);
+      return { success: false, error: errorMsg, onesignal_id: null, recipients: 0 };
     }
-    const onesignalId = result?.id || null;
-    console.log("[notify-drivers-new-ride] OneSignal notification ID:", onesignalId, "recipients:", result?.recipients);
-    return { success: true, onesignal_id: onesignalId, recipients: result?.recipients || 0 };
+
+    return { 
+      success: true, 
+      onesignal_id: result?.id || null, 
+      recipients: result?.recipients || 0 
+    };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error("OneSignal driver alert failed:", msg);
-    return { success: false, error: msg };
+    console.error("[notify-drivers-new-ride] OneSignal fetch failed:", msg);
+    return { success: false, error: msg, onesignal_id: null };
   }
 }
 
