@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Camera, Loader2, User } from 'lucide-react';
+import ProfileDebugInfo from '@/components/ProfileDebugInfo';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -122,8 +123,7 @@ const RiderProfileModal = ({ open, onOpenChange }: RiderProfileModalProps) => {
 
       if (profileError) throw profileError;
 
-      // Refresh in background with timeout — don't block the modal close
-      Promise.race([refreshProfile(), new Promise(r => setTimeout(r, 3000))]);
+      await refreshProfile();
 
       toast({
         title: 'Profile updated',
@@ -217,6 +217,9 @@ const RiderProfileModal = ({ open, onOpenChange }: RiderProfileModalProps) => {
             </div>
           </div>
         </div>
+
+        {/* Quick Debug IDs */}
+        <ProfileDebugInfo userId={user?.id} />
 
         <div className="flex gap-3">
           <Button

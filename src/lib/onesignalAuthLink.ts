@@ -43,22 +43,6 @@ export function initOneSignalAuthLink() {
           await OneSignal.logout();
           console.log("✅ OneSignal logged out");
         }
-
-        // Register notification click handler (web SDK)
-        try {
-          if (OneSignal.Notifications?.addEventListener) {
-            OneSignal.Notifications.addEventListener("click", (event: any) => {
-              const data = event?.notification?.additionalData || event?.result?.notification?.additionalData || {};
-              console.log("🔔 OneSignal notification clicked, data:", data);
-              if (data.ride_id) {
-                window.location.href = "/ride";
-              }
-            });
-            console.log("✅ OneSignal notification click handler registered");
-          }
-        } catch (e) {
-          console.log("OneSignal click handler registration failed (non-fatal):", e);
-        }
       })
       .catch((e) => {
         console.log("❌ OneSignal External ID error:", (e as any)?.message || e);

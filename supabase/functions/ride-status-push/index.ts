@@ -17,31 +17,16 @@ interface RidePayload {
   driver_id: string | null;
 }
 
-async function getDriverFirstName(driverId: string): Promise<string> {
-  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const supabase = createClient(supabaseUrl, serviceRoleKey);
-
-  const { data } = await supabase
-    .from("profiles")
-    .select("first_name")
-    .eq("user_id", driverId)
-    .single();
-
-  return data?.first_name || "Your driver";
-}
-
-function getNotificationConfig(payload: RidePayload, driverName?: string) {
+function getNotificationConfig(payload: RidePayload) {
   const { new_status, rider_id, driver_id } = payload;
-  const name = driverName || "Your driver";
 
   switch (new_status) {
     case "driver_assigned":
-      return { targetUserId: rider_id, title: `${name} Is On The Way 🚗`, message: `${name} has accepted your ride and is heading to pick you up!` };
+      return { targetUserId: rider_id, title: "Driver Assigned 🚗", message: "A driver has been assigned to your ride!" };
     case "driver_en_route":
-      return { targetUserId: rider_id, title: `${name} Is On The Way 🚗`, message: `${name} is on the way to pick you up.` };
+      return { targetUserId: rider_id, title: "Driver On The Way 🚗", message: "Your driver is on the way to pick you up." };
     case "arrived":
-      return { targetUserId: rider_id, title: `${name} Has Arrived 📍`, message: `${name} has arrived! Please meet them at the pickup location.` };
+      return { targetUserId: rider_id, title: "Driver Has Arrived 📍", message: "Your driver is here! Head to the pickup point." };
     case "in_progress":
       return { targetUserId: rider_id, title: "Ride Started 🛣️", message: "Your ride has started. Enjoy the trip!" };
     case "completed":
@@ -80,19 +65,31 @@ async function sendPush(
   const restApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
   if (!restApiKey) throw new Error("ONESIGNAL_REST_API_KEY not configured");
 
-  console.log("[ride-status-push] target external user id:", targetUserId);
+  console.log("[ride-status-push] target user id:", targetUserId);
+
+  // Try player ID first (most reliable for native iOS)
+  const playerId = await getPlayerIdFromProfiles(targetUserId);
+  console.log("[ride-status-push] onesignal_player_id", playerId ? `found: ${playerId}` : "missing");
 
   const osPayload: Record<string, unknown> = {
     app_id: ONESIGNAL_APP_ID,
-    include_external_user_ids: [targetUserId],
-    headings: { en: String(title) },
-    contents: { en: String(message) },
-    priority: 10,
+    headings: { en: title },
+    contents: { en: message },
     content_available: true,
-    mutable_content: true,
     ios_sound: "default",
+    priority: 10,
     data,
   };
+
+  if (playerId) {
+    osPayload.include_player_ids = [playerId];
+  } else {
+    // Fallback: target via uid tag (set by client-side useOneSignalPlayerSync)
+    osPayload.filters = [
+      { field: "tag", key: "uid", relation: "=", value: targetUserId },
+    ];
+    console.log("[ride-status-push] Using tag-based targeting for uid:", targetUserId);
+  }
 
   const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
     method: "POST",
@@ -110,27 +107,15 @@ async function sendPush(
 }
 
 serve(async (req) => {
-  console.log("Function ride-status-push was called!");
-  console.log("[ride-status-push] method:", req.method, "url:", req.url);
-
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const rawBody = await req.text();
-    console.log("[ride-status-push] Raw body:", rawBody);
-    const payload: RidePayload = JSON.parse(rawBody);
-    console.log("[ride-status-push] Parsed payload:", JSON.stringify(payload));
+    const payload: RidePayload = await req.json();
+    console.log("[ride-status-push] Received payload:", JSON.stringify(payload));
 
-    // Fetch driver name for personalized notifications
-    let driverName: string | undefined;
-    if (["driver_assigned", "driver_en_route", "arrived"].includes(payload.new_status) && payload.driver_id) {
-      driverName = await getDriverFirstName(payload.driver_id);
-      console.log("[ride-status-push] Driver name:", driverName);
-    }
-
-    const config = getNotificationConfig(payload, driverName);
+    const config = getNotificationConfig(payload);
     if (!config || !config.targetUserId) {
       console.log("[ride-status-push] No notification needed for status:", payload.new_status);
       return new Response(JSON.stringify({ skipped: true }), {

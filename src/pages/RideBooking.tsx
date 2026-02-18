@@ -141,7 +141,7 @@ const RideBooking = () => {
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const {
@@ -324,12 +324,7 @@ const RideBooking = () => {
     return null;
   }, [mapboxToken, language]);
 
-  // Persist last known route for session restoration
-  useEffect(() => {
-    try { localStorage.setItem('last_route', '/ride'); } catch {}
-  }, []);
-
-  // Auto-detect GPS location on mount — Uber-style: silent, fast, no prompts
+  // Auto-detect GPS location on mount and set as default pickup
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
     if (!navigator.geolocation) {
@@ -337,67 +332,75 @@ const RideBooking = () => {
       return;
     }
     hasAutoDetectedLocation.current = true;
-
-    // Set "Current Location" placeholder immediately — never block the UI
-    const currentLocLabel = language === 'fr' ? 'Position actuelle' : 'Current Location';
-    setPickupAddress(currentLocLabel);
-
-    // Check permission silently first (Permissions API)
-    const checkAndTrack = async () => {
-      try {
-        const perm = await navigator.permissions?.query({ name: 'geolocation' });
-        if (perm && perm.state === 'denied') {
-          // Permission denied — keep "Current Location" label, user can edit
-          return;
-        }
-      } catch {
-        // Permissions API not supported — proceed with geolocation call
+    let retryCount = 0;
+    const maxRetries = 3;
+    const attemptReverseGeocode = async (lat: number, lng: number) => {
+      const address = await reverseGeocode(lat, lng);
+      if (address) {
+        setPickupAddress(address);
+        setPickup({
+          address,
+          lat,
+          lng
+        });
+        setIsDetectingLocation(false);
+        return;
       }
 
-      let retryCount = 0;
-      const maxRetries = 3;
-      const attemptReverseGeocode = async (lat: number, lng: number) => {
-        const address = await reverseGeocode(lat, lng);
-        if (address) {
-          setPickupAddress(address);
-          setPickup(prev => prev ? { ...prev, address } : { address, lat, lng });
-          return;
-        }
-        if (retryCount < maxRetries && mapboxToken) {
-          retryCount++;
-          setTimeout(() => attemptReverseGeocode(lat, lng), 800);
-          return;
-        }
-        const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-        setPickupAddress(coordAddress);
-        setPickup(prev => prev ? { ...prev, address: coordAddress } : { address: coordAddress, lat, lng });
-      };
+      // Retry if geocoding failed and we have retries left
+      if (retryCount < maxRetries && mapboxToken) {
+        retryCount++;
+        console.log(`[RideBooking] Reverse geocode retry ${retryCount}/${maxRetries}`);
+        setTimeout(() => attemptReverseGeocode(lat, lng), 1000);
+        return;
+      }
 
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-
-          // Store coords immediately — map centers instantly, keep label as-is
-          setPickup(prev => prev ? { ...prev, lat, lng } : { address: currentLocLabel, lat, lng });
-
-          if (!mapboxToken) return;
-          await attemptReverseGeocode(lat, lng);
-        },
-        () => {
-          // Silent failure — user keeps "Current Location" and can type manually
-        },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 120000 }
-      );
+      // Final fallback: use coordinates as readable address
+      const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      setPickupAddress(coordAddress);
+      setPickup({
+        address: coordAddress,
+        lat,
+        lng
+      });
+      setIsDetectingLocation(false);
     };
+    navigator.geolocation.getCurrentPosition(async position => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
 
-    checkAndTrack();
+      // Always store coords immediately so pickup is never null
+      const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
+      setPickup({
+        address: tempAddress,
+        lat,
+        lng
+      });
+      setPickupAddress(tempAddress);
+
+      // Wait for mapboxToken if not available yet - effect below will resolve
+      if (!mapboxToken) return;
+      await attemptReverseGeocode(lat, lng);
+    }, error => {
+      console.log('[RideBooking] GPS auto-detect failed:', error.message);
+      setIsDetectingLocation(false);
+    }, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000
+    });
+
+    // Safety timeout: never show detecting overlay for more than 6 seconds
+    const safetyTimer = setTimeout(() => {
+      setIsDetectingLocation(false);
+    }, 6000);
+    return () => clearTimeout(safetyTimer);
   }, [mapboxToken, language, reverseGeocode]);
 
   // Effect to resolve address when pickup has coords but generic address
   useEffect(() => {
-    if (!pickup || !mapboxToken || !pickup.lat) return;
-    const genericLabels = ['Detecting...', 'Détection...', 'Current Location', 'Current location', 'Position actuelle'];
+    if (!pickup || !mapboxToken) return;
+    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle'];
     const isGeneric = genericLabels.includes(pickupAddress) || pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
     if (isGeneric) {
       reverseGeocode(pickup.lat, pickup.lng).then(address => {
@@ -407,6 +410,7 @@ const RideBooking = () => {
             ...prev,
             address
           } : null);
+          setIsDetectingLocation(false);
         }
       });
     }
@@ -443,9 +447,7 @@ const RideBooking = () => {
       }
 
       // If ride is pending_payment or searching without a succeeded payment, show payment
-      // Test accounts bypass payment entirely
-      const isTestRestore = (user?.email && TEST_ACCOUNTS.includes(user.email.toLowerCase())) || (user?.email ? getRemainingFreeRides(user.email) > 0 : false);
-      if (!isTestRestore && (activeRide.status === 'pending_payment' || activeRide.status === 'searching')) {
+      if (activeRide.status === 'pending_payment' || activeRide.status === 'searching') {
         const {
           data: payment
         } = await supabase.from('payments').select('status').eq('ride_id', activeRide.id).maybeSingle();
@@ -842,78 +844,27 @@ const RideBooking = () => {
         address,
         ...location
       });
-      // Auto-calculate estimate when destination is selected (Uber-style: skip "Get Estimate")
-      if (pickup) {
-        // Small delay to let state settle, then auto-calculate
-        setTimeout(() => {
-          calculateRouteAuto({ address, ...location });
-        }, 100);
-      }
     }
   };
-
-  // Auto-calculate route without relying on dropoff state (passes location directly)
-  const calculateRouteAuto = useCallback(async (dropoffLoc: Location) => {
-    if (!pickup) return;
-    try {
-      let estimatedDistance = 0;
-      let estimatedDuration = 0;
-      if (mapboxToken) {
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoffLoc.lng},${dropoffLoc.lat}?overview=false&alternatives=false&access_token=${mapboxToken}`;
-        const res = await fetch(url);
-        const data = await res.json();
-        const route = data?.routes?.[0];
-        if (!route?.distance || !route?.duration) throw new Error('No route returned');
-        estimatedDistance = route.distance / 1000;
-        estimatedDuration = route.duration / 60;
-      } else {
-        const R = 6371;
-        const dLat = (dropoffLoc.lat - pickup.lat) * Math.PI / 180;
-        const dLon = (dropoffLoc.lng - pickup.lng) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(pickup.lat * Math.PI / 180) * Math.cos(dropoffLoc.lat * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const straightLineDistance = R * c;
-        estimatedDistance = straightLineDistance * 1.4;
-        estimatedDuration = estimatedDistance / 30 * 60;
-      }
-      setDistanceKm(estimatedDistance);
-      setDurationMinutes(estimatedDuration);
-      const estimate = calculateFare(estimatedDistance, estimatedDuration);
-      setFareEstimate(estimate);
-      setStep('estimate');
-    } catch (error) {
-      toast({
-        title: 'Route error',
-        description: 'Unable to calculate route',
-        variant: 'destructive'
-      });
-    }
-  }, [pickup, toast, mapboxToken]);
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return;
-    const currentLocLabel = language === 'fr' ? 'Position actuelle' : 'Current Location';
-    setPickupAddress(currentLocLabel);
-    navigator.geolocation.getCurrentPosition(async (position) => {
+    navigator.geolocation.getCurrentPosition(position => {
       const lat = position.coords.latitude;
       const lng = position.coords.longitude;
-      setPickup({ address: currentLocLabel, lat, lng });
-      // Reverse geocode to get real address
-      const address = await reverseGeocode(lat, lng);
-      if (address) {
-        setPickupAddress(address);
-        setPickup({ address, lat, lng });
-      } else {
-        const fallback = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-        setPickupAddress(fallback);
-        setPickup({ address: fallback, lat, lng });
-      }
+      const fallbackAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      setPickupAddress(fallbackAddress);
+      setPickup({
+        address: fallbackAddress,
+        lat,
+        lng
+      });
     }, () => {
       toast({
         title: 'Location error',
         description: 'Unable to get your current location',
         variant: 'destructive'
       });
-    }, { enableHighAccuracy: true, timeout: 5000, maximumAge: 120000 });
+    });
   };
   const calculateRoute = useCallback(async () => {
     if (!pickup || !dropoff) return;
@@ -983,113 +934,90 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // Safety timeout — 20s max for ride creation (mobile networks can be slow)
-    const safetyTimeout = window.setTimeout(() => {
-      console.error('[Payment] Safety timeout fired — ride creation took >20s');
-      setIsSubmitting(false);
-      toast({
-        title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
-        description: language === 'fr' ? 'Connexion lente. Veuillez réessayer.' : 'Slow connection. Please try again.',
-        variant: 'destructive'
-      });
-      setStep('estimate');
-    }, 20000);
-
-    try {
-      console.log('[Payment] Starting ride creation...');
-      const {
-        data: {
-          session
+    // Create the ride in the background as fast as possible.
+    // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
+    (async () => {
+      try {
+        const {
+          data: {
+            session
+          }
+        } = await supabase.auth.getSession();
+        if (!session) {
+          toast({
+            title: 'Session expired',
+            description: 'Please sign in again to continue.',
+            variant: 'destructive'
+          });
+          setStep('estimate');
+          navigate('/login');
+          return;
         }
-      } = await supabase.auth.getSession();
-      if (!session) {
-        window.clearTimeout(safetyTimeout);
-        setIsSubmitting(false);
-        toast({
-          title: 'Session expired',
-          description: 'Please sign in again to continue.',
-          variant: 'destructive'
+
+        // Test accounts create ride directly with 'searching' status
+        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
+        const {
+          data: ride,
+          error: rideErr
+        } = await supabase.from('rides').insert({
+          rider_id: user.id,
+          pickup_address: pickup.address,
+          pickup_lat: pickup.lat,
+          pickup_lng: pickup.lng,
+          dropoff_address: dropoff.address,
+          dropoff_lat: dropoff.lat,
+          dropoff_lng: dropoff.lng,
+          distance_km: distanceKm,
+          estimated_duration_minutes: Math.round(durationMinutes),
+          estimated_fare: fareEstimate.total,
+          promo_discount: fareEstimate.promoDiscount,
+          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+          gst_amount: fareEstimate.gstAmount,
+          qst_amount: fareEstimate.qstAmount,
+          platform_fee: fareEstimate.platformFee,
+          status: rideStatus
+        }).select('*').single();
+        if (rideErr || !ride?.id) {
+          console.error('Ride insert error:', rideErr);
+          throw new Error(rideErr?.message || 'Ride creation failed');
+        }
+
+        // Optional rider notification (non-blocking)
+        void supabase.from('notifications').insert({
+          user_id: user.id,
+          ride_id: ride.id,
+          type: 'ride_booked',
+          title: skipPayment ? 'Test ride created' : 'Payment required',
+          message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
         });
-        setStep('estimate');
-        navigate('/login');
-        return;
-      }
+        setCurrentRide(ride);
+        updateRide(ride);
 
-      console.log('[Payment] Session OK, inserting ride...');
-      const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-      const {
-        data: ride,
-        error: rideErr
-      } = await supabase.from('rides').insert({
-        rider_id: user.id,
-        pickup_address: pickup.address,
-        pickup_lat: pickup.lat,
-        pickup_lng: pickup.lng,
-        dropoff_address: dropoff.address,
-        dropoff_lat: dropoff.lat,
-        dropoff_lng: dropoff.lng,
-        distance_km: distanceKm,
-        estimated_duration_minutes: Math.round(durationMinutes),
-        estimated_fare: fareEstimate.total,
-        promo_discount: fareEstimate.promoDiscount,
-        subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-        gst_amount: fareEstimate.gstAmount,
-        qst_amount: fareEstimate.qstAmount,
-        platform_fee: fareEstimate.platformFee,
-        status: rideStatus
-      }).select('*').single();
-
-      window.clearTimeout(safetyTimeout);
-
-      if (rideErr || !ride?.id) {
-        console.error('[Payment] Ride insert FAILED:', rideErr);
-        setIsSubmitting(false);
+        // Test accounts go directly to searching (escalation hook will handle notifications)
+        if (skipPayment) {
+          // Increment free rides counter for limited test accounts
+          if (!isUnlimited && freeRidesLeft > 0 && user.email) {
+            incrementFreeRidesUsed(user.email);
+          }
+          setStep('searching');
+          const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
+          toast({
+            title: 'Test mode',
+            description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
+          });
+        }
+      } catch (err: any) {
+        console.error('Error creating ride:', err);
         toast({
           title: 'Error booking ride',
-          description: rideErr?.message || 'Ride creation failed. Please try again.',
+          description: err.message,
           variant: 'destructive'
         });
         setStep('estimate');
-        return;
+      } finally {
+        setIsSubmitting(false);
       }
-
-      console.log('[Payment] Ride created:', ride.id, 'status:', ride.status);
-
-      // Optional rider notification (non-blocking)
-      void supabase.from('notifications').insert({
-        user_id: user.id,
-        ride_id: ride.id,
-        type: 'ride_booked',
-        title: skipPayment ? 'Test ride created' : 'Payment required',
-        message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
-      });
-      setCurrentRide(ride);
-      updateRide(ride);
-      setIsSubmitting(false);
-
-      // Test accounts go directly to searching
-      if (skipPayment) {
-        if (!isUnlimited && freeRidesLeft > 0 && user.email) {
-          incrementFreeRidesUsed(user.email);
-        }
-        setStep('searching');
-        const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
-        toast({
-          title: 'Test mode',
-          description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
-        });
-      }
-    } catch (err: any) {
-      window.clearTimeout(safetyTimeout);
-      console.error('[Payment] Error creating ride:', err);
-      setIsSubmitting(false);
-      toast({
-        title: 'Error booking ride',
-        description: err.message || 'Something went wrong. Please try again.',
-        variant: 'destructive'
-      });
-      setStep('estimate');
-    }
+    })();
   };
   const handlePaymentSuccess = async () => {
     // Payment succeeded – transition ride status to searching so drivers can see it
@@ -1105,9 +1033,9 @@ const RideBooking = () => {
       }
     }
     setStep('searching');
-
     toast({
-      title: language === 'fr' ? '🔍 Recherche de chauffeurs...' : '🔍 Searching for nearby drivers...',
+      title: t('booking.searching'),
+      description: 'Payment confirmed! Finding nearby drivers...'
     });
   };
   const handlePaymentCancel = async () => {
@@ -1335,8 +1263,8 @@ const RideBooking = () => {
 
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
   if (step === 'input') {
-    // Extract short address for display — show "Current Location" instantly, real address when resolved
-    const displayPickupAddress = pickupAddress ? pickupAddress.split(',')[0] : (language === 'fr' ? 'Position actuelle' : 'Current Location');
+    // Extract short address for display - always show real address, never generic label
+    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress) ? pickupAddress.split(',')[0] : isDetectingLocation ? language === 'fr' ? 'Détection...' : 'Detecting...' : pickupAddress?.split(',')[0] || '';
     return <div className="min-h-screen bg-background relative overflow-hidden">
         {/* Full-page background image */}
         <div className="absolute inset-0 z-0" style={{
@@ -1353,17 +1281,7 @@ const RideBooking = () => {
         <div className="absolute inset-0 z-10" style={{
         opacity: 0.85
       }}>
-          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} onMapClick={async (lat, lng) => {
-            // When user taps the map, move pickup pin and reverse geocode
-            const tempAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-            setPickup({ address: tempAddress, lat, lng });
-            setPickupAddress(tempAddress);
-            const address = await reverseGeocode(lat, lng);
-            if (address) {
-              setPickupAddress(address);
-              setPickup({ address, lat, lng });
-            }
-          }} />
+          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} />
         </div>
             
         {/* Compact Frosted Top Bar */}
@@ -1465,7 +1383,15 @@ const RideBooking = () => {
           </div>
         </motion.div>
         
-        {/* GPS Detection Overlay — removed: zero-wait flow, never block UI */}
+        {/* GPS Detection Overlay */}
+        {isDetectingLocation && <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
+            <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
+              <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <p className="text-sm font-medium text-white">
+                {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+              </p>
+            </div>
+          </div>}
           
         {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
         <motion.div initial={{
@@ -1537,8 +1463,20 @@ const RideBooking = () => {
             });
           }} />}
 
-            {/* Auto-estimate triggers on destination selection — no manual button needed */}
-
+            {/* Get Estimate Button - shows when destination is selected */}
+            {dropoffAddress && pickup && <motion.div initial={{
+            opacity: 0,
+            y: 10
+          }} animate={{
+            opacity: 1,
+            y: 0
+          }} transition={{
+            delay: 0.1
+          }}>
+                <Button onClick={handleGetEstimate} className="w-full gradient-primary shadow-button py-5 text-lg font-semibold" disabled={!pickupAddress || !dropoffAddress}>
+                  {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
+                </Button>
+              </motion.div>}
           </div>
         </motion.div>
 
@@ -1562,14 +1500,11 @@ const RideBooking = () => {
                   </h2>
                 </div>
 
-                {/* Location Inputs — pre-populate pickup with Current Location, auto-focus destination */}
+                {/* Location Inputs */}
                 <div className="p-4 space-y-3">
-                  <LocationInput type="pickup" value={pickupAddress || (language === 'fr' ? 'Position actuelle' : 'Current Location')} onChange={handlePickupChange} onUseCurrentLocation={useCurrentLocation} />
+                  <LocationInput type="pickup" value={pickupAddress} onChange={handlePickupChange} onUseCurrentLocation={useCurrentLocation} />
                   
-                  <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => {
-                    handleDropoffChange(addr, coords);
-                    if (coords) setShowFullInput(false);
-                  }} />
+                  <LocationInput type="dropoff" value={dropoffAddress} onChange={handleDropoffChange} />
                 </div>
 
                 {/* Recent Destinations */}
@@ -1588,7 +1523,7 @@ const RideBooking = () => {
                   <Button onClick={() => {
                 setShowFullInput(false);
                 if (pickup && dropoff) {
-                  calculateRoute();
+                  handleGetEstimate();
                 }
               }} className="w-full gradient-primary shadow-button py-6 text-lg" disabled={!pickupAddress || !dropoffAddress}>
                     {pickup && dropoff ? t('booking.estimate') : language === 'fr' ? 'Confirmer' : 'Confirm'}
@@ -1797,7 +1732,7 @@ const RideBooking = () => {
                     repeat: Infinity,
                     ease: 'linear'
                   }} className="w-5 h-5 mr-2 rounded-full border-2 border-primary-foreground border-t-transparent" />
-                        {language === 'fr' ? 'Chargement...' : 'Loading...'}
+                        Preparing payment...
                       </> : <>
                         <CreditCard className="h-5 w-5 mr-2" />
                         {t('booking.confirm')} & Pay
@@ -1840,14 +1775,8 @@ const RideBooking = () => {
                   ease: 'linear'
                 }} className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent" />
                       <p className="text-muted-foreground text-center">
-                        {language === 'fr' ? 'Préparation du paiement...' : 'Setting up payment...'}
+                        Preparing your payment...
                       </p>
-                      <p className="text-xs text-muted-foreground text-center">
-                        {language === 'fr' ? 'Si cela prend trop longtemps, appuyez sur Annuler et réessayez.' : 'If this takes too long, tap Cancel and try again.'}
-                      </p>
-                      <Button variant="outline" size="sm" onClick={handlePaymentCancel} className="mt-2">
-                        {language === 'fr' ? 'Annuler' : 'Cancel'}
-                      </Button>
                     </Card>}
                 </motion.div>}
 

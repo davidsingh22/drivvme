@@ -417,145 +417,41 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setTimeout(() => {
             (async () => {
               try {
-                const median = (window as any).median;
-                const currentRoles = rolesRef.current;
-                const roleTag = currentRoles.includes('driver') ? 'driver' : currentRoles.includes('rider') ? 'rider' : null;
-
-                console.log('[OS-SYNC] Step 0: median=', typeof median, 'roles=', currentRoles, 'uid=', osUserId);
-
-                // === STEP 1: Force Registration (Median native bridge) ===
-                if (typeof median !== 'undefined' && median?.onesignal) {
-                  console.log('[OS-SYNC] Step 1: Calling median.onesignal.register()...');
-                  let registerError: any = null;
-                  try {
-                    await median.onesignal.register();
-                    console.log('[OS-SYNC] Step 1 ✅: register() completed');
-                  } catch (regErr) {
-                    registerError = regErr;
-                    console.log('[OS-SYNC] Step 1 ❌: register() failed:', regErr);
-                  }
-
-                  // === Poll for device info – 5 attempts, 2s apart (10s total) ===
-                  let info: any = null;
-                  let bridgeReady = false;
-                  const maxAttempts = 5;
-                  let lastPollError: any = null;
-
-                  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                    console.log(`[OS-SYNC] Polling attempt ${attempt}/${maxAttempts}...`);
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-
-                    try {
-                      info = median.onesignal.info ? await median.onesignal.info() : null;
-                      console.log(`[OS-SYNC] info() attempt ${attempt}:`, JSON.stringify(info));
-                    } catch (infoErr) {
-                      lastPollError = infoErr;
-                      console.log(`[OS-SYNC] info() error attempt ${attempt}:`, infoErr);
-                    }
-
-                    const isEmpty = !info || (typeof info === 'object' && Object.keys(info).length === 0);
-                    if (!isEmpty) {
-                      bridgeReady = true;
-                      break;
-                    }
-
-                    // On attempt 3, try re-registering in case bridge wasn't ready
-                    if (attempt === 3 && !bridgeReady) {
-                      console.log('[OS-SYNC] Mid-poll retry: calling register() again...');
-                      try {
-                        await median.onesignal.register();
-                      } catch (_) { /* ignore */ }
-                    }
-                  }
-
-                  if (bridgeReady) {
-                    // === STEP 2: Identity Sync ===
-                    console.log('[OS-SYNC] Step 2: Calling median.onesignal.login(', osUserId, ')...');
-                    try {
-                      await median.onesignal.login(osUserId);
-                      console.log('[OS-SYNC] Step 2 ✅: login() completed');
-                    } catch (loginErr) {
-                      console.log('[OS-SYNC] Step 2 ❌: login() failed:', loginErr);
-                    }
-
-                    // === STEP 2b: Role tag via native bridge ===
-                    const roleForTag = currentRoles.includes('driver') ? 'driver' : 'rider';
-                    try {
-                      const osObj = (window as any).OneSignal;
-                      if (osObj?.User?.addTag) {
-                        await osObj.User.addTag('role', roleForTag);
-                        console.log('[OS-SYNC] Step 2b ✅: addTag("role","' + roleForTag + '")');
-                      }
-                    } catch (tagErr) {
-                      console.log('[OS-SYNC] Step 2b ❌: addTag failed:', tagErr);
-                    }
-
-                    const playerId = info?.oneSignalId || info?.playerId || info?.userId || 'none';
-                    const permStatus = info?.permissionStatus || info?.notificationPermission || 'unknown';
-                    const subscribed = info?.subscribed ?? info?.isSubscribed ?? 'unknown';
-                    const pushToken = info?.pushToken || info?.deviceToken || 'none';
-                    console.log('[OS-SYNC] ✅ Bridge ready. Player ID:', playerId, 'Permission:', permStatus, 'Subscribed:', subscribed);
-                  } else {
-                    // Detailed timeout diagnostic
-                    const diagParts: string[] = [
-                      '❌ Native Bridge Timeout (10s)',
-                      '',
-                      'register() error: ' + (registerError ? String(registerError) : 'none'),
-                      'Last poll error: ' + (lastPollError ? String(lastPollError) : 'none'),
-                      'median.onesignal exists: ' + (!!median?.onesignal),
-                      'median.onesignal.info exists: ' + (typeof median?.onesignal?.info),
-                      'Last info() result: ' + JSON.stringify(info),
-                      '',
-                      '🔧 Checklist:',
-                      '1. Info.plist → OneSignal_app_groups_key = group.co.median.ios.nmdjrzl.onesignal',
-                      '2. Both App + Extension targets share the same App Group',
-                      '3. Push Notifications capability enabled in Xcode',
-                      '4. APNs certificate uploaded to OneSignal dashboard',
-                      '5. Rebuild & reinstall via Xcode (not just reload)',
-                    ];
-                    console.log('[OS-SYNC] ❌ Timeout diagnostic:', diagParts.join(' | '));
-                  }
-                } else {
-                  console.log('[OS-SYNC] No Median bridge, using web SDK path');
-                }
-
-                // === STEP 3: Role Tagging (web SDK + native fallback) ===
-                console.log('[OS-SYNC] Step 3: Tagging role=', roleTag);
                 const os = (window as any).OneSignalDeferred || (window as any).OneSignal;
-
-                if (os) {
-                  if (typeof os.push === 'function' || Array.isArray(os)) {
-                    os.push(async function(onesignal: any) {
-                      await onesignal.login(osUserId);
-                      if (roleTag) {
-                        await onesignal.User.addTag("role", roleTag);
-                        console.log("[OS-SYNC] Step 3 ✅: Tagged (deferred):", roleTag);
-                      }
-                      console.log("[OS-SYNC] ✅ OneSignal login (deferred) for:", osUserId);
-                    });
-                  } else if (typeof os.login === 'function') {
-                    await os.login(osUserId);
-                    if (roleTag && os.User?.addTag) {
-                      await os.User.addTag("role", roleTag);
-                      console.log("[OS-SYNC] Step 3 ✅: Tagged (direct):", roleTag);
-                    }
-                    console.log("[OS-SYNC] ✅ OneSignal login (direct) for:", osUserId);
-                  } else {
-                    await OneSignal.login(osUserId);
-                    console.log("[OS-SYNC] ✅ OneSignal login (react-sdk) for:", osUserId);
-                  }
-                } else {
+                if (!os) {
+                  // Fallback to react-onesignal SDK
                   await OneSignal.login(osUserId);
                   await OneSignal.User.PushSubscription.optIn();
-                  console.log("[OS-SYNC] ✅ OneSignal linked (SDK fallback) for:", osUserId);
+                  console.log("✅ OneSignal linked (SDK) for:", osUserId);
+                  return;
                 }
 
-                // React-onesignal role tagging & player ID save
+                // Native OneSignal (Median / web SDK v16+)
+                if (typeof os.push === 'function' || Array.isArray(os)) {
+                  // OneSignalDeferred queue pattern
+                  os.push(async function(onesignal: any) {
+                    await onesignal.login(osUserId);
+                    console.log("✅ OneSignal login (deferred) for:", osUserId);
+                  });
+                } else if (typeof os.login === 'function') {
+                  await os.login(osUserId);
+                  console.log("✅ OneSignal login (direct) for:", osUserId);
+                } else {
+                  // react-onesignal fallback
+                  await OneSignal.login(osUserId);
+                  console.log("✅ OneSignal login (react-sdk) for:", osUserId);
+                }
+
+                // Also try react-onesignal for role tagging & player ID
                 try {
                   await OneSignal.User.PushSubscription.optIn();
-                  if (roleTag) {
-                    await OneSignal.User.addTag("role", roleTag);
-                    console.log("[OS-SYNC] 🏷️ React SDK tagged:", roleTag);
+                  const currentRoles = rolesRef.current;
+                  if (currentRoles.includes('driver')) {
+                    await OneSignal.User.addTag("role", "driver");
+                    console.log("🏷️ OneSignal tagged as driver");
+                  } else if (currentRoles.includes('rider')) {
+                    await OneSignal.User.addTag("role", "rider");
+                    console.log("🏷️ OneSignal tagged as rider");
                   }
 
                   const playerId = OneSignal.User.PushSubscription.id;
@@ -564,13 +460,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       .from('profiles')
                       .update({ onesignal_player_id: playerId } as any)
                       .eq('user_id', osUserId);
-                    console.log("[OS-SYNC] ✅ Player ID saved:", playerId);
+                    console.log("✅ OneSignal player ID saved:", playerId);
                   }
                 } catch (tagErr) {
-                  console.log("[OS-SYNC] ⚠️ React SDK tagging skipped:", tagErr);
+                  console.log("⚠️ OneSignal tagging skipped (non-blocking):", tagErr);
                 }
               } catch (e) {
-                console.log("[OS-SYNC] ❌ Fatal error (non-blocking):", e);
+                console.log("❌ OneSignal init error (non-blocking):", e);
               }
             })();
           }, 0);

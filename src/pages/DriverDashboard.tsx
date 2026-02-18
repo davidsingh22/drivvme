@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import OneSignal from 'react-onesignal';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, UserCircle, Bell, Map, HelpCircle, Gift } from 'lucide-react';
@@ -98,7 +97,6 @@ const DriverDashboard = () => {
   const { unreadCount: unreadSupportMessages } = useUnreadSupportMessages();
   const [showGPSNavigation, setShowGPSNavigation] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
-  const [showNotifSettingsModal, setShowNotifSettingsModal] = useState(false);
 
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
@@ -373,54 +371,6 @@ const DriverDashboard = () => {
 
     restoreActiveRide();
   }, [session?.user?.id]);
-
-  // Check for pending ride offers on mount/resume AND poll every 5s while idle
-  useEffect(() => {
-    const driverId = session?.user?.id;
-    if (!driverId || !isOnline) return;
-
-    const checkPendingOffers = async () => {
-      // Skip if driver is already busy with a ride or alert
-      if (currentRideRef.current || newRideAlertOpenRef.current) return;
-
-      // Look for recent unread new_ride notifications
-      const { data: notifications } = await supabase
-        .from('notifications')
-        .select('ride_id')
-        .eq('user_id', driverId)
-        .eq('type', 'new_ride')
-        .eq('is_read', false)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const rideId = notifications?.[0]?.ride_id;
-      if (!rideId) return;
-
-      // Check if this ride is still available
-      const { data: ride } = await supabase
-        .from('rides')
-        .select('*')
-        .eq('id', rideId)
-        .eq('status', 'searching')
-        .maybeSingle();
-
-      if (!ride) return;
-
-      console.log('[DriverDashboard] Restored pending ride offer from notification:', ride.id);
-      setCachedAlertRide(ride);
-      setNewRideAlertRideId(ride.id);
-      setNewRideAlertOpen(true);
-      alertStartTimeRef.current = Date.now();
-    };
-
-    // Run immediately
-    checkPendingOffers();
-
-    // Poll every 5 seconds as a fallback in case realtime misses the insert
-    const interval = window.setInterval(checkPendingOffers, 5000);
-
-    return () => window.clearInterval(interval);
-  }, [session?.user?.id, isOnline]);
 
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
@@ -944,43 +894,36 @@ const DriverDashboard = () => {
   return (
     <div className="min-h-screen bg-background">
 
+      <DriverBeepFix
+        incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
+        onTimeout={() => {
+          setNewRideAlertOpen(false);
+          setCachedAlertRide(null);
+          setNewRideAlertRideId(null);
+          alertStartTimeRef.current = null;
+        }}
+        timeoutSeconds={25}
+      />
+
+      <RideOfferModal
+        open={newRideAlertOpen}
+        ride={alertRide}
+        countdownSeconds={20}
+        driverLocation={driverLocation}
+        onDecline={() => {
+          setNewRideAlertOpen(false);
+          setCachedAlertRide(null);
+          setNewRideAlertRideId(null);
+          alertStartTimeRef.current = null;
+        }}
+        onAccept={() => {
+          // Use cached ride data for acceptance (persists even if ride was removed from availableRides)
+          if (cachedAlertRide) {
+            acceptRide(cachedAlertRide);
+          }
+        }}
+      />
       <Navbar />
-
-
-      {/* iOS Settings Modal */}
-      {showNotifSettingsModal && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="bg-card rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4">
-            <h2 className="text-xl font-bold text-foreground">⚠️ Notifications Blocked</h2>
-            <p className="text-muted-foreground text-sm leading-relaxed">
-              iOS is blocking alerts. To start receiving ride orders, you need to manually enable notifications:
-            </p>
-            <ol className="list-decimal pl-5 text-sm text-muted-foreground space-y-1">
-              <li>Open your iPhone <span className="font-semibold text-foreground">Settings</span></li>
-              <li>Scroll down and tap <span className="font-semibold text-foreground">Drivveme</span></li>
-              <li>Tap <span className="font-semibold text-foreground">Notifications</span></li>
-              <li>Turn on <span className="font-semibold text-foreground">Allow Notifications</span></li>
-            </ol>
-            <div className="flex flex-col gap-2 pt-2">
-              <Button
-                className="w-full"
-                onClick={() => {
-                  try { window.location.href = 'app-settings:'; } catch (e) { console.warn('app-settings: link not supported', e); }
-                }}
-              >
-                Open App Settings
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => setShowNotifSettingsModal(false)}
-              >
-                Got it, I'll do it manually
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
         {/* Map - takes 65% on mobile, flex-[2] on desktop */}
@@ -1156,7 +1099,6 @@ const DriverDashboard = () => {
                 )}
               </div>
             </Card>
-
 
             {/* Push Notifications (critical for new ride alerts when app is backgrounded) */}
             {!pushSubscribed && (
