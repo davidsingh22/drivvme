@@ -1101,22 +1101,30 @@ const DriverDashboard = () => {
               </div>
             </Card>
 
-            {/* Fix Notifications button — manually re-trigger native permission */}
+            {/* Enable Driver Alerts — double-register + permission check */}
             <Button
-              variant="outline"
-              className="w-full mb-3 border-primary/50 text-primary hover:bg-primary/10"
+              variant="destructive"
+              className="w-full mb-3 text-lg py-6 font-bold"
               onClick={async () => {
                 const median = (window as any).median;
                 if (typeof median !== 'undefined' && median?.onesignal) {
                   try {
-                    console.log('[FixNotif] Calling median.onesignal.register()...');
+                    // First register call
+                    console.log('[DriverAlerts] register() call #1');
                     await median.onesignal.register();
-                    // Wait and check info
+                    // 1-second delay
+                    await new Promise(r => setTimeout(r, 1000));
+                    // Second register call
+                    console.log('[DriverAlerts] register() call #2');
+                    await median.onesignal.register();
+                    // Wait 3 seconds then check permission
                     await new Promise(r => setTimeout(r, 3000));
                     const info = median.onesignal.info ? await median.onesignal.info() : null;
-                    const isEmpty = !info || Object.keys(info).length === 0;
-                    if (!isEmpty) {
-                      // Proceed with login + tag
+                    const perm = info?.permission;
+                    const hasId = info && Object.keys(info).length > 0;
+
+                    if (perm === true || perm === 'granted' || perm === 1) {
+                      // Permission granted — proceed with identity + tag
                       if (user?.id) {
                         await median.onesignal.login(user.id);
                         const osObj = (window as any).OneSignal;
@@ -1125,9 +1133,17 @@ const DriverDashboard = () => {
                         }
                       }
                       const playerId = info?.oneSignalId || info?.playerId || info?.userId || 'none';
-                      window.alert(`✅ Fixed!\nPlayer ID: ${playerId}\nInfo: ${JSON.stringify(info, null, 2)}`);
+                      window.alert(`✅ Alerts enabled!\nPlayer ID: ${playerId}`);
+                    } else if (hasId) {
+                      // Bridge responded but permission not granted
+                      window.alert(
+                        '⚠️ Please go to iPhone Settings > Notifications > Drivveme and toggle "Allow Notifications" ON manually.'
+                      );
                     } else {
-                      window.alert('❌ Still empty after retry.\nCheck Xcode App Groups & APNs certificate.');
+                      // Bridge returned empty
+                      window.alert(
+                        '⚠️ Please go to iPhone Settings > Notifications > Drivveme and toggle "Allow Notifications" ON manually.'
+                      );
                     }
                   } catch (err) {
                     window.alert('❌ Error: ' + String(err));
@@ -1136,15 +1152,17 @@ const DriverDashboard = () => {
                   // Web fallback
                   try {
                     await OneSignal.Notifications.requestPermission();
-                    toast({ title: 'Permission requested' });
+                    if (user?.id) {
+                      await OneSignal.User.addTag('role', 'driver');
+                    }
+                    toast({ title: language === 'fr' ? 'Alertes activées' : 'Alerts enabled' });
                   } catch (err) {
                     window.alert('Error: ' + String(err));
                   }
                 }
               }}
             >
-              <Bell className="h-4 w-4 mr-2" />
-              {language === 'fr' ? 'Réparer Notifications' : 'Fix Notifications'}
+              🔴 {language === 'fr' ? 'Activer les alertes chauffeur' : 'Enable Driver Alerts'}
             </Button>
 
             {/* Push Notifications (critical for new ride alerts when app is backgrounded) */}
