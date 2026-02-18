@@ -1034,8 +1034,8 @@ const RideBooking = () => {
     }
     setStep('searching');
     toast({
-      title: t('booking.searching'),
-      description: 'Payment confirmed! Finding nearby drivers...'
+      title: '🔍 Searching for nearby drivers...',
+      description: 'Payment confirmed! Drivers near you are being notified.',
     });
   };
   const handlePaymentCancel = async () => {

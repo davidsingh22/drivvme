@@ -216,9 +216,9 @@ async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string):
     filters: [
       { field: "tag", key: "role", relation: "=", value: "driver" },
     ],
-    headings: { en: "New Ride Request! 🚗" },
-    contents: { en: "A rider is looking for a trip nearby." },
-    data: { ride_id: rideId, type: "new_ride" },
+    headings: { en: "New Ride Request Nearby! 🚗" },
+    contents: { en: "A new ride request is available near you. Tap to view details!" },
+    data: { ride_id: rideId, type: "new_ride", targetUrl: "/driver-dashboard" },
     priority: 10,
     ios_sound: "default",
     android_sound: "default",
