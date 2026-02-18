@@ -840,8 +840,53 @@ const RideBooking = () => {
         address,
         ...location
       });
+      // Auto-calculate estimate when destination is selected (Uber-style: skip "Get Estimate")
+      if (pickup) {
+        // Small delay to let state settle, then auto-calculate
+        setTimeout(() => {
+          calculateRouteAuto({ address, ...location });
+        }, 100);
+      }
     }
   };
+
+  // Auto-calculate route without relying on dropoff state (passes location directly)
+  const calculateRouteAuto = useCallback(async (dropoffLoc: Location) => {
+    if (!pickup) return;
+    try {
+      let estimatedDistance = 0;
+      let estimatedDuration = 0;
+      if (mapboxToken) {
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoffLoc.lng},${dropoffLoc.lat}?overview=false&alternatives=false&access_token=${mapboxToken}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const route = data?.routes?.[0];
+        if (!route?.distance || !route?.duration) throw new Error('No route returned');
+        estimatedDistance = route.distance / 1000;
+        estimatedDuration = route.duration / 60;
+      } else {
+        const R = 6371;
+        const dLat = (dropoffLoc.lat - pickup.lat) * Math.PI / 180;
+        const dLon = (dropoffLoc.lng - pickup.lng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(pickup.lat * Math.PI / 180) * Math.cos(dropoffLoc.lat * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const straightLineDistance = R * c;
+        estimatedDistance = straightLineDistance * 1.4;
+        estimatedDuration = estimatedDistance / 30 * 60;
+      }
+      setDistanceKm(estimatedDistance);
+      setDurationMinutes(estimatedDuration);
+      const estimate = calculateFare(estimatedDistance, estimatedDuration);
+      setFareEstimate(estimate);
+      setStep('estimate');
+    } catch (error) {
+      toast({
+        title: 'Route error',
+        description: 'Unable to calculate route',
+        variant: 'destructive'
+      });
+    }
+  }, [pickup, toast, mapboxToken]);
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(position => {
@@ -930,6 +975,19 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
+    // Safety timeout — if ride creation takes >12s, stop spinner and let user retry
+    const safetyTimeout = window.setTimeout(() => {
+      setIsSubmitting(false);
+      if (!currentRide) {
+        toast({
+          title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
+          description: language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.',
+          variant: 'destructive'
+        });
+        setStep('estimate');
+      }
+    }, 12000);
+
     // Create the ride in the background as fast as possible.
     // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
     (async () => {
@@ -1011,6 +1069,7 @@ const RideBooking = () => {
         });
         setStep('estimate');
       } finally {
+        window.clearTimeout(safetyTimeout);
         setIsSubmitting(false);
       }
     })();
@@ -1451,20 +1510,7 @@ const RideBooking = () => {
             });
           }} />}
 
-            {/* Get Estimate Button - shows when destination is selected */}
-            {dropoffAddress && pickup && <motion.div initial={{
-            opacity: 0,
-            y: 10
-          }} animate={{
-            opacity: 1,
-            y: 0
-          }} transition={{
-            delay: 0.1
-          }}>
-                <Button onClick={handleGetEstimate} className="w-full gradient-primary shadow-button py-5 text-lg font-semibold" disabled={!pickupAddress || !dropoffAddress}>
-                  {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
-                </Button>
-              </motion.div>}
+            {/* Auto-estimate triggers on destination selection — no manual button needed */}
 
           </div>
         </motion.div>
@@ -1489,11 +1535,14 @@ const RideBooking = () => {
                   </h2>
                 </div>
 
-                {/* Location Inputs */}
+                {/* Location Inputs — pre-populate pickup with Current Location, auto-focus destination */}
                 <div className="p-4 space-y-3">
-                  <LocationInput type="pickup" value={pickupAddress} onChange={handlePickupChange} onUseCurrentLocation={useCurrentLocation} />
+                  <LocationInput type="pickup" value={pickupAddress || (language === 'fr' ? 'Position actuelle' : 'Current Location')} onChange={handlePickupChange} onUseCurrentLocation={useCurrentLocation} />
                   
-                  <LocationInput type="dropoff" value={dropoffAddress} onChange={handleDropoffChange} />
+                  <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => {
+                    handleDropoffChange(addr, coords);
+                    if (coords) setShowFullInput(false);
+                  }} />
                 </div>
 
                 {/* Recent Destinations */}
@@ -1512,7 +1561,7 @@ const RideBooking = () => {
                   <Button onClick={() => {
                 setShowFullInput(false);
                 if (pickup && dropoff) {
-                  handleGetEstimate();
+                  calculateRoute();
                 }
               }} className="w-full gradient-primary shadow-button py-6 text-lg" disabled={!pickupAddress || !dropoffAddress}>
                     {pickup && dropoff ? t('booking.estimate') : language === 'fr' ? 'Confirmer' : 'Confirm'}
@@ -1721,7 +1770,7 @@ const RideBooking = () => {
                     repeat: Infinity,
                     ease: 'linear'
                   }} className="w-5 h-5 mr-2 rounded-full border-2 border-primary-foreground border-t-transparent" />
-                        Preparing payment...
+                        {language === 'fr' ? 'Chargement...' : 'Loading...'}
                       </> : <>
                         <CreditCard className="h-5 w-5 mr-2" />
                         {t('booking.confirm')} & Pay
@@ -1764,8 +1813,14 @@ const RideBooking = () => {
                   ease: 'linear'
                 }} className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent" />
                       <p className="text-muted-foreground text-center">
-                        Preparing your payment...
+                        {language === 'fr' ? 'Préparation du paiement...' : 'Setting up payment...'}
                       </p>
+                      <p className="text-xs text-muted-foreground text-center">
+                        {language === 'fr' ? 'Si cela prend trop longtemps, appuyez sur Annuler et réessayez.' : 'If this takes too long, tap Cancel and try again.'}
+                      </p>
+                      <Button variant="outline" size="sm" onClick={handlePaymentCancel} className="mt-2">
+                        {language === 'fr' ? 'Annuler' : 'Cancel'}
+                      </Button>
                     </Card>}
                 </motion.div>}
 
