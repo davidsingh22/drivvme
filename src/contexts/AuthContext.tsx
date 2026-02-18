@@ -446,13 +446,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     console.log('[OS-SYNC] Step 2 ❌: login() failed:', loginErr);
                   }
 
-                  // === Show device info for verification ===
+                  // === Show device info & retry if empty ===
                   try {
-                    const info = median.onesignal.info ? median.onesignal.info() : null;
-                    console.log('[OS-SYNC] Device info:', JSON.stringify(info));
-                    window.alert('OneSignal Device Info:\n' + JSON.stringify(info, null, 2));
+                    let info = median.onesignal.info ? await median.onesignal.info() : null;
+                    console.log('[OS-SYNC] Device info (1st check):', JSON.stringify(info));
+
+                    const isEmpty = !info || (typeof info === 'object' && Object.keys(info).length === 0);
+                    if (isEmpty) {
+                      console.log('[OS-SYNC] ⚠️ info() empty — retrying register in 3s...');
+                      await new Promise(resolve => setTimeout(resolve, 3000));
+
+                      try {
+                        await median.onesignal.register();
+                        console.log('[OS-SYNC] Retry register() ✅');
+                      } catch (retryErr) {
+                        console.log('[OS-SYNC] Retry register() ❌:', retryErr);
+                      }
+
+                      await new Promise(resolve => setTimeout(resolve, 2000));
+
+                      try {
+                        await median.onesignal.login(osUserId);
+                        console.log('[OS-SYNC] Retry login() ✅');
+                      } catch (retryLoginErr) {
+                        console.log('[OS-SYNC] Retry login() ❌:', retryLoginErr);
+                      }
+
+                      info = median.onesignal.info ? await median.onesignal.info() : null;
+                      console.log('[OS-SYNC] Device info (2nd check):', JSON.stringify(info));
+                    }
+
+                    const isEmpty2 = !info || (typeof info === 'object' && Object.keys(info).length === 0);
+                    const permStatus = info?.permissionStatus || info?.notificationPermission || 'unknown';
+                    const playerId = info?.oneSignalId || info?.playerId || info?.userId || 'none';
+                    const subscribed = info?.subscribed ?? info?.isSubscribed ?? 'unknown';
+
+                    const msg = isEmpty2
+                      ? `❌ Bridge still empty after retry.\nPermission: ${permStatus}\nPossible causes:\n- Native push not configured in Xcode\n- APNs certificate missing\n- OneSignal App ID mismatch`
+                      : `✅ OneSignal Device Info:\nPlayer ID: ${playerId}\nPermission: ${permStatus}\nSubscribed: ${subscribed}\nFull: ${JSON.stringify(info, null, 2)}`;
+
+                    console.log('[OS-SYNC] Final alert:', msg);
+                    window.alert(msg);
                   } catch (infoErr) {
-                    window.alert('OneSignal info() not available: ' + infoErr);
+                    window.alert('OneSignal info() error: ' + String(infoErr));
+                    console.log('[OS-SYNC] info() exception:', infoErr);
                   }
                 } else {
                   console.log('[OS-SYNC] No Median bridge, using web SDK path');
