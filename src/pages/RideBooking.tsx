@@ -975,18 +975,16 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // Safety timeout — if ride creation takes >12s, stop spinner and let user retry
+    // Safety timeout — if ride creation takes >30s, stop spinner and let user retry
     const safetyTimeout = window.setTimeout(() => {
       setIsSubmitting(false);
-      if (!currentRide) {
-        toast({
-          title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
-          description: language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.',
-          variant: 'destructive'
-        });
-        setStep('estimate');
-      }
-    }, 12000);
+      toast({
+        title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
+        description: language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.',
+        variant: 'destructive'
+      });
+      setStep('estimate');
+    }, 30000);
 
     // Create the ride in the background as fast as possible.
     // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
