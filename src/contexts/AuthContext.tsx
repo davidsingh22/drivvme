@@ -426,17 +426,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // === STEP 1: Force Registration (Median native bridge) ===
                 if (typeof median !== 'undefined' && median?.onesignal) {
                   console.log('[OS-SYNC] Step 1: Calling median.onesignal.register()...');
+                  let registerError: any = null;
                   try {
                     await median.onesignal.register();
                     console.log('[OS-SYNC] Step 1 ✅: register() completed');
                   } catch (regErr) {
+                    registerError = regErr;
                     console.log('[OS-SYNC] Step 1 ❌: register() failed:', regErr);
                   }
 
-                  // === Poll for device info up to 5 times (2s apart) ===
+                  // === Poll for device info – 5 attempts, 2s apart (10s total) ===
                   let info: any = null;
                   let bridgeReady = false;
                   const maxAttempts = 5;
+                  let lastPollError: any = null;
 
                   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                     console.log(`[OS-SYNC] Polling attempt ${attempt}/${maxAttempts}...`);
@@ -446,6 +449,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       info = median.onesignal.info ? await median.onesignal.info() : null;
                       console.log(`[OS-SYNC] info() attempt ${attempt}:`, JSON.stringify(info));
                     } catch (infoErr) {
+                      lastPollError = infoErr;
                       console.log(`[OS-SYNC] info() error attempt ${attempt}:`, infoErr);
                     }
 
@@ -453,6 +457,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     if (!isEmpty) {
                       bridgeReady = true;
                       break;
+                    }
+
+                    // On attempt 3, try re-registering in case bridge wasn't ready
+                    if (attempt === 3 && !bridgeReady) {
+                      console.log('[OS-SYNC] Mid-poll retry: calling register() again...');
+                      try {
+                        await median.onesignal.register();
+                      } catch (_) { /* ignore */ }
                     }
                   }
 
@@ -481,12 +493,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     const playerId = info?.oneSignalId || info?.playerId || info?.userId || 'none';
                     const permStatus = info?.permissionStatus || info?.notificationPermission || 'unknown';
                     const subscribed = info?.subscribed ?? info?.isSubscribed ?? 'unknown';
-                    const msg = `✅ OneSignal Device Info:\nPlayer ID: ${playerId}\nPermission: ${permStatus}\nSubscribed: ${subscribed}\nFull: ${JSON.stringify(info, null, 2)}`;
+                    const pushToken = info?.pushToken || info?.deviceToken || 'none';
+                    const msg = `✅ Bridge Ready!\nPlayer ID: ${playerId}\nPermission: ${permStatus}\nSubscribed: ${subscribed}\nPush Token: ${pushToken}\nApp Group: group.co.median.ios.nmdjrzl.onesignal\n\nFull: ${JSON.stringify(info, null, 2)}`;
                     console.log('[OS-SYNC] Final alert:', msg);
                     window.alert(msg);
                   } else {
-                    console.log('[OS-SYNC] ❌ Bridge timeout after 10s');
-                    window.alert('Native Bridge Timeout - Check Xcode App Groups');
+                    // Detailed timeout diagnostic
+                    const diagParts: string[] = [
+                      '❌ Native Bridge Timeout (10s)',
+                      '',
+                      'register() error: ' + (registerError ? String(registerError) : 'none'),
+                      'Last poll error: ' + (lastPollError ? String(lastPollError) : 'none'),
+                      'median.onesignal exists: ' + (!!median?.onesignal),
+                      'median.onesignal.info exists: ' + (typeof median?.onesignal?.info),
+                      'Last info() result: ' + JSON.stringify(info),
+                      '',
+                      '🔧 Checklist:',
+                      '1. Info.plist → OneSignal_app_groups_key = group.co.median.ios.nmdjrzl.onesignal',
+                      '2. Both App + Extension targets share the same App Group',
+                      '3. Push Notifications capability enabled in Xcode',
+                      '4. APNs certificate uploaded to OneSignal dashboard',
+                      '5. Rebuild & reinstall via Xcode (not just reload)',
+                    ];
+                    const diagMsg = diagParts.join('\n');
+                    console.log('[OS-SYNC] ❌ Timeout diagnostic:', diagMsg);
+                    window.alert(diagMsg);
                   }
                 } else {
                   console.log('[OS-SYNC] No Median bridge, using web SDK path');

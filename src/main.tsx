@@ -12,6 +12,8 @@ setTimeout(() => {
   OneSignal.init({
     appId: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
     allowLocalhostAsSecureOrigin: true,
+    // Pass App Group for native iOS bridge data sharing
+    appGroupId: "group.co.median.ios.nmdjrzl.onesignal",
     promptOptions: {
       slidedown: {
         prompts: [{
