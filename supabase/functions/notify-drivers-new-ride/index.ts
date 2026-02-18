@@ -218,6 +218,7 @@ async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string):
     contents: { en: "A new ride request is available near you. Tap to view details!" },
     data: { ride_id: rideId, type: "new_ride", targetUrl: "/driver-dashboard" },
     priority: 10,
+    ttl: 3600,
     ios_sound: "default",
     android_sound: "default",
     android_channel_id: "ride_requests",
