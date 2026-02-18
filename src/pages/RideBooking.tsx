@@ -141,7 +141,7 @@ const RideBooking = () => {
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const {
@@ -338,13 +338,16 @@ const RideBooking = () => {
     }
     hasAutoDetectedLocation.current = true;
 
+    // Set "Current Location" placeholder immediately — never block the UI
+    const currentLocLabel = language === 'fr' ? 'Position actuelle' : 'Current Location';
+    setPickupAddress(currentLocLabel);
+
     // Check permission silently first (Permissions API)
     const checkAndTrack = async () => {
       try {
         const perm = await navigator.permissions?.query({ name: 'geolocation' });
         if (perm && perm.state === 'denied') {
-          // Permission denied — skip silently, no prompts
-          setIsDetectingLocation(false);
+          // Permission denied — keep "Current Location" label, user can edit
           return;
         }
       } catch {
@@ -357,8 +360,7 @@ const RideBooking = () => {
         const address = await reverseGeocode(lat, lng);
         if (address) {
           setPickupAddress(address);
-          setPickup({ address, lat, lng });
-          setIsDetectingLocation(false);
+          setPickup(prev => prev ? { ...prev, address } : { address, lat, lng });
           return;
         }
         if (retryCount < maxRetries && mapboxToken) {
@@ -368,8 +370,7 @@ const RideBooking = () => {
         }
         const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
         setPickupAddress(coordAddress);
-        setPickup({ address: coordAddress, lat, lng });
-        setIsDetectingLocation(false);
+        setPickup(prev => prev ? { ...prev, address: coordAddress } : { address: coordAddress, lat, lng });
       };
 
       navigator.geolocation.getCurrentPosition(
@@ -377,35 +378,26 @@ const RideBooking = () => {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
 
-          // Store coords immediately — map centers instantly
-          const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
-          setPickup({ address: tempAddress, lat, lng });
-          setPickupAddress(tempAddress);
+          // Store coords immediately — map centers instantly, keep label as-is
+          setPickup(prev => prev ? { ...prev, lat, lng } : { address: currentLocLabel, lat, lng });
 
           if (!mapboxToken) return;
           await attemptReverseGeocode(lat, lng);
         },
         () => {
-          // Silent failure — no toast, no prompt
-          setIsDetectingLocation(false);
+          // Silent failure — user keeps "Current Location" and can type manually
         },
         { enableHighAccuracy: true, timeout: 5000, maximumAge: 120000 }
       );
     };
 
     checkAndTrack();
-
-    // Safety timeout: never show detecting overlay for more than 4 seconds
-    const safetyTimer = setTimeout(() => {
-      setIsDetectingLocation(false);
-    }, 4000);
-    return () => clearTimeout(safetyTimer);
   }, [mapboxToken, language, reverseGeocode]);
 
   // Effect to resolve address when pickup has coords but generic address
   useEffect(() => {
-    if (!pickup || !mapboxToken) return;
-    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle'];
+    if (!pickup || !mapboxToken || !pickup.lat) return;
+    const genericLabels = ['Detecting...', 'Détection...', 'Current Location', 'Current location', 'Position actuelle'];
     const isGeneric = genericLabels.includes(pickupAddress) || pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
     if (isGeneric) {
       reverseGeocode(pickup.lat, pickup.lng).then(address => {
@@ -415,7 +407,6 @@ const RideBooking = () => {
             ...prev,
             address
           } : null);
-          setIsDetectingLocation(false);
         }
       });
     }
@@ -1268,8 +1259,8 @@ const RideBooking = () => {
 
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
   if (step === 'input') {
-    // Extract short address for display - always show real address, never generic label
-    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress) ? pickupAddress.split(',')[0] : isDetectingLocation ? language === 'fr' ? 'Détection...' : 'Detecting...' : pickupAddress?.split(',')[0] || '';
+    // Extract short address for display — show "Current Location" instantly, real address when resolved
+    const displayPickupAddress = pickupAddress ? pickupAddress.split(',')[0] : (language === 'fr' ? 'Position actuelle' : 'Current Location');
     return <div className="min-h-screen bg-background relative overflow-hidden">
         {/* Full-page background image */}
         <div className="absolute inset-0 z-0" style={{
@@ -1388,15 +1379,7 @@ const RideBooking = () => {
           </div>
         </motion.div>
         
-        {/* GPS Detection Overlay */}
-        {isDetectingLocation && <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
-            <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
-              <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-              <p className="text-sm font-medium text-white">
-                {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-              </p>
-            </div>
-          </div>}
+        {/* GPS Detection Overlay — removed: zero-wait flow, never block UI */}
           
         {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
         <motion.div initial={{
