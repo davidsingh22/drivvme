@@ -98,6 +98,7 @@ const DriverDashboard = () => {
   const { unreadCount: unreadSupportMessages } = useUnreadSupportMessages();
   const [showGPSNavigation, setShowGPSNavigation] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [showNotifSettingsModal, setShowNotifSettingsModal] = useState(false);
 
   const [newRideAlertOpen, setNewRideAlertOpen] = useState(false);
   const [newRideAlertRideId, setNewRideAlertRideId] = useState<string | null>(null);
@@ -897,40 +898,70 @@ const DriverDashboard = () => {
 
       <Navbar />
 
-      {/* TEMPORARY: Force Notifications button for iOS debugging - fixed position so it's always visible */}
-      <div className="fixed top-16 left-0 right-0 z-[9999] p-3 bg-destructive">
+      {/* Activate Driver Alerts button */}
+      <div className="fixed top-16 left-0 right-0 z-[9999] p-3 bg-primary/90 backdrop-blur-sm">
         <Button
-          variant="destructive"
-          className="w-full text-lg py-6 font-bold bg-red-600 hover:bg-red-700 text-white"
+          className="w-full text-lg py-6 font-bold"
           onClick={async () => {
-            toast({
-              title: "📲 Notifications",
-              description: "Attempting to enable notifications...",
-            });
+            toast({ title: "📲 Activating...", description: "Requesting notification permission..." });
             const median = (window as any).median;
             if (typeof median !== 'undefined' && median?.onesignal) {
-              console.log('[FORCE-NOTIF] Calling median.onesignal.register()...');
-              try { await median.onesignal.register(); } catch (e) { console.warn(e); }
-              await new Promise(r => setTimeout(r, 1000));
-              let info = null;
+              console.log('[ACTIVATE-ALERTS] Calling median.onesignal.register()...');
+              try { await median.onesignal.register(); } catch (e) { console.warn('[ACTIVATE-ALERTS] register error', e); }
+              await new Promise(r => setTimeout(r, 1500));
+              let info: any = null;
               try { info = median.onesignal.info ? await median.onesignal.info() : null; } catch (e) { console.warn(e); }
-              console.log('[FORCE-NOTIF] median.onesignal.info() =', JSON.stringify(info));
-              toast({
-                title: "📲 Check Settings",
-                description: "If no Apple popup appeared, go to Settings > Notifications > Drivveme and turn it on.",
-              });
+              console.log('[ACTIVATE-ALERTS] info =', JSON.stringify(info));
+              const optedIn = info?.subscription?.optedIn === true;
+              if (optedIn) {
+                toast({ title: "✅ Notifications Active!", description: "You will now receive ride alerts." });
+              } else {
+                setShowNotifSettingsModal(true);
+              }
             } else {
-              try { await OneSignal.Notifications.requestPermission(); } catch (err) { console.error('[FORCE-NOTIF] web error', err); }
-              toast({
-                title: "📲 Check Settings",
-                description: "If no browser popup appeared, check your browser notification settings.",
-              });
+              try { await OneSignal.Notifications.requestPermission(); } catch (err) { console.error('[ACTIVATE-ALERTS] web error', err); }
+              toast({ title: "📲 Check Settings", description: "If no browser popup appeared, check your browser notification settings." });
             }
           }}
         >
-          🔴 FORCE NOTIFICATIONS
+          🚀 Activate Driver Alerts
         </Button>
       </div>
+
+      {/* iOS Settings Modal */}
+      {showNotifSettingsModal && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-card rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4">
+            <h2 className="text-xl font-bold text-foreground">⚠️ Notifications Blocked</h2>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              iOS is blocking alerts. To start receiving ride orders, you need to manually enable notifications:
+            </p>
+            <ol className="list-decimal pl-5 text-sm text-muted-foreground space-y-1">
+              <li>Open your iPhone <span className="font-semibold text-foreground">Settings</span></li>
+              <li>Scroll down and tap <span className="font-semibold text-foreground">Drivveme</span></li>
+              <li>Tap <span className="font-semibold text-foreground">Notifications</span></li>
+              <li>Turn on <span className="font-semibold text-foreground">Allow Notifications</span></li>
+            </ol>
+            <div className="flex flex-col gap-2 pt-2">
+              <Button
+                className="w-full"
+                onClick={() => {
+                  try { window.location.href = 'app-settings:'; } catch (e) { console.warn('app-settings: link not supported', e); }
+                }}
+              >
+                Open App Settings
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setShowNotifSettingsModal(false)}
+              >
+                Got it, I'll do it manually
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
         {/* Map - takes 65% on mobile, flex-[2] on desktop */}
