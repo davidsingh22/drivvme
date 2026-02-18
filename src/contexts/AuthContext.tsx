@@ -418,55 +418,74 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             (async () => {
               try {
                 const median = (window as any).median;
-                console.log('NATIVE_BRIDGE_TEST: checking median...', typeof median);
-                window.alert('Bridge Status: ' + (typeof median !== 'undefined'));
-                const os = (window as any).OneSignalDeferred || (window as any).OneSignal;
-                if (!os) {
-                  // Fallback to react-onesignal SDK
-                  await OneSignal.login(osUserId);
-                  await OneSignal.User.PushSubscription.optIn();
-                  console.log("✅ OneSignal linked (SDK) for:", osUserId);
-                  return;
-                }
-
-                // Determine role tag for native path
                 const currentRoles = rolesRef.current;
                 const roleTag = currentRoles.includes('driver') ? 'driver' : currentRoles.includes('rider') ? 'rider' : null;
 
-                // Native OneSignal (Median / web SDK v16+)
-                if (typeof os.push === 'function' || Array.isArray(os)) {
-                  // OneSignalDeferred queue pattern
-                  os.push(async function(onesignal: any) {
-                    await onesignal.login(osUserId);
-                    if (roleTag) {
-                      await onesignal.User.addTag("role", roleTag);
-                      console.log("🏷️ OneSignal tagged (deferred native):", roleTag);
-                    }
-                    console.log("✅ OneSignal login (deferred) for:", osUserId);
-                  });
-                } else if (typeof os.login === 'function') {
-                  await os.login(osUserId);
-                  if (roleTag && os.User?.addTag) {
-                    await os.User.addTag("role", roleTag);
-                    console.log("🏷️ OneSignal tagged (direct native):", roleTag);
+                console.log('[OS-SYNC] Step 0: median=', typeof median, 'roles=', currentRoles, 'uid=', osUserId);
+
+                // === STEP 1: Force Registration (Median native bridge) ===
+                if (typeof median !== 'undefined' && median?.onesignal) {
+                  console.log('[OS-SYNC] Step 1: Calling median.onesignal.register()...');
+                  try {
+                    await median.onesignal.register();
+                    console.log('[OS-SYNC] Step 1 ✅: register() completed');
+                  } catch (regErr) {
+                    console.log('[OS-SYNC] Step 1 ❌: register() failed:', regErr);
                   }
-                  console.log("✅ OneSignal login (direct) for:", osUserId);
+
+                  // === 2-second delay to let native bridge fully initialize ===
+                  console.log('[OS-SYNC] Waiting 2s for bridge init...');
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+
+                  // === STEP 2: Identity Sync via Median bridge ===
+                  console.log('[OS-SYNC] Step 2: Calling median.onesignal.login(', osUserId, ')...');
+                  try {
+                    await median.onesignal.login(osUserId);
+                    console.log('[OS-SYNC] Step 2 ✅: login() completed');
+                  } catch (loginErr) {
+                    console.log('[OS-SYNC] Step 2 ❌: login() failed:', loginErr);
+                  }
                 } else {
-                  // react-onesignal fallback
-                  await OneSignal.login(osUserId);
-                  console.log("✅ OneSignal login (react-sdk) for:", osUserId);
+                  console.log('[OS-SYNC] No Median bridge, using web SDK path');
                 }
 
-                // Also try react-onesignal for role tagging & player ID
+                // === STEP 3: Role Tagging (web SDK + native fallback) ===
+                console.log('[OS-SYNC] Step 3: Tagging role=', roleTag);
+                const os = (window as any).OneSignalDeferred || (window as any).OneSignal;
+
+                if (os) {
+                  if (typeof os.push === 'function' || Array.isArray(os)) {
+                    os.push(async function(onesignal: any) {
+                      await onesignal.login(osUserId);
+                      if (roleTag) {
+                        await onesignal.User.addTag("role", roleTag);
+                        console.log("[OS-SYNC] Step 3 ✅: Tagged (deferred):", roleTag);
+                      }
+                      console.log("[OS-SYNC] ✅ OneSignal login (deferred) for:", osUserId);
+                    });
+                  } else if (typeof os.login === 'function') {
+                    await os.login(osUserId);
+                    if (roleTag && os.User?.addTag) {
+                      await os.User.addTag("role", roleTag);
+                      console.log("[OS-SYNC] Step 3 ✅: Tagged (direct):", roleTag);
+                    }
+                    console.log("[OS-SYNC] ✅ OneSignal login (direct) for:", osUserId);
+                  } else {
+                    await OneSignal.login(osUserId);
+                    console.log("[OS-SYNC] ✅ OneSignal login (react-sdk) for:", osUserId);
+                  }
+                } else {
+                  await OneSignal.login(osUserId);
+                  await OneSignal.User.PushSubscription.optIn();
+                  console.log("[OS-SYNC] ✅ OneSignal linked (SDK fallback) for:", osUserId);
+                }
+
+                // React-onesignal role tagging & player ID save
                 try {
                   await OneSignal.User.PushSubscription.optIn();
-                  const currentRoles = rolesRef.current;
-                  if (currentRoles.includes('driver')) {
-                    await OneSignal.User.addTag("role", "driver");
-                    console.log("🏷️ OneSignal tagged as driver");
-                  } else if (currentRoles.includes('rider')) {
-                    await OneSignal.User.addTag("role", "rider");
-                    console.log("🏷️ OneSignal tagged as rider");
+                  if (roleTag) {
+                    await OneSignal.User.addTag("role", roleTag);
+                    console.log("[OS-SYNC] 🏷️ React SDK tagged:", roleTag);
                   }
 
                   const playerId = OneSignal.User.PushSubscription.id;
@@ -475,13 +494,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       .from('profiles')
                       .update({ onesignal_player_id: playerId } as any)
                       .eq('user_id', osUserId);
-                    console.log("✅ OneSignal player ID saved:", playerId);
+                    console.log("[OS-SYNC] ✅ Player ID saved:", playerId);
                   }
                 } catch (tagErr) {
-                  console.log("⚠️ OneSignal tagging skipped (non-blocking):", tagErr);
+                  console.log("[OS-SYNC] ⚠️ React SDK tagging skipped:", tagErr);
                 }
               } catch (e) {
-                console.log("❌ OneSignal init error (non-blocking):", e);
+                console.log("[OS-SYNC] ❌ Fatal error (non-blocking):", e);
               }
             })();
           }, 0);
