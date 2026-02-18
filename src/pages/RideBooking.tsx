@@ -443,7 +443,9 @@ const RideBooking = () => {
       }
 
       // If ride is pending_payment or searching without a succeeded payment, show payment
-      if (activeRide.status === 'pending_payment' || activeRide.status === 'searching') {
+      // Test accounts bypass payment entirely
+      const isTestRestore = (user?.email && TEST_ACCOUNTS.includes(user.email.toLowerCase())) || (user?.email ? getRemainingFreeRides(user.email) > 0 : false);
+      if (!isTestRestore && (activeRide.status === 'pending_payment' || activeRide.status === 'searching')) {
         const {
           data: payment
         } = await supabase.from('payments').select('status').eq('ride_id', activeRide.id).maybeSingle();
