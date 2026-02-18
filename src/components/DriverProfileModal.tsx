@@ -357,6 +357,81 @@ function OneSignalDebugPanel({ userId }: { userId?: string }) {
     setLoading(false);
   };
 
+  const handleDebugSync = async () => {
+    setLoading(true);
+    const results: string[] = [];
+    try {
+      const median = (window as any).median;
+      const OS = (window as any).OneSignal;
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+
+      if (typeof median !== 'undefined') {
+        results.push('✅ Median detected');
+
+        // 1. Register (triggers iOS permission prompt)
+        try {
+          await median.onesignal.register();
+          results.push('✅ median.onesignal.register() called');
+        } catch (e: any) {
+          results.push('❌ register: ' + e.message);
+        }
+
+        // 2. Login with user ID
+        if (uid) {
+          try {
+            await median.onesignal.login(uid);
+            results.push('✅ median.onesignal.login(' + uid.slice(0, 8) + '...)');
+          } catch (e: any) {
+            results.push('❌ login: ' + e.message);
+          }
+        } else {
+          results.push('⚠️ No Supabase user session');
+        }
+      } else {
+        results.push('⚠️ Median not detected (web browser)');
+        // Fallback to web OneSignal
+        if (OS && uid) {
+          try {
+            if (typeof OS.login === 'function') await OS.login(uid);
+            results.push('✅ Web OneSignal.login called');
+          } catch (e: any) {
+            results.push('❌ Web login: ' + e.message);
+          }
+        }
+      }
+
+      // 3. Tag role=driver via web SDK
+      try {
+        if (OS?.User?.addTag) {
+          await OS.User.addTag('role', 'driver');
+          results.push('✅ Tagged role=driver');
+        } else if (typeof OS?.push === 'function' || Array.isArray(OS)) {
+          OS.push(async (os: any) => { await os.User.addTag('role', 'driver'); });
+          results.push('✅ Tagged role=driver (deferred)');
+        } else {
+          results.push('⚠️ Could not tag (no SDK)');
+        }
+      } catch (e: any) {
+        results.push('❌ Tag: ' + e.message);
+      }
+
+      // 4. Read OneSignal ID
+      await new Promise(r => setTimeout(r, 2000));
+      let osId = 'unknown';
+      try {
+        osId = OS?.User?.PushSubscription?.id ?? median?.onesignal?.getPlayerId?.() ?? 'null';
+      } catch { /* ignore */ }
+      results.push('📱 OneSignal ID: ' + osId);
+
+      await readValues();
+      alert(results.join('\n'));
+    } catch (e: any) {
+      alert('Debug Sync error: ' + e.message);
+    }
+    setLoading(false);
+  };
+
   if (!showDebug) {
     return (
       <Button variant="ghost" size="sm" className="w-full text-xs text-muted-foreground" onClick={() => { setShowDebug(true); readValues(); }}>
@@ -377,9 +452,12 @@ function OneSignalDebugPanel({ userId }: { userId?: string }) {
       <div className="flex gap-2 pt-1">
         <Button size="sm" variant="outline" className="flex-1 text-xs" onClick={readValues}>Refresh</Button>
         <Button size="sm" variant="default" className="flex-1 text-xs" onClick={handleForceLink} disabled={loading}>
-          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Force Link OneSignal'}
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Force Link'}
         </Button>
       </div>
+      <Button size="sm" variant="destructive" className="w-full text-xs mt-1" onClick={handleDebugSync} disabled={loading}>
+        {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : '🔧 Debug Sync (Register + Login + Tag)'}
+      </Button>
     </div>
   );
 }
