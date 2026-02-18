@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import OneSignal from 'react-onesignal';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Power, MapPin, Navigation, DollarSign, Clock, Star, User, Phone, UserCircle, Bell, Map, HelpCircle, Gift } from 'lucide-react';
@@ -1099,6 +1100,52 @@ const DriverDashboard = () => {
                 )}
               </div>
             </Card>
+
+            {/* Fix Notifications button — manually re-trigger native permission */}
+            <Button
+              variant="outline"
+              className="w-full mb-3 border-primary/50 text-primary hover:bg-primary/10"
+              onClick={async () => {
+                const median = (window as any).median;
+                if (typeof median !== 'undefined' && median?.onesignal) {
+                  try {
+                    console.log('[FixNotif] Calling median.onesignal.register()...');
+                    await median.onesignal.register();
+                    // Wait and check info
+                    await new Promise(r => setTimeout(r, 3000));
+                    const info = median.onesignal.info ? await median.onesignal.info() : null;
+                    const isEmpty = !info || Object.keys(info).length === 0;
+                    if (!isEmpty) {
+                      // Proceed with login + tag
+                      if (user?.id) {
+                        await median.onesignal.login(user.id);
+                        const osObj = (window as any).OneSignal;
+                        if (osObj?.User?.addTag) {
+                          await osObj.User.addTag('role', 'driver');
+                        }
+                      }
+                      const playerId = info?.oneSignalId || info?.playerId || info?.userId || 'none';
+                      window.alert(`✅ Fixed!\nPlayer ID: ${playerId}\nInfo: ${JSON.stringify(info, null, 2)}`);
+                    } else {
+                      window.alert('❌ Still empty after retry.\nCheck Xcode App Groups & APNs certificate.');
+                    }
+                  } catch (err) {
+                    window.alert('❌ Error: ' + String(err));
+                  }
+                } else {
+                  // Web fallback
+                  try {
+                    await OneSignal.Notifications.requestPermission();
+                    toast({ title: 'Permission requested' });
+                  } catch (err) {
+                    window.alert('Error: ' + String(err));
+                  }
+                }
+              }}
+            >
+              <Bell className="h-4 w-4 mr-2" />
+              {language === 'fr' ? 'Réparer Notifications' : 'Fix Notifications'}
+            </Button>
 
             {/* Push Notifications (critical for new ride alerts when app is backgrounded) */}
             {!pushSubscribed && (
