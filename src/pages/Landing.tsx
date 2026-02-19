@@ -1,5 +1,6 @@
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Car, Clock, Shield, Headphones, TrendingDown, MapPin, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -34,9 +35,48 @@ const Landing = () => {
   } = useLanguage();
   const {
     user,
+    session,
+    roles,
+    authLoading,
     isRider,
-    isDriver
+    isDriver,
+    isAdmin
   } = useAuth();
+  const navigate = useNavigate();
+
+  // Redirect logged-in users to their role-based dashboard
+  useEffect(() => {
+    if (authLoading) return;
+    if (!session?.user) return;
+
+    if (isAdmin) {
+      navigate('/admin', { replace: true });
+    } else if (isDriver) {
+      navigate('/driver', { replace: true });
+    } else if (isRider) {
+      navigate('/ride', { replace: true });
+    }
+    // If roles are loaded but empty, user stays on landing (edge case)
+  }, [authLoading, session?.user, roles, isAdmin, isDriver, isRider, navigate]);
+
+  // Show loader while auth is resolving to prevent landing page flash
+  if (authLoading || (session?.user && roles.length === 0)) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground text-lg">Loading…</div>
+      </div>
+    );
+  }
+
+  // If user is logged in with a role, don't render landing (redirect is in progress)
+  if (session?.user && (isDriver || isRider || isAdmin)) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground text-lg">Loading…</div>
+      </div>
+    );
+  }
+
   return <div className="min-h-screen bg-background relative">
       {/* Full-page background image */}
       <div className="fixed inset-0 z-0" style={{
