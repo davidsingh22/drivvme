@@ -1345,8 +1345,11 @@ const RideBooking = () => {
       }} />
         
         {/* Full-bleed Map - with transparency to show background */}
+        {/* CRITICAL: bottom ~65vh is the booking sheet — clip the map's touch target
+            so Mapbox's canvas never steals taps from the sheet on real iOS devices. */}
         <div className="absolute inset-0 z-10" style={{
-        opacity: 0.85
+        opacity: 0.85,
+        clipPath: 'inset(0 0 55% 0)',
       }}>
           <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} />
         </div>
@@ -1489,11 +1492,17 @@ const RideBooking = () => {
             <GreetingHeader />
             
             {/* Pickup Location Row */}
-            <div 
+            {/* CRITICAL: Use <button> — iOS WKWebView doesn't reliably fire
+                click/touch on <div> elements. Semantic buttons always work. */}
+            <button 
+              type="button"
               onClick={() => { console.log('[RideBooking] 📱 Pickup Edit onClick'); setShowFullInput(true); }}
-              onTouchStart={(e) => { console.log('[RideBooking] 📱 Pickup Edit onTouchStart'); }}
-              onPointerDown={(e) => { console.log('[RideBooking] 📱 Pickup Edit onPointerDown'); e.stopPropagation(); }}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" 
+              onTouchEnd={(e) => { 
+                console.log('[RideBooking] 📱 Pickup Edit onTouchEnd'); 
+                e.preventDefault(); // Prevent ghost click / double fire
+                setShowFullInput(true); 
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors text-left" 
               style={{
                 background: 'rgba(40, 20, 60, 0.7)',
                 border: '1.5px solid rgba(200, 50, 255, 0.6)',
@@ -1501,6 +1510,8 @@ const RideBooking = () => {
                 pointerEvents: 'auto',
                 position: 'relative',
                 zIndex: 30,
+                WebkitTapHighlightColor: 'transparent',
+                WebkitAppearance: 'none' as any,
               }}>
               <div className="h-9 w-9 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0">
                 <Navigation className="h-4 w-4 text-lime-400" />
@@ -1511,7 +1522,7 @@ const RideBooking = () => {
               <span className="text-white font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/15">
                 {language === 'fr' ? 'Éditer' : 'Edit'}
               </span>
-            </div>
+            </button>
 
             {/* GPS slow/failed CTA — never blocks, just a helpful nudge */}
             {(gpsStatus === 'slow' || gpsStatus === 'failed') && (
@@ -1545,7 +1556,12 @@ const RideBooking = () => {
             position: 'relative',
             zIndex: 30,
           }}
-            onTouchStart={() => console.log('[RideBooking] 📱 Where to? wrapper onTouchStart')}
+            onTouchEnd={(e) => {
+              console.log('[RideBooking] 📱 Where to? wrapper onTouchEnd');
+              // Focus the input inside on iOS tap
+              const input = e.currentTarget.querySelector('input');
+              if (input) input.focus();
+            }}
           >
               <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => handleDropoffChange(addr, coords)} placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'} />
             </div>

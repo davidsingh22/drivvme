@@ -366,6 +366,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                 type="button"
                 className="w-full px-4 py-3 text-left hover:bg-muted transition-colors border-b border-border last:border-b-0 flex items-start gap-3"
                 onClick={() => handleSelectSuggestion(suggestion)}
+                onTouchEnd={(e) => { e.preventDefault(); handleSelectSuggestion(suggestion); }}
               >
                 {suggestion.isRecent ? (
                   <Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
