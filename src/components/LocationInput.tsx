@@ -210,6 +210,10 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
   const searchMapbox = async (query: string, accessToken: string): Promise<Suggestion[]> => {
     try {
+      // ── Diagnostic: log token availability (masked) ──
+      const tokenPrefix = accessToken ? accessToken.substring(0, 6) + '...' : 'MISSING';
+      console.log(`[LocationInput] Mapbox search: query="${query}", token=${tokenPrefix}`);
+
       // Use Mapbox Search Box API for superior POI discovery
       const sessionToken = crypto.randomUUID();
       
@@ -224,12 +228,31 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         proximity: '-73.5673,45.5017',
       });
       
-      const response = await fetch(
-        `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`
-      );
+      const suggestUrl = `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`;
+      console.log(`[LocationInput] Suggest URL (no token): ${suggestUrl.replace(accessToken, '***')}`);
+      
+      const response = await fetch(suggestUrl);
+      console.log(`[LocationInput] Suggest HTTP ${response.status}`);
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        console.error(`[LocationInput] Suggest failed ${response.status}: ${errBody.substring(0, 200)}`);
+        if (response.status === 401 || response.status === 403 || response.status === 404) {
+          setSearchFailed(true);
+        }
+        // Fallback to direct geocoding on auth errors
+        return await searchMapboxGeocoding(query, accessToken);
+      }
+
       const data = await response.json();
+      console.log(`[LocationInput] Suggest returned ${data.suggestions?.length ?? 0} suggestions`);
 
       if (data.suggestions && data.suggestions.length > 0) {
+        // Log first 2 results for diagnostics
+        data.suggestions.slice(0, 2).forEach((s: any, i: number) => {
+          console.log(`[LocationInput] Result ${i}: "${s.name}" — ${s.full_address || s.place_formatted || ''}`);
+        });
+
         const detailedSuggestions = await Promise.all(
           data.suggestions.slice(0, 8).map(async (s: any) => {
             try {
@@ -240,6 +263,18 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
               const retrieveResponse = await fetch(
                 `https://api.mapbox.com/search/searchbox/v1/retrieve/${s.mapbox_id}?${retrieveParams}`
               );
+              
+              if (!retrieveResponse.ok) {
+                console.warn(`[LocationInput] Retrieve failed for ${s.name}: HTTP ${retrieveResponse.status}`);
+                // Return suggestion from suggest data as fallback
+                return {
+                  id: s.mapbox_id,
+                  name: s.name || 'Unknown',
+                  address: s.full_address || s.place_formatted || '',
+                  center: [0, 0] as [number, number], // Will be filtered if no coords
+                } as Suggestion | null;
+              }
+              
               const retrieveData = await retrieveResponse.json();
               
               if (retrieveData.features && retrieveData.features.length > 0) {
@@ -269,50 +304,78 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                 };
               }
               return null;
-            } catch {
+            } catch (retrieveErr) {
+              console.warn(`[LocationInput] Retrieve error for ${s.name}:`, retrieveErr);
               return null;
             }
           })
         );
 
-        return detailedSuggestions.filter((s): s is Suggestion => s !== null);
-      } else {
-        // Fallback to geocoding API
-        const geocodeParams = new URLSearchParams({
-          access_token: accessToken,
-          country: 'ca',
-          types: 'poi,address,place,locality,neighborhood',
-          limit: '10',
-          fuzzyMatch: 'true',
-          autocomplete: 'true',
-          proximity: '-73.5673,45.5017',
-          language: 'en,fr',
-        });
+        const results = detailedSuggestions.filter((s): s is Suggestion => s !== null && s.center[0] !== 0);
+        console.log(`[LocationInput] Final results: ${results.length} after retrieve`);
         
-        const geocodeResponse = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${geocodeParams}`
-        );
-        const geocodeData = await geocodeResponse.json();
-
-        if (geocodeData.features) {
-          return geocodeData.features.map((f: any) => {
-            const parts = f.place_name.split(', ');
-            const name = parts[0] || f.place_name;
-            const address = parts.slice(1).join(', ') || '';
-            return {
-              id: f.id,
-              name,
-              address,
-              center: f.center,
-            };
-          });
-        }
+        if (results.length > 0) return results;
+        // If all retrieves failed, fall back to geocoding
+        return await searchMapboxGeocoding(query, accessToken);
+      } else {
+        // No suggestions, fallback to geocoding API
+        return await searchMapboxGeocoding(query, accessToken);
       }
-      return [];
     } catch (err) {
-      console.error('Mapbox search error:', err);
+      console.error('[LocationInput] Mapbox search error:', err);
+      // Last resort: try direct geocoding
+      try {
+        return await searchMapboxGeocoding(query, accessToken);
+      } catch {
+        return [];
+      }
+    }
+  };
+
+  // Direct Mapbox Geocoding v5 fallback — no map needed, works independently
+  const searchMapboxGeocoding = async (query: string, accessToken: string): Promise<Suggestion[]> => {
+    console.log(`[LocationInput] Geocoding fallback for: "${query}"`);
+    const geocodeParams = new URLSearchParams({
+      access_token: accessToken,
+      country: 'ca',
+      types: 'poi,address,place,locality,neighborhood',
+      limit: '10',
+      fuzzyMatch: 'true',
+      autocomplete: 'true',
+      proximity: '-73.5673,45.5017',
+      language: 'en,fr',
+    });
+    
+    const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${geocodeParams}`;
+    const geocodeResponse = await fetch(geocodeUrl);
+    console.log(`[LocationInput] Geocoding HTTP ${geocodeResponse.status}`);
+    
+    if (!geocodeResponse.ok) {
+      console.error(`[LocationInput] Geocoding failed: HTTP ${geocodeResponse.status}`);
       return [];
     }
+    
+    const geocodeData = await geocodeResponse.json();
+    console.log(`[LocationInput] Geocoding returned ${geocodeData.features?.length ?? 0} features`);
+
+    if (geocodeData.features) {
+      geocodeData.features.slice(0, 2).forEach((f: any, i: number) => {
+        console.log(`[LocationInput] Geocode ${i}: "${f.place_name}"`);
+      });
+      
+      return geocodeData.features.map((f: any) => {
+        const parts = f.place_name.split(', ');
+        const name = parts[0] || f.place_name;
+        const address = parts.slice(1).join(', ') || '';
+        return {
+          id: f.id,
+          name,
+          address,
+          center: f.center,
+        };
+      });
+    }
+    return [];
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
