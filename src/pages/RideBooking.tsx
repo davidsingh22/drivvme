@@ -188,7 +188,7 @@ const RideBooking = () => {
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
+  // Spinner fully removed — no detecting state needed
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const {
@@ -382,7 +382,7 @@ const RideBooking = () => {
     if (!navigator.geolocation) return;
     hasAutoDetectedLocation.current = true;
     // Only show detecting spinner if we have NO cached address
-    if (!pickupAddress) setIsDetectingLocation(true);
+    // No spinner to show — cache-first model
 
     let softTimerFired = false;
     let resolved = false;
@@ -390,14 +390,14 @@ const RideBooking = () => {
     // 3s soft timeout – stop showing "detecting" but keep trying
     const softTimer = setTimeout(() => {
       softTimerFired = true;
-      setIsDetectingLocation(false);
+      // no-op: spinner removed
     }, 3000);
 
     // 8s hard timeout – give up entirely
     const hardTimer = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        setIsDetectingLocation(false);
+        // no-op: spinner removed
       }
     }, 8000);
 
@@ -410,7 +410,7 @@ const RideBooking = () => {
         try {
           localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: address, ts: Date.now() }));
         } catch { /* ignore */ }
-        setIsDetectingLocation(false);
+        // no-op: spinner removed
         resolved = true;
         return;
       }
@@ -421,7 +421,7 @@ const RideBooking = () => {
       try {
         localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: coordAddress, ts: Date.now() }));
       } catch { /* ignore */ }
-      setIsDetectingLocation(false);
+      // no-op: spinner removed
       resolved = true;
     };
 
@@ -442,7 +442,7 @@ const RideBooking = () => {
       },
       (error) => {
         console.log('[RideBooking] GPS auto-detect failed:', error.message);
-        setIsDetectingLocation(false);
+        // no-op: spinner removed
         resolved = true;
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
@@ -467,7 +467,7 @@ const RideBooking = () => {
             ...prev,
             address
           } : null);
-          setIsDetectingLocation(false);
+          // no-op: spinner removed
         }
       });
     }
@@ -1342,7 +1342,7 @@ const RideBooking = () => {
     const hasRealAddress = pickupAddress && !genericLabels.includes(pickupAddress);
     const displayPickupAddress = hasRealAddress
       ? pickupAddress.split(',')[0]
-      : (language === 'fr' ? 'Définir le lieu de départ' : 'Set pickup location');
+      : (language === 'fr' ? 'Position actuelle' : 'Current Location');
 
     return (
       <div className="min-h-[100dvh] bg-background flex flex-col">
@@ -1422,9 +1422,7 @@ const RideBooking = () => {
               <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Départ' : 'Pickup'}</p>
               <p className="text-sm font-medium text-foreground truncate">{displayPickupAddress}</p>
             </div>
-            {isDetectingLocation && (
-              <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin flex-shrink-0" />
-            )}
+            {/* Spinner removed — address or fallback always visible */}
             <span className="text-xs font-medium text-primary flex-shrink-0 px-2.5 py-1 rounded-full border border-primary/30">
               {language === 'fr' ? 'Éditer' : 'Edit'}
             </span>
