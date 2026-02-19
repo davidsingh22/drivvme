@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -114,6 +114,7 @@ const RideBooking = () => {
     clearRide
   } = useActiveRide(user?.id);
   const hasRestoredRide = useRef(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState<RideStep>('input');
   const [pickup, setPickup] = useState<Location | null>(null);
   const [dropoff, setDropoff] = useState<Location | null>(null);
@@ -1147,6 +1148,16 @@ const RideBooking = () => {
     clearRide(); // Clear from localStorage
     hasRestoredRide.current = false;
   };
+
+  // Reset booking when navigating with ?new=1
+  useEffect(() => {
+    if (searchParams.get('new') === '1') {
+      resetBooking();
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [searchParams]);
+
 
   // isActiveRidePhase already declared above for realtime tracking
   // Use ride notifications hook (must be before any returns)
