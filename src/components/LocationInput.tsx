@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback, forwardRef } from 'react';
-import { MapPin, Navigation, Loader2, Clock, Star } from 'lucide-react';
+import { MapPin, Navigation, Loader2, Clock, Star, Edit3 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { supabase } from '@/integrations/supabase/client';
@@ -23,6 +24,7 @@ interface Suggestion {
   isCustom?: boolean;
   isRecent?: boolean;
   visitCount?: number;
+  isManual?: boolean;
 }
 
 const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
@@ -32,16 +34,20 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   placeholder,
   onUseCurrentLocation,
 }, ref) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { user } = useAuth();
-  const { token, loading: tokenLoading } = useMapboxToken();
+  const { token } = useMapboxToken();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [recentDestinations, setRecentDestinations] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingQueryRef = useRef<string | null>(null);
+  const tokenRef = useRef(token);
+  tokenRef.current = token;
 
   const icon = type === 'pickup' ? (
     <MapPin className="h-5 w-5 text-primary" />
@@ -119,8 +125,17 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     );
   };
 
+  // When token arrives and there's a pending query, execute it
+  useEffect(() => {
+    if (token && pendingQueryRef.current) {
+      const query = pendingQueryRef.current;
+      pendingQueryRef.current = null;
+      searchPlaces(query);
+    }
+  }, [token]);
+
   const searchPlaces = useCallback(async (query: string) => {
-    if (!token || query.length < 2) {
+    if (query.length < 2) {
       // If no query but we have recent destinations (dropoff only), show them
       if (type === 'dropoff' && recentDestinations.length > 0 && query.length === 0) {
         setSuggestions(recentDestinations);
@@ -132,16 +147,28 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     }
 
     setIsSearching(true);
+    setSearchFailed(false);
     try {
-      // Search recent destinations, custom locations, and Mapbox in parallel
+      // Search recent destinations and custom locations (no token needed)
       const recentResults = searchRecentDestinations(query);
-      const [customResults, mapboxResults] = await Promise.all([
-        searchCustomLocations(query),
-        searchMapbox(query, token),
-      ]);
+      const customResults = await searchCustomLocations(query);
+      
+      // Search Mapbox only if token is available
+      let mapboxResults: Suggestion[] = [];
+      const currentToken = tokenRef.current;
+      if (currentToken) {
+        try {
+          mapboxResults = await searchMapbox(query, currentToken);
+        } catch (err) {
+          console.warn('[LocationInput] Mapbox search failed, showing local results + manual fallback');
+          setSearchFailed(true);
+        }
+      } else {
+        // Token not ready yet — save query and retry when token arrives
+        pendingQueryRef.current = query;
+      }
 
       // Combine results: recent first, then custom, then Mapbox
-      // Deduplicate by removing Mapbox results that match recent destinations
       const recentIds = new Set(recentResults.map(r => `${r.center[0]}-${r.center[1]}`));
       const customIds = new Set(customResults.map(r => `${r.center[0]}-${r.center[1]}`));
       
@@ -151,14 +178,35 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       });
 
       const combined = [...recentResults, ...customResults, ...filteredMapbox];
+      
+      // If no results and token failed or missing, add "enter manually" fallback
+      if (combined.length === 0 || searchFailed) {
+        combined.push({
+          id: 'manual-entry',
+          name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
+          address: query,
+          center: [0, 0],
+          isManual: true,
+        });
+      }
+      
       setSuggestions(combined);
       setShowSuggestions(combined.length > 0);
     } catch (err) {
       console.error('Search error:', err);
+      // Show manual entry fallback on error
+      setSuggestions([{
+        id: 'manual-entry',
+        name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
+        address: query,
+        center: [0, 0],
+        isManual: true,
+      }]);
+      setShowSuggestions(true);
     } finally {
       setIsSearching(false);
     }
-  }, [token, type, recentDestinations]);
+  }, [type, recentDestinations, language]);
 
   const searchMapbox = async (query: string, accessToken: string): Promise<Suggestion[]> => {
     try {
@@ -281,6 +329,13 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   };
 
   const handleSelectSuggestion = (suggestion: Suggestion) => {
+    if (suggestion.isManual) {
+      // Manual entry: use the typed text as the address, no coordinates
+      onChange(suggestion.address);
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
     const fullAddress = suggestion.address ? `${suggestion.name}, ${suggestion.address}` : suggestion.name;
     onChange(fullAddress, {
       lat: suggestion.center[1],
@@ -330,21 +385,38 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
             }
           }}
           placeholder={placeholder || t(`booking.${type}`)}
-          className="pl-10 py-6 bg-background"
-          disabled={tokenLoading}
+          className="pl-10 py-6 bg-background touch-manipulation"
         />
+
+        {/* Loading skeletons while searching */}
+        {isSearching && !showSuggestions && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 p-2 space-y-2">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="flex items-center gap-3 px-2 py-2">
+                <Skeleton className="h-5 w-5 rounded-full shrink-0" />
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Suggestions dropdown */}
         {showSuggestions && suggestions.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 overflow-hidden max-h-[60vh] overflow-y-auto">
             {suggestions.map((suggestion) => (
               <button
                 key={suggestion.id}
                 type="button"
-                className="w-full px-4 py-3 text-left hover:bg-muted transition-colors border-b border-border last:border-b-0 flex items-start gap-3"
+                className="w-full px-4 py-3 text-left hover:bg-muted active:bg-muted transition-colors border-b border-border last:border-b-0 flex items-start gap-3 touch-manipulation"
+                onTouchEnd={(e) => { e.preventDefault(); handleSelectSuggestion(suggestion); }}
                 onClick={() => handleSelectSuggestion(suggestion)}
               >
-                {suggestion.isRecent ? (
+                {suggestion.isManual ? (
+                  <Edit3 className="h-5 w-5 text-accent mt-0.5 shrink-0" />
+                ) : suggestion.isRecent ? (
                   <Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
                 ) : (
                   <MapPin className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
@@ -358,7 +430,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                       </span>
                     )}
                   </div>
-                  {suggestion.address && (
+                  {suggestion.address && !suggestion.isManual && (
                     <span className="text-sm text-muted-foreground truncate">{suggestion.address}</span>
                   )}
                 </div>
