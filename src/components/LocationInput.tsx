@@ -135,13 +135,18 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   }, [token]);
 
   const searchPlaces = useCallback(async (query: string) => {
-    if (query.length < 2) {
+    const trimmed = query.trim();
+
+    // Don't search for empty, too-short, or numeric-only input
+    if (trimmed.length < 2 || /^\d+$/.test(trimmed)) {
+      setIsSearching(false);
       // If no query but we have recent destinations (dropoff only), show them
-      if (type === 'dropoff' && recentDestinations.length > 0 && query.length === 0) {
+      if (type === 'dropoff' && recentDestinations.length > 0 && trimmed.length === 0) {
         setSuggestions(recentDestinations);
         setShowSuggestions(true);
-      } else {
+      } else if (trimmed.length === 0) {
         setSuggestions([]);
+        setShowSuggestions(false);
       }
       return;
     }
@@ -386,6 +391,14 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       clearTimeout(debounceRef.current);
     }
 
+    const trimmed = newValue.trim();
+    // Immediately show recents for empty dropoff, don't debounce
+    if (trimmed.length === 0 && type === 'dropoff' && recentDestinations.length > 0) {
+      setSuggestions(recentDestinations);
+      setShowSuggestions(true);
+      return;
+    }
+
     debounceRef.current = setTimeout(() => {
       searchPlaces(newValue);
     }, 300);
@@ -432,7 +445,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     <div ref={ref || containerRef} className="relative flex gap-2">
       <div className="flex-1 relative" ref={containerRef}>
         <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
-          {isSearching ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : icon}
+          {isSearching && value.trim().length >= 2 && !/^\d+$/.test(value.trim()) ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : icon}
         </div>
         <Input
           ref={inputRef}
@@ -451,8 +464,8 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           className="pl-10 py-6 bg-background touch-manipulation"
         />
 
-        {/* Loading skeletons while searching */}
-        {isSearching && !showSuggestions && (
+        {/* Loading skeletons while searching — only when a real query is in-flight */}
+        {isSearching && !showSuggestions && value.trim().length >= 2 && !/^\d+$/.test(value.trim()) && (
           <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 p-2 space-y-2">
             {[1, 2, 3].map(i => (
               <div key={i} className="flex items-center gap-3 px-2 py-2">
