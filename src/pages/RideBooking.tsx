@@ -1343,6 +1343,7 @@ const RideBooking = () => {
     const displayPickupAddress = hasRealAddress
       ? pickupAddress.split(',')[0]
       : (language === 'fr' ? 'Position actuelle' : 'Current Location');
+    const isFallback = !hasRealAddress;
 
     return (
       <div className="min-h-[100dvh] bg-background flex flex-col">
@@ -1420,7 +1421,7 @@ const RideBooking = () => {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Départ' : 'Pickup'}</p>
-              <p className="text-sm font-medium text-foreground truncate">{displayPickupAddress}</p>
+              <p className={`text-sm truncate transition-all duration-300 ${isFallback ? 'font-bold text-primary' : 'font-medium text-foreground animate-fade-in'}`}>{displayPickupAddress}</p>
             </div>
             {/* Spinner removed — address or fallback always visible */}
             <span className="text-xs font-medium text-primary flex-shrink-0 px-2.5 py-1 rounded-full border border-primary/30">
