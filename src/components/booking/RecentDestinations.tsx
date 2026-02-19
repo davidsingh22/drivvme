@@ -20,11 +20,14 @@ interface RecentDestinationsProps {
   onSelectDestination: (destination: { address: string; lat: number; lng: number }) => void;
 }
 
+const CACHE_KEY = 'drivveme_recent_destinations';
+
 export const RecentDestinations: React.FC<RecentDestinationsProps> = ({ onSelectDestination }) => {
   const { language } = useLanguage();
   const { user } = useAuth();
 
-  const { data: destinations = [], isLoading } = useQuery({
+  // Cache-first: initialData from localStorage, no skeletons
+  const { data: destinations = [] } = useQuery({
     queryKey: ['recent-destinations', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
@@ -41,53 +44,32 @@ export const RecentDestinations: React.FC<RecentDestinationsProps> = ({ onSelect
         return [];
       }
       
-      return data as RecentDestination[];
+      const result = data as RecentDestination[];
+      try { localStorage.setItem(CACHE_KEY, JSON.stringify(result)); } catch {}
+      return result;
     },
     enabled: !!user?.id,
-    staleTime: 60000, // 1 minute
+    staleTime: 60000,
+    initialData: () => {
+      try {
+        const cached = localStorage.getItem(CACHE_KEY);
+        return cached ? JSON.parse(cached) : undefined;
+      } catch { return undefined; }
+    },
   });
-
-  if (isLoading) {
-    return (
-      <div className="space-y-2">
-        {[1, 2, 3].map((i) => (
-          <div key={i} className="animate-pulse flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-            <div className="h-10 w-10 rounded-full bg-muted" />
-            <div className="flex-1 space-y-2">
-              <div className="h-4 w-24 bg-muted rounded" />
-              <div className="h-3 w-32 bg-muted rounded" />
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
 
   if (destinations.length === 0) {
     return null;
   }
 
-  // Get icon based on destination name
   const getDestinationIcon = (name: string) => {
     const lowerName = name.toLowerCase();
-    if (lowerName.includes('airport') || lowerName.includes('aéroport')) {
-      return '✈️';
-    }
-    if (lowerName.includes('work') || lowerName.includes('travail') || lowerName.includes('bureau')) {
-      return '💼';
-    }
-    if (lowerName.includes('home') || lowerName.includes('maison') || lowerName.includes('domicile')) {
-      return '🏠';
-    }
-    if (lowerName.includes('gym') || lowerName.includes('sport') || lowerName.includes('fitness')) {
-      return '🏋️';
-    }
-    if (lowerName.includes('restaurant') || lowerName.includes('café') || lowerName.includes('bar')) {
-      return '🍽️';
-    }
-    if (lowerName.includes('hotel') || lowerName.includes('hôtel')) {
-      return '🏨';
-    }
+    if (lowerName.includes('airport') || lowerName.includes('aéroport')) return '✈️';
+    if (lowerName.includes('work') || lowerName.includes('travail') || lowerName.includes('bureau')) return '💼';
+    if (lowerName.includes('home') || lowerName.includes('maison') || lowerName.includes('domicile')) return '🏠';
+    if (lowerName.includes('gym') || lowerName.includes('sport') || lowerName.includes('fitness')) return '🏋️';
+    if (lowerName.includes('restaurant') || lowerName.includes('café') || lowerName.includes('bar')) return '🍽️';
+    if (lowerName.includes('hotel') || lowerName.includes('hôtel')) return '🏨';
     return null;
   };
 

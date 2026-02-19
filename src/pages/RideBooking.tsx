@@ -115,8 +115,14 @@ const RideBooking = () => {
   } = useActiveRide(user?.id);
   const hasRestoredRide = useRef(false);
 
-  // Prefetch recent destinations into state on mount for instant display
-  const [prefetchedDestinations, setPrefetchedDestinations] = useState<any[]>([]);
+  // Cache-first destinations: render from localStorage instantly, update from DB in background
+  const DEST_CACHE_KEY = 'drivveme_cached_destinations';
+  const [prefetchedDestinations, setPrefetchedDestinations] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem(DEST_CACHE_KEY);
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
   const hasPrefetched = useRef(false);
   useEffect(() => {
     if (!user?.id || hasPrefetched.current) return;
@@ -128,7 +134,10 @@ const RideBooking = () => {
       .order('last_visited_at', { ascending: false })
       .limit(10)
       .then(({ data }) => {
-        if (data) setPrefetchedDestinations(data);
+        if (data && data.length > 0) {
+          setPrefetchedDestinations(data);
+          try { localStorage.setItem(DEST_CACHE_KEY, JSON.stringify(data)); } catch {}
+        }
       });
   }, [user?.id]);
   const [step, setStep] = useState<RideStep>('input');
@@ -158,7 +167,7 @@ const RideBooking = () => {
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const {
@@ -362,11 +371,10 @@ const RideBooking = () => {
   // Background GPS detection with 3s/8s timeouts, caches result
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
-    if (!navigator.geolocation) {
-      setIsDetectingLocation(false);
-      return;
-    }
+    if (!navigator.geolocation) return;
     hasAutoDetectedLocation.current = true;
+    // Only show detecting spinner if we have NO cached address
+    if (!pickupAddress) setIsDetectingLocation(true);
 
     let softTimerFired = false;
     let resolved = false;
@@ -414,11 +422,11 @@ const RideBooking = () => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
 
-        // Store coords immediately so pickup is never null
+        // Store coords immediately so pickup is never null — but don't overwrite a cached address
         if (!pickup) {
-          const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
-          setPickup({ address: tempAddress, lat, lng });
-          setPickupAddress(tempAddress);
+          setPickup({ address: pickupAddress || '', lat, lng });
+        } else if (!pickup.lat || !pickup.lng) {
+          setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
         }
 
         if (!mapboxToken) return; // effect below will resolve address
@@ -1322,11 +1330,11 @@ const RideBooking = () => {
 
   // DEFAULT BOOKING FLOW - MAP-FREE "WHERE TO?" SCREEN
   if (step === 'input') {
-    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress)
+    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', ''];
+    const hasRealAddress = pickupAddress && !genericLabels.includes(pickupAddress);
+    const displayPickupAddress = hasRealAddress
       ? pickupAddress.split(',')[0]
-      : isDetectingLocation
-        ? (language === 'fr' ? 'Détection...' : 'Detecting...')
-        : (pickupAddress?.split(',')[0] || (language === 'fr' ? 'Définir le lieu de départ' : 'Set pickup location'));
+      : (language === 'fr' ? 'Définir le lieu de départ' : 'Set pickup location');
 
     return (
       <div className="min-h-[100dvh] bg-background flex flex-col">
