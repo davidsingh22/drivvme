@@ -141,16 +141,21 @@ const RideBooking = () => {
       });
   }, [user?.id]);
   const [step, setStep] = useState<RideStep>('input');
-  // Cache-first: initialize pickup from localStorage immediately so UI never shows "Set pickup location"
+  // Cache-first: initialize pickup from localStorage immediately — never show placeholder
   const [pickup, setPickup] = useState<Location | null>(() => {
     try {
       const cached = localStorage.getItem('drivveme_last_pickup');
       if (cached) {
-        const { lat, lng, addressLabel, ts } = JSON.parse(cached);
-        if (lat && lng && addressLabel && Date.now() - ts < 60 * 60 * 1000) {
+        const { lat, lng, addressLabel } = JSON.parse(cached);
+        if (lat && lng && addressLabel) {
           return { address: addressLabel, lat, lng };
         }
       }
+    } catch {}
+    // Fallback: try simple key
+    try {
+      const simple = localStorage.getItem('last_pickup_address');
+      if (simple) return { address: simple, lat: 0, lng: 0 };
     } catch {}
     return null;
   });
@@ -159,9 +164,14 @@ const RideBooking = () => {
     try {
       const cached = localStorage.getItem('drivveme_last_pickup');
       if (cached) {
-        const { addressLabel, ts } = JSON.parse(cached);
-        if (addressLabel && Date.now() - ts < 60 * 60 * 1000) return addressLabel;
+        const { addressLabel } = JSON.parse(cached);
+        if (addressLabel) return addressLabel;
       }
+    } catch {}
+    // Fallback: try simple key
+    try {
+      const simple = localStorage.getItem('last_pickup_address');
+      if (simple) return simple;
     } catch {}
     return '';
   });
@@ -406,9 +416,10 @@ const RideBooking = () => {
       if (address) {
         setPickupAddress(address);
         setPickup({ address, lat, lng });
-        // Cache in localStorage
+        // Cache in localStorage — both structured and simple keys
         try {
           localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: address, ts: Date.now() }));
+          localStorage.setItem('last_pickup_address', address);
         } catch { /* ignore */ }
         // no-op: spinner removed
         resolved = true;
@@ -420,6 +431,7 @@ const RideBooking = () => {
       setPickup({ address: coordAddress, lat, lng });
       try {
         localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: coordAddress, ts: Date.now() }));
+        localStorage.setItem('last_pickup_address', coordAddress);
       } catch { /* ignore */ }
       // no-op: spinner removed
       resolved = true;
@@ -889,6 +901,11 @@ const RideBooking = () => {
         address,
         ...location
       });
+      // Force-save to localStorage on every manual pickup change
+      try {
+        localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat: location.lat, lng: location.lng, addressLabel: address, ts: Date.now() }));
+        localStorage.setItem('last_pickup_address', address);
+      } catch {}
     }
   };
   const handleDropoffChange = (address: string, location?: {
@@ -928,34 +945,51 @@ const RideBooking = () => {
     });
   };
   const calculateRoute = useCallback(async () => {
-    if (!pickup || !dropoff) return;
+    if (!dropoff) return;
+    // Use pickup coords if available; if pickup has no real coords (lat=0), skip Mapbox and use fallback math
+    const pickupToUse = pickup && pickup.lat !== 0 && pickup.lng !== 0 ? pickup : null;
     try {
-      // Use the same Directions API as the map rendering so the estimate matches the real route.
-      // Fallback to a rough estimate only if we don't have a token.
       let estimatedDistance = 0;
       let estimatedDuration = 0;
-      if (mapboxToken) {
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}?overview=false&alternatives=false&access_token=${mapboxToken}`;
-        const res = await fetch(url);
-        const data = await res.json();
-        const route = data?.routes?.[0];
-
-        // Mapbox returns distance in meters, duration in seconds
-        if (!route?.distance || !route?.duration) {
-          throw new Error('No route returned');
+      if (pickupToUse && mapboxToken) {
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${pickupToUse.lng},${pickupToUse.lat};${dropoff.lng},${dropoff.lat}?overview=false&alternatives=false&access_token=${mapboxToken}`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        try {
+          const res = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeout);
+          const data = await res.json();
+          const route = data?.routes?.[0];
+          if (route?.distance && route?.duration) {
+            estimatedDistance = route.distance / 1000;
+            estimatedDuration = route.duration / 60;
+          } else {
+            throw new Error('No route returned');
+          }
+        } catch {
+          clearTimeout(timeout);
+          // Fallback to straight-line
+          if (pickupToUse) {
+            const R = 6371;
+            const dLat = (dropoff.lat - pickupToUse.lat) * Math.PI / 180;
+            const dLon = (dropoff.lng - pickupToUse.lng) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(pickupToUse.lat * Math.PI / 180) * Math.cos(dropoff.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+            estimatedDistance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.4;
+            estimatedDuration = estimatedDistance / 30 * 60;
+          }
         }
-        estimatedDistance = route.distance / 1000;
-        estimatedDuration = route.duration / 60;
-      } else {
-        // Rough fallback (straight-line with a road factor)
-        const R = 6371; // Earth's radius in km
-        const dLat = (dropoff.lat - pickup.lat) * Math.PI / 180;
-        const dLon = (dropoff.lng - pickup.lng) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(pickup.lat * Math.PI / 180) * Math.cos(dropoff.lat * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        const straightLineDistance = R * c;
-        estimatedDistance = straightLineDistance * 1.4;
+      } else if (pickupToUse) {
+        // No token — rough fallback
+        const R = 6371;
+        const dLat = (dropoff.lat - pickupToUse.lat) * Math.PI / 180;
+        const dLon = (dropoff.lng - pickupToUse.lng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(pickupToUse.lat * Math.PI / 180) * Math.cos(dropoff.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+        estimatedDistance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.4;
         estimatedDuration = estimatedDistance / 30 * 60;
+      } else {
+        // No pickup coords at all — use a default 5km estimate so the user isn't stuck
+        estimatedDistance = 5;
+        estimatedDuration = 12;
       }
       setDistanceKm(estimatedDistance);
       setDurationMinutes(estimatedDuration);
@@ -974,7 +1008,7 @@ const RideBooking = () => {
   // Auto-calculate route when both pickup and dropoff have coordinates
   const hasTriggeredAutoEstimate = useRef(false);
   useEffect(() => {
-    if (!pickup || !dropoff) {
+    if (!dropoff) {
       hasTriggeredAutoEstimate.current = false;
       return;
     }
