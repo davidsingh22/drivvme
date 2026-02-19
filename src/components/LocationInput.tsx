@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, forwardRef } from 'react';
-import { MapPin, Navigation, Loader2, Clock, Star } from 'lucide-react';
+import { MapPin, Navigation, Loader2, Clock, Star, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -120,7 +120,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   };
 
   const searchPlaces = useCallback(async (query: string) => {
-    if (!token || query.length < 2) {
+    if (query.length < 2) {
       // If no query but we have recent destinations (dropoff only), show them
       if (type === 'dropoff' && recentDestinations.length > 0 && query.length === 0) {
         setSuggestions(recentDestinations);
@@ -128,6 +128,16 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       } else {
         setSuggestions([]);
       }
+      return;
+    }
+
+    // Allow typing even if token isn't ready — show custom/recent results
+    if (!token) {
+      const recentResults = searchRecentDestinations(query);
+      const customResults = await searchCustomLocations(query);
+      const combined = [...recentResults, ...customResults];
+      setSuggestions(combined);
+      setShowSuggestions(combined.length > 0);
       return;
     }
 
@@ -161,6 +171,8 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   }, [token, type, recentDestinations]);
 
   const searchMapbox = async (query: string, accessToken: string): Promise<Suggestion[]> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000); // 5s hard timeout
     try {
       // Use Mapbox Search Box API for superior POI discovery
       const sessionToken = crypto.randomUUID();
@@ -177,8 +189,10 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       });
       
       const response = await fetch(
-        `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`
+        `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`,
+        { signal: controller.signal }
       );
+      clearTimeout(timeout);
       const data = await response.json();
 
       if (data.suggestions && data.suggestions.length > 0) {
@@ -261,9 +275,15 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         }
       }
       return [];
-    } catch (err) {
-      console.error('Mapbox search error:', err);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        console.warn('[LocationInput] Mapbox search timed out (5s)');
+      } else {
+        console.error('Mapbox search error:', err);
+      }
       return [];
+    } finally {
+      clearTimeout(timeout);
     }
   };
 
@@ -321,6 +341,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           value={value}
           onChange={handleInputChange}
           onFocus={() => {
+            console.log(`[LocationInput:${type}] onFocus fired`);
             // Show recent destinations when focusing on empty dropoff field
             if (type === 'dropoff' && !value && recentDestinations.length > 0) {
               setSuggestions(recentDestinations);
@@ -329,9 +350,11 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
               setShowSuggestions(true);
             }
           }}
+          onTouchStart={() => {
+            console.log(`[LocationInput:${type}] onTouchStart fired`);
+          }}
           placeholder={placeholder || t(`booking.${type}`)}
           className="pl-10 py-6 bg-background"
-          disabled={tokenLoading}
         />
 
         {/* Suggestions dropdown */}

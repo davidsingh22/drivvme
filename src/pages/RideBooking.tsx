@@ -79,6 +79,7 @@ const incrementFreeRidesUsed = (email: string): void => {
   localStorage.setItem(usedKey, String(used + 1));
 };
 const RideBooking = () => {
+  console.log('[RideBooking] 📱 pageMounted — component render');
   const {
     t,
     language
@@ -298,28 +299,33 @@ const RideBooking = () => {
   // Helper to reverse geocode coordinates to a readable address
   const reverseGeocode = useCallback(async (lat: number, lng: number): Promise<string | null> => {
     if (!mapboxToken) return null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000); // 4s timeout
     try {
-      const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxToken}&language=${language}&types=address,poi`);
+      console.log('[RideBooking] 🌍 reverseGeocode start');
+      const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${mapboxToken}&language=${language}&types=address,poi`, { signal: controller.signal });
       const data = await res.json();
       const place = data?.features?.[0];
       if (place) {
-        // Extract a clean street address
         let cleanAddress = '';
-
-        // Check if it's a POI with address
         if (place.properties?.address) {
           cleanAddress = place.properties.address;
         } else if (place.text && place.address) {
-          // Combine street number and street name
           cleanAddress = `${place.address} ${place.text}`;
         } else if (place.place_name) {
-          // Use first part of place_name (before first comma)
           cleanAddress = place.place_name.split(',')[0];
         }
+        console.log('[RideBooking] ✅ reverseGeocodeDone:', cleanAddress || place.place_name);
         return cleanAddress || place.place_name || null;
       }
-    } catch (err) {
-      console.error('[RideBooking] Reverse geocode error:', err);
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        console.warn('[RideBooking] ⏱ reverseGeocode timed out (4s)');
+      } else {
+        console.error('[RideBooking] Reverse geocode error:', err);
+      }
+    } finally {
+      clearTimeout(timeout);
     }
     return null;
   }, [mapboxToken, language]);
@@ -344,7 +350,7 @@ const RideBooking = () => {
           setPickup(cached);
           setPickupAddress(cached.address);
           restoredFromCache = true;
-          console.log('[RideBooking] Restored cached pickup:', cached.address);
+          console.log('[RideBooking] ✅ pickupStateSet — Restored cached pickup:', cached.address);
         }
       } catch { /* ignore corrupt cache */ }
     }
@@ -425,6 +431,7 @@ const RideBooking = () => {
       async (position) => {
         if (resolved) return;
         resolved = true;
+        console.log('[RideBooking] ✅ geolocationResolved — high accuracy');
         setGpsStatus('resolved');
         await resolveAddress(position.coords.latitude, position.coords.longitude);
       },
@@ -1320,19 +1327,21 @@ const RideBooking = () => {
 
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
   if (step === 'input') {
+    console.log('[RideBooking] 📱 Rendering input step — UI should be interactive');
     // Extract short address for display - always show real address, never generic label
     const genericPickupLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', 'Current Location', 'Set pickup location', 'Définir le lieu de prise en charge'];
     const displayPickupAddress = pickupAddress && !genericPickupLabels.includes(pickupAddress) ? pickupAddress.split(',')[0] : language === 'fr' ? 'Définir le lieu de prise en charge' : 'Set pickup location';
-    return <div className="min-h-screen bg-background relative overflow-hidden">
+    return <div className="min-h-screen bg-background relative overflow-hidden" style={{ pointerEvents: 'auto' }}>
         {/* Full-page background image */}
         <div className="absolute inset-0 z-0" style={{
         backgroundImage: `url(${rideBg})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center center'
       }} />
-        {/* Gradient overlay for better contrast */}
+        {/* Gradient overlay for better contrast — pointer-events: none so taps pass through */}
         <div className="absolute inset-0 z-0" style={{
-        background: 'linear-gradient(to bottom, rgba(10, 10, 25, 0.3) 0%, rgba(60, 30, 100, 0.4) 50%, rgba(10, 10, 25, 0.6) 100%)'
+        background: 'linear-gradient(to bottom, rgba(10, 10, 25, 0.3) 0%, rgba(60, 30, 100, 0.4) 50%, rgba(10, 10, 25, 0.6) 100%)',
+        pointerEvents: 'none'
       }} />
         
         {/* Full-bleed Map - with transparency to show background */}
@@ -1474,17 +1483,25 @@ const RideBooking = () => {
             
             
           </div>
-          {/* Content layer */}
-          <div className="relative h-full p-5 pt-6 space-y-3 overflow-y-auto z-10">
+          {/* Content layer — must be above map (z-10) and have pointer-events */}
+          <div className="relative h-full p-5 pt-6 space-y-3 overflow-y-auto" style={{ zIndex: 20, pointerEvents: 'auto' }}>
             {/* Greeting */}
             <GreetingHeader />
             
             {/* Pickup Location Row */}
-            <div onClick={() => setShowFullInput(true)} className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" style={{
-            background: 'rgba(40, 20, 60, 0.7)',
-            border: '1.5px solid rgba(200, 50, 255, 0.6)',
-            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
-          }}>
+            <div 
+              onClick={() => { console.log('[RideBooking] 📱 Pickup Edit onClick'); setShowFullInput(true); }}
+              onTouchStart={(e) => { console.log('[RideBooking] 📱 Pickup Edit onTouchStart'); }}
+              onPointerDown={(e) => { console.log('[RideBooking] 📱 Pickup Edit onPointerDown'); e.stopPropagation(); }}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" 
+              style={{
+                background: 'rgba(40, 20, 60, 0.7)',
+                border: '1.5px solid rgba(200, 50, 255, 0.6)',
+                boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)',
+                pointerEvents: 'auto',
+                position: 'relative',
+                zIndex: 30,
+              }}>
               <div className="h-9 w-9 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0">
                 <Navigation className="h-4 w-4 text-lime-400" />
               </div>
@@ -1523,8 +1540,13 @@ const RideBooking = () => {
             <div className="rounded-xl" style={{
             background: 'rgba(40, 20, 60, 0.7)',
             border: '1.5px solid rgba(200, 50, 255, 0.6)',
-            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
-          }}>
+            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)',
+            pointerEvents: 'auto',
+            position: 'relative',
+            zIndex: 30,
+          }}
+            onTouchStart={() => console.log('[RideBooking] 📱 Where to? wrapper onTouchStart')}
+          >
               <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => handleDropoffChange(addr, coords)} placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'} />
             </div>
 
