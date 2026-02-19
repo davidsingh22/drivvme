@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, forwardRef } from 'react';
-import { MapPin, Navigation, Loader2, Clock, Star, Edit3 } from 'lucide-react';
+import { MapPin, Navigation, Loader2, Clock, Star, Edit3, RefreshCw } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -7,6 +7,13 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+
+const isIOS = typeof navigator !== 'undefined' && (
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+);
+const SEARCH_TIMEOUT_MS = 4000;
+const MIN_QUERY_LENGTH = 3;
 
 interface LocationInputProps {
   type: 'pickup' | 'dropoff';
@@ -27,7 +34,7 @@ interface Suggestion {
   isManual?: boolean;
 }
 
-const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
+const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>((({
   type,
   value,
   onChange,
@@ -42,10 +49,13 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [searchFailed, setSearchFailed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const pendingQueryRef = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const lastQueryRef = useRef<string>('');
   const tokenRef = useRef(token);
   tokenRef.current = token;
 
@@ -91,7 +101,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   // Search custom locations from database
   const searchCustomLocations = async (query: string): Promise<Suggestion[]> => {
     if (query.length < 2) return [];
-    
+
     try {
       const { data, error } = await supabase
         .from('custom_locations')
@@ -120,7 +130,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     if (!query || query.length < 2) return [];
     const lowerQuery = query.toLowerCase();
     return recentDestinations.filter(
-      d => d.name.toLowerCase().includes(lowerQuery) || 
+      d => d.name.toLowerCase().includes(lowerQuery) ||
            d.address.toLowerCase().includes(lowerQuery)
     );
   };
@@ -137,9 +147,16 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   const searchPlaces = useCallback(async (query: string) => {
     const trimmed = query.trim();
 
-    // Too short — show recents or clear, but never fire a request
-    if (trimmed.length < 3) {
+    // Abort any previous in-flight request
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+
+    // Too short: clear loading, show recents or nothing
+    if (trimmed.length < MIN_QUERY_LENGTH) {
       setIsSearching(false);
+      setErrorMessage(null);
       if (type === 'dropoff' && recentDestinations.length > 0 && trimmed.length === 0) {
         setSuggestions(recentDestinations);
         setShowSuggestions(true);
@@ -150,8 +167,23 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       return;
     }
 
+    // Create new AbortController for this request
+    const controller = new AbortController();
+    abortRef.current = controller;
+    lastQueryRef.current = trimmed;
+
+    if (isIOS) console.log('[Search] searchStarted', { query: trimmed });
     setIsSearching(true);
     setSearchFailed(false);
+    setErrorMessage(null);
+
+    // Hard timeout: forcibly abort after SEARCH_TIMEOUT_MS
+    const timeoutId = setTimeout(() => {
+      if (!controller.signal.aborted) {
+        if (isIOS) console.log('[Search] searchTimeout', { query: trimmed });
+        controller.abort();
+      }
+    }, SEARCH_TIMEOUT_MS);
 
     const doSearch = async (): Promise<Suggestion[]> => {
       const recentResults = searchRecentDestinations(query);
@@ -163,6 +195,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         try {
           mapboxResults = await searchMapbox(query, currentToken);
         } catch (err) {
+          if ((err as Error)?.name === 'AbortError') throw err;
           console.warn('[LocationInput] Mapbox search failed, showing local results + manual fallback');
           setSearchFailed(true);
         }
@@ -172,7 +205,6 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
       const recentIds = new Set(recentResults.map(r => `${r.center[0]}-${r.center[1]}`));
       const customIds = new Set(customResults.map(r => `${r.center[0]}-${r.center[1]}`));
-
       const filteredMapbox = mapboxResults.filter(m => {
         const key = `${m.center[0]}-${m.center[1]}`;
         return !recentIds.has(key) && !customIds.has(key);
@@ -181,14 +213,23 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       return [...recentResults, ...customResults, ...filteredMapbox];
     };
 
+    const errorMsg = language === 'fr'
+      ? 'Impossible de charger les resultats'
+      : "Can't load results - use Enter manually";
+
     try {
+      if (controller.signal.aborted) { const e = new Error('Aborted'); e.name = 'AbortError'; throw e; }
+
       let combined = await doSearch();
 
-      // Retry once after 500ms if empty
-      if (combined.length === 0) {
+      // Retry once after 500ms if empty and not aborted
+      if (combined.length === 0 && !controller.signal.aborted) {
         await new Promise(r => setTimeout(r, 500));
+        if (controller.signal.aborted) { const e = new Error('Aborted'); e.name = 'AbortError'; throw e; }
         combined = await doSearch();
       }
+
+      if (controller.signal.aborted) { const e = new Error('Aborted'); e.name = 'AbortError'; throw e; }
 
       if (combined.length === 0 || searchFailed) {
         combined.push({
@@ -200,10 +241,35 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         });
       }
 
+      clearTimeout(timeoutId);
       setSuggestions(combined);
       setShowSuggestions(combined.length > 0);
+      setIsSearching(false);
+      if (isIOS) console.log('[Search] searchFinished', { query: trimmed, count: combined.length });
     } catch (err) {
-      console.error('Search error:', err);
+      clearTimeout(timeoutId);
+      const isAbort = (err as Error)?.name === 'AbortError';
+      if (isAbort) {
+        // Only show error if this was a timeout (not superseded by newer query)
+        if (lastQueryRef.current === trimmed) {
+          if (isIOS) console.log('[Search] searchTimeout/aborted showing error', { query: trimmed });
+          setIsSearching(false);
+          setErrorMessage(errorMsg);
+          setSuggestions([{
+            id: 'manual-entry',
+            name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
+            address: query,
+            center: [0, 0],
+            isManual: true,
+          }]);
+          setShowSuggestions(true);
+        }
+        return;
+      }
+      console.error('[Search] searchError:', err);
+      if (isIOS) console.log('[Search] searchError', { query: trimmed, error: (err as Error)?.message });
+      setIsSearching(false);
+      setErrorMessage(errorMsg);
       setSuggestions([{
         id: 'manual-entry',
         name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
@@ -212,20 +278,16 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         isManual: true,
       }]);
       setShowSuggestions(true);
-    } finally {
-      setIsSearching(false);
     }
   }, [type, recentDestinations, language]);
 
   const searchMapbox = async (query: string, accessToken: string): Promise<Suggestion[]> => {
     try {
-      // ── Diagnostic: log token availability (masked) ──
       const tokenPrefix = accessToken ? accessToken.substring(0, 6) + '...' : 'MISSING';
       console.log(`[LocationInput] Mapbox search: query="${query}", token=${tokenPrefix}`);
 
-      // Use Mapbox Search Box API for superior POI discovery
       const sessionToken = crypto.randomUUID();
-      
+
       const params = new URLSearchParams({
         access_token: accessToken,
         session_token: sessionToken,
@@ -236,10 +298,10 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         types: 'poi,address,place,street,postcode,locality,neighborhood,district,region',
         proximity: '-73.5673,45.5017',
       });
-      
+
       const suggestUrl = `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`;
       console.log(`[LocationInput] Suggest URL (no token): ${suggestUrl.replace(accessToken, '***')}`);
-      
+
       const response = await fetch(suggestUrl);
       console.log(`[LocationInput] Suggest HTTP ${response.status}`);
 
@@ -249,7 +311,6 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         if (response.status === 401 || response.status === 403 || response.status === 404) {
           setSearchFailed(true);
         }
-        // Fallback to direct geocoding on auth errors
         return await searchMapboxGeocoding(query, accessToken);
       }
 
@@ -257,9 +318,8 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       console.log(`[LocationInput] Suggest returned ${data.suggestions?.length ?? 0} suggestions`);
 
       if (data.suggestions && data.suggestions.length > 0) {
-        // Log first 2 results for diagnostics
         data.suggestions.slice(0, 2).forEach((s: any, i: number) => {
-          console.log(`[LocationInput] Result ${i}: "${s.name}" — ${s.full_address || s.place_formatted || ''}`);
+          console.log(`[LocationInput] Result ${i}: "${s.name}" - ${s.full_address || s.place_formatted || ''}`);
         });
 
         const detailedSuggestions = await Promise.all(
@@ -272,39 +332,38 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
               const retrieveResponse = await fetch(
                 `https://api.mapbox.com/search/searchbox/v1/retrieve/${s.mapbox_id}?${retrieveParams}`
               );
-              
+
               if (!retrieveResponse.ok) {
                 console.warn(`[LocationInput] Retrieve failed for ${s.name}: HTTP ${retrieveResponse.status}`);
-                // Return suggestion from suggest data as fallback
                 return {
                   id: s.mapbox_id,
                   name: s.name || 'Unknown',
                   address: s.full_address || s.place_formatted || '',
-                  center: [0, 0] as [number, number], // Will be filtered if no coords
+                  center: [0, 0] as [number, number],
                 } as Suggestion | null;
               }
-              
+
               const retrieveData = await retrieveResponse.json();
-              
+
               if (retrieveData.features && retrieveData.features.length > 0) {
                 const feature = retrieveData.features[0];
                 const props = feature.properties || {};
-                
+
                 const streetParts: string[] = [];
                 if (props.address) streetParts.push(props.address);
                 if (props.street) streetParts.push(props.street);
                 const streetAddress = streetParts.join(' ');
-                
+
                 const locationParts: string[] = [];
                 if (props.place) locationParts.push(props.place);
                 if (props.region) locationParts.push(props.region);
                 if (props.postcode) locationParts.push(props.postcode);
                 if (props.country) locationParts.push(props.country);
-                
-                const fullAddress = streetAddress 
+
+                const fullAddress = streetAddress
                   ? `${streetAddress}, ${locationParts.join(', ')}`
                   : locationParts.join(', ');
-                
+
                 return {
                   id: s.mapbox_id,
                   name: s.name || props.name || 'Unknown',
@@ -322,26 +381,22 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
         const results = detailedSuggestions.filter((s): s is Suggestion => s !== null && s.center[0] !== 0);
         console.log(`[LocationInput] Final results: ${results.length} after retrieve`);
-        
+
         if (results.length > 0) return results;
-        // If all retrieves failed, fall back to geocoding
         return await searchMapboxGeocoding(query, accessToken);
       } else {
-        // No suggestions, fallback to geocoding API
         return await searchMapboxGeocoding(query, accessToken);
       }
     } catch (err) {
       console.error('[LocationInput] Mapbox search error:', err);
-      // Last resort: try direct geocoding
       try {
         return await searchMapboxGeocoding(query, accessToken);
-      } catch {
+      } catch (_e) {
         return [];
       }
     }
   };
 
-  // Direct Mapbox Geocoding v5 fallback — no map needed, works independently
   const searchMapboxGeocoding = async (query: string, accessToken: string): Promise<Suggestion[]> => {
     console.log(`[LocationInput] Geocoding fallback for: "${query}"`);
     const geocodeParams = new URLSearchParams({
@@ -354,16 +409,16 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       proximity: '-73.5673,45.5017',
       language: 'en,fr',
     });
-    
+
     const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${geocodeParams}`;
     const geocodeResponse = await fetch(geocodeUrl);
     console.log(`[LocationInput] Geocoding HTTP ${geocodeResponse.status}`);
-    
+
     if (!geocodeResponse.ok) {
       console.error(`[LocationInput] Geocoding failed: HTTP ${geocodeResponse.status}`);
       return [];
     }
-    
+
     const geocodeData = await geocodeResponse.json();
     console.log(`[LocationInput] Geocoding returned ${geocodeData.features?.length ?? 0} features`);
 
@@ -371,7 +426,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       geocodeData.features.slice(0, 2).forEach((f: any, i: number) => {
         console.log(`[LocationInput] Geocode ${i}: "${f.place_name}"`);
       });
-      
+
       return geocodeData.features.map((f: any) => {
         const parts = f.place_name.split(', ');
         const name = parts[0] || f.place_name;
@@ -390,22 +445,28 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     onChange(newValue);
+    setErrorMessage(null);
 
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    // Abort any in-flight request immediately on keystroke
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
     }
 
     const trimmed = newValue.trim();
-    // Immediately show recents for empty dropoff, don't debounce
+    // Immediately show recents for empty dropoff
     if (trimmed.length === 0 && type === 'dropoff' && recentDestinations.length > 0) {
       setIsSearching(false);
       setSuggestions(recentDestinations);
       setShowSuggestions(true);
       return;
     }
-    // Below min length — clear loading state immediately
-    if (trimmed.length < 3) {
+    // Below min length: clear loading state immediately
+    if (trimmed.length < MIN_QUERY_LENGTH) {
       setIsSearching(false);
+      setSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
 
@@ -416,7 +477,6 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
   const handleSelectSuggestion = (suggestion: Suggestion) => {
     if (suggestion.isManual) {
-      // Manual entry: use the typed text as the address, no coordinates
       onChange(suggestion.address);
       setSuggestions([]);
       setShowSuggestions(false);
@@ -445,8 +505,10 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
   useEffect(() => {
     return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (abortRef.current) {
+        abortRef.current.abort();
+        abortRef.current = null;
       }
     };
   }, []);
@@ -455,18 +517,20 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     <div ref={ref || containerRef} className="relative flex gap-2">
       <div className="flex-1 relative" ref={containerRef}>
         <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
-          {isSearching && value.trim().length >= 3 ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : icon}
+          {isSearching && value.trim().length >= MIN_QUERY_LENGTH ? (
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          ) : icon}
         </div>
         <Input
           ref={inputRef}
           value={value}
           onChange={handleInputChange}
           onFocus={() => {
-            // Show recents on focus for empty dropoff — no search triggered
+            // Show recents on focus for empty dropoff: no search triggered
             if (type === 'dropoff' && !value && recentDestinations.length > 0) {
               setSuggestions(recentDestinations);
               setShowSuggestions(true);
-            } else if (value.trim().length >= 3 && suggestions.length > 0) {
+            } else if (value.trim().length >= MIN_QUERY_LENGTH && suggestions.length > 0) {
               setShowSuggestions(true);
             }
           }}
@@ -474,8 +538,28 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           className="pl-10 py-6 bg-background touch-manipulation"
         />
 
-        {/* Loading skeletons while searching — only when a real query is in-flight */}
-        {isSearching && !showSuggestions && value.trim().length >= 3 && (
+        {/* Error banner with retry */}
+        {errorMessage && !isSearching && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-destructive/50 rounded-lg shadow-lg z-50 p-3 flex items-center justify-between gap-2">
+            <span className="text-sm text-muted-foreground">{errorMessage}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="shrink-0 text-primary"
+              onClick={() => {
+                setErrorMessage(null);
+                searchPlaces(value);
+              }}
+            >
+              <RefreshCw className="h-4 w-4 mr-1" />
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {/* Loading skeletons: only when a real request is in-flight */}
+        {isSearching && !showSuggestions && !errorMessage && value.trim().length >= MIN_QUERY_LENGTH && (
           <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 p-2 space-y-2">
             {[1, 2, 3].map(i => (
               <div key={i} className="flex items-center gap-3 px-2 py-2">
