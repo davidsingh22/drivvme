@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -114,6 +114,23 @@ const RideBooking = () => {
     clearRide
   } = useActiveRide(user?.id);
   const hasRestoredRide = useRef(false);
+
+  // Prefetch recent destinations into state on mount for instant display
+  const [prefetchedDestinations, setPrefetchedDestinations] = useState<any[]>([]);
+  const hasPrefetched = useRef(false);
+  useEffect(() => {
+    if (!user?.id || hasPrefetched.current) return;
+    hasPrefetched.current = true;
+    supabase
+      .from('rider_destinations')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('last_visited_at', { ascending: false })
+      .limit(10)
+      .then(({ data }) => {
+        if (data) setPrefetchedDestinations(data);
+      });
+  }, [user?.id]);
   const [step, setStep] = useState<RideStep>('input');
   const [pickup, setPickup] = useState<Location | null>(null);
   const [dropoff, setDropoff] = useState<Location | null>(null);
@@ -1402,13 +1419,50 @@ const RideBooking = () => {
         <div className="flex-1 overflow-y-auto px-5 pb-4 space-y-4">
           {!dropoffAddress && (
             <>
+              {/* Show prefetched destinations instantly while React Query loads */}
+              {prefetchedDestinations.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-semibold text-muted-foreground px-1">
+                    {language === 'fr' ? 'Récents' : 'Recent'}
+                  </h3>
+                  {prefetchedDestinations.slice(0, 5).map((dest) => (
+                    <button
+                      key={dest.id}
+                      type="button"
+                      onClick={() => handleDropoffChange(dest.address || dest.name, { lat: dest.lat, lng: dest.lng })}
+                      onTouchEnd={(e) => { e.preventDefault(); handleDropoffChange(dest.address || dest.name, { lat: dest.lat, lng: dest.lng }); }}
+                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-secondary/60 transition-colors touch-manipulation text-left"
+                    >
+                      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                        <Clock className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{dest.name}</p>
+                        <p className="text-xs text-muted-foreground truncate">{dest.address}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
               <QuickDestinations onSelectDestination={(dest) => {
                 handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
               }} />
-              <RecentDestinations onSelectDestination={(dest) => {
-                handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-              }} />
+              {prefetchedDestinations.length === 0 && (
+                <RecentDestinations onSelectDestination={(dest) => {
+                  handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+                }} />
+              )}
             </>
+          )}
+
+          {/* Show calculating indicator when destination selected */}
+          {dropoffAddress && !fareEstimate && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center gap-3 py-8">
+              <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <span className="text-sm text-muted-foreground">
+                {language === 'fr' ? 'Calcul du trajet...' : 'Calculating route...'}
+              </span>
+            </motion.div>
           )}
 
           {/* Manual pickup/destination buttons */}
@@ -1426,19 +1480,6 @@ const RideBooking = () => {
                 </span>
               </button>
             </div>
-          )}
-
-          {/* Get Estimate button when destination selected but no auto-route yet */}
-          {dropoffAddress && pickup && (
-            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-              <Button
-                onClick={handleGetEstimate}
-                className="w-full gradient-primary shadow-button py-5 text-lg font-semibold"
-                disabled={!pickupAddress || !dropoffAddress}
-              >
-                {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
-              </Button>
-            </motion.div>
           )}
         </div>
 
@@ -1526,11 +1567,28 @@ const RideBooking = () => {
               y: -20
             }} className="space-y-6">
                   <div className="flex items-center justify-between">
-                    <h2 className="font-display text-2xl font-bold fare-header-glow">
-                      {t('pricing.estimated')}
-                    </h2>
-                    <Button variant="ghost" size="icon" onClick={() => setStep('input')}>
-                      <X className="h-5 w-5" />
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" size="icon" onClick={() => {
+                        setStep('input');
+                        setDropoff(null);
+                        setDropoffAddress('');
+                        setFareEstimate(null);
+                        hasTriggeredAutoEstimate.current = false;
+                      }}>
+                        <ArrowLeft className="h-5 w-5" />
+                      </Button>
+                      <h2 className="font-display text-2xl font-bold fare-header-glow">
+                        {t('pricing.estimated')}
+                      </h2>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      setStep('input');
+                      setDropoff(null);
+                      setDropoffAddress('');
+                      setFareEstimate(null);
+                      hasTriggeredAutoEstimate.current = false;
+                    }} className="text-primary text-sm">
+                      {language === 'fr' ? 'Modifier' : 'Modify'}
                     </Button>
                   </div>
 
