@@ -34,7 +34,7 @@ interface Suggestion {
   isManual?: boolean;
 }
 
-const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>((({
+const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   type,
   value,
   onChange,
