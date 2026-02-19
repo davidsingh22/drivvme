@@ -142,7 +142,7 @@ const RideBooking = () => {
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const {
@@ -343,89 +343,15 @@ const RideBooking = () => {
     } catch { /* ignore */ }
   }, []);
 
-  // Background GPS detection with 3s/8s timeouts, caches result
-  useEffect(() => {
-    if (hasAutoDetectedLocation.current) return;
-    if (!navigator.geolocation) {
-      setIsDetectingLocation(false);
-      return;
-    }
-    hasAutoDetectedLocation.current = true;
-
-    let softTimerFired = false;
-    let resolved = false;
-
-    // 3s soft timeout – stop showing "detecting" but keep trying
-    const softTimer = setTimeout(() => {
-      softTimerFired = true;
-      setIsDetectingLocation(false);
-    }, 3000);
-
-    // 8s hard timeout – give up entirely
-    const hardTimer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        setIsDetectingLocation(false);
-      }
-    }, 8000);
-
-    const attemptReverseGeocode = async (lat: number, lng: number) => {
-      const address = await reverseGeocode(lat, lng);
-      if (address) {
-        setPickupAddress(address);
-        setPickup({ address, lat, lng });
-        // Cache in localStorage
-        try {
-          localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: address, ts: Date.now() }));
-        } catch { /* ignore */ }
-        setIsDetectingLocation(false);
-        resolved = true;
-        return;
-      }
-      // Fallback to coordinates
-      const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      setPickupAddress(coordAddress);
-      setPickup({ address: coordAddress, lat, lng });
-      try {
-        localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: coordAddress, ts: Date.now() }));
-      } catch { /* ignore */ }
-      setIsDetectingLocation(false);
-      resolved = true;
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-
-        // Store coords immediately so pickup is never null
-        if (!pickup) {
-          const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
-          setPickup({ address: tempAddress, lat, lng });
-          setPickupAddress(tempAddress);
-        }
-
-        if (!mapboxToken) return; // effect below will resolve address
-        await attemptReverseGeocode(lat, lng);
-      },
-      (error) => {
-        console.log('[RideBooking] GPS auto-detect failed:', error.message);
-        setIsDetectingLocation(false);
-        resolved = true;
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-    );
-
-    return () => {
-      clearTimeout(softTimer);
-      clearTimeout(hardTimer);
-    };
-  }, [mapboxToken, language, reverseGeocode]);
+  // GPS is NOT requested on mount (iOS WKWebView cold-start hang).
+  // Geolocation is only triggered by explicit user interaction:
+  // - tapping "Edit pickup", "Use current location", or selecting a destination.
+  // The requestGeolocation() function below handles this with 3s/6s timeouts.
 
   // Effect to resolve address when pickup has coords but generic address
   useEffect(() => {
     if (!pickup || !mapboxToken) return;
-    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle'];
+    const genericLabels = ['Locating...', 'Localisation...', 'Current location', 'Position actuelle'];
     const isGeneric = genericLabels.includes(pickupAddress) || pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
     if (isGeneric) {
       reverseGeocode(pickup.lat, pickup.lng).then(address => {
@@ -875,26 +801,70 @@ const RideBooking = () => {
   };
 
   // (auto-estimate effect moved below calculateRoute declaration)
-  const useCurrentLocation = () => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(position => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
-      const fallbackAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      setPickupAddress(fallbackAddress);
-      setPickup({
-        address: fallbackAddress,
-        lat,
-        lng
-      });
-    }, () => {
-      toast({
-        title: 'Location error',
-        description: 'Unable to get your current location',
-        variant: 'destructive'
-      });
-    });
-  };
+  // Request geolocation only on explicit user interaction (Uber-style).
+  // 3s soft timeout stops spinner, 6s hard timeout gives up entirely.
+  const useCurrentLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      toast({ title: language === 'fr' ? 'GPS non disponible' : 'GPS unavailable', variant: 'destructive' });
+      return;
+    }
+
+    setIsDetectingLocation(true);
+    let resolved = false;
+
+    const softTimer = setTimeout(() => {
+      if (!resolved) setIsDetectingLocation(false);
+    }, 3000);
+
+    const hardTimer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        setIsDetectingLocation(false);
+        // Silent fallback — don't toast, just leave existing pickup
+      }
+    }, 6000);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(softTimer);
+        clearTimeout(hardTimer);
+
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const coordLabel = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+        // Set coords immediately
+        setPickup({ address: coordLabel, lat, lng });
+        setPickupAddress(coordLabel);
+
+        // Reverse geocode for a nice address
+        const address = await reverseGeocode(lat, lng);
+        if (address) {
+          setPickup({ address, lat, lng });
+          setPickupAddress(address);
+        }
+
+        // Cache for next session
+        try {
+          localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({
+            lat, lng, addressLabel: address || coordLabel, ts: Date.now()
+          }));
+        } catch { /* ignore */ }
+        setIsDetectingLocation(false);
+      },
+      () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(softTimer);
+        clearTimeout(hardTimer);
+        setIsDetectingLocation(false);
+        // Silent fail — keep cached/existing pickup
+      },
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 60000 }
+    );
+  }, [language, toast, reverseGeocode]);
   const calculateRoute = useCallback(async () => {
     if (!pickup || !dropoff) return;
     try {
@@ -1316,11 +1286,11 @@ const RideBooking = () => {
 
   // DEFAULT BOOKING FLOW - MAP-FREE "WHERE TO?" SCREEN
   if (step === 'input') {
-    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress)
+    const displayPickupAddress = pickupAddress && !['Current location', 'Position actuelle'].includes(pickupAddress)
       ? pickupAddress.split(',')[0]
       : isDetectingLocation
-        ? (language === 'fr' ? 'Détection...' : 'Detecting...')
-        : (pickupAddress?.split(',')[0] || (language === 'fr' ? 'Définir le lieu de départ' : 'Set pickup location'));
+        ? (language === 'fr' ? 'Localisation...' : 'Locating...')
+        : (language === 'fr' ? 'Définir le lieu de départ' : 'Set pickup location');
 
     return (
       <div className="min-h-[100dvh] bg-background flex flex-col">
@@ -1388,8 +1358,15 @@ const RideBooking = () => {
         <div className="px-5 pb-4">
           <button
             type="button"
-            onTouchEnd={(e) => { e.preventDefault(); setShowFullInput(true); }}
-            onClick={() => setShowFullInput(true)}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              if (!pickup) useCurrentLocation();
+              setShowFullInput(true);
+            }}
+            onClick={() => {
+              if (!pickup) useCurrentLocation();
+              setShowFullInput(true);
+            }}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-secondary/60 border border-border hover:bg-secondary transition-colors touch-manipulation text-left"
             aria-label="Edit pickup location"
           >
