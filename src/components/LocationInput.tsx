@@ -137,10 +137,9 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   const searchPlaces = useCallback(async (query: string) => {
     const trimmed = query.trim();
 
-    // Don't search for empty, too-short, or numeric-only input
-    if (trimmed.length < 2 || /^\d+$/.test(trimmed)) {
+    // Too short — show recents or clear, but never fire a request
+    if (trimmed.length < 3) {
       setIsSearching(false);
-      // If no query but we have recent destinations (dropoff only), show them
       if (type === 'dropoff' && recentDestinations.length > 0 && trimmed.length === 0) {
         setSuggestions(recentDestinations);
         setShowSuggestions(true);
@@ -153,12 +152,11 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
     setIsSearching(true);
     setSearchFailed(false);
-    try {
-      // Search recent destinations and custom locations (no token needed)
+
+    const doSearch = async (): Promise<Suggestion[]> => {
       const recentResults = searchRecentDestinations(query);
       const customResults = await searchCustomLocations(query);
-      
-      // Search Mapbox only if token is available
+
       let mapboxResults: Suggestion[] = [];
       const currentToken = tokenRef.current;
       if (currentToken) {
@@ -169,22 +167,29 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           setSearchFailed(true);
         }
       } else {
-        // Token not ready yet — save query and retry when token arrives
         pendingQueryRef.current = query;
       }
 
-      // Combine results: recent first, then custom, then Mapbox
       const recentIds = new Set(recentResults.map(r => `${r.center[0]}-${r.center[1]}`));
       const customIds = new Set(customResults.map(r => `${r.center[0]}-${r.center[1]}`));
-      
+
       const filteredMapbox = mapboxResults.filter(m => {
         const key = `${m.center[0]}-${m.center[1]}`;
         return !recentIds.has(key) && !customIds.has(key);
       });
 
-      const combined = [...recentResults, ...customResults, ...filteredMapbox];
-      
-      // If no results and token failed or missing, add "enter manually" fallback
+      return [...recentResults, ...customResults, ...filteredMapbox];
+    };
+
+    try {
+      let combined = await doSearch();
+
+      // Retry once after 500ms if empty
+      if (combined.length === 0) {
+        await new Promise(r => setTimeout(r, 500));
+        combined = await doSearch();
+      }
+
       if (combined.length === 0 || searchFailed) {
         combined.push({
           id: 'manual-entry',
@@ -194,12 +199,11 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           isManual: true,
         });
       }
-      
+
       setSuggestions(combined);
       setShowSuggestions(combined.length > 0);
     } catch (err) {
       console.error('Search error:', err);
-      // Show manual entry fallback on error
       setSuggestions([{
         id: 'manual-entry',
         name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
@@ -394,8 +398,14 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     const trimmed = newValue.trim();
     // Immediately show recents for empty dropoff, don't debounce
     if (trimmed.length === 0 && type === 'dropoff' && recentDestinations.length > 0) {
+      setIsSearching(false);
       setSuggestions(recentDestinations);
       setShowSuggestions(true);
+      return;
+    }
+    // Below min length — clear loading state immediately
+    if (trimmed.length < 3) {
+      setIsSearching(false);
       return;
     }
 
@@ -445,18 +455,18 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     <div ref={ref || containerRef} className="relative flex gap-2">
       <div className="flex-1 relative" ref={containerRef}>
         <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
-          {isSearching && value.trim().length >= 2 && !/^\d+$/.test(value.trim()) ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : icon}
+          {isSearching && value.trim().length >= 3 ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : icon}
         </div>
         <Input
           ref={inputRef}
           value={value}
           onChange={handleInputChange}
           onFocus={() => {
-            // Show recent destinations when focusing on empty dropoff field
+            // Show recents on focus for empty dropoff — no search triggered
             if (type === 'dropoff' && !value && recentDestinations.length > 0) {
               setSuggestions(recentDestinations);
               setShowSuggestions(true);
-            } else if (suggestions.length > 0) {
+            } else if (value.trim().length >= 3 && suggestions.length > 0) {
               setShowSuggestions(true);
             }
           }}
@@ -465,7 +475,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         />
 
         {/* Loading skeletons while searching — only when a real query is in-flight */}
-        {isSearching && !showSuggestions && value.trim().length >= 2 && !/^\d+$/.test(value.trim()) && (
+        {isSearching && !showSuggestions && value.trim().length >= 3 && (
           <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 p-2 space-y-2">
             {[1, 2, 3].map(i => (
               <div key={i} className="flex items-center gap-3 px-2 py-2">
