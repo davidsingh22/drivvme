@@ -8,12 +8,29 @@ import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
+const isDev = import.meta.env.DEV;
 const isIOS = typeof navigator !== 'undefined' && (
   /iPad|iPhone|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 );
 const SEARCH_TIMEOUT_MS = 4000;
 const MIN_QUERY_LENGTH = 3;
+
+// Structured debug logger — always logs on iOS builds + dev
+const searchLog = (event: string, data: Record<string, unknown>) => {
+  if (isDev || isIOS) {
+    console.log(`[Search] ${event}`, data);
+  }
+};
+
+// Token fallback chain for WKWebView where import.meta.env may be empty
+const getMapboxTokenFallback = (): string | null => {
+  const env = (import.meta.env as any)?.VITE_MAPBOX_TOKEN ?? null;
+  if (env) return env;
+  const win = (window as any).VITE_MAPBOX_TOKEN ?? null;
+  if (win) return win;
+  try { return localStorage.getItem('MAPBOX_TOKEN'); } catch { return null; }
+};
 
 interface LocationInputProps {
   type: 'pickup' | 'dropoff';
@@ -43,21 +60,35 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 }, ref) => {
   const { t, language } = useLanguage();
   const { user } = useAuth();
-  const { token } = useMapboxToken();
+  const { token: hookToken } = useMapboxToken();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [recentDestinations, setRecentDestinations] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const [searchFailed, setSearchFailed] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [tokenMissing, setTokenMissing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const pendingQueryRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lastQueryRef = useRef<string>('');
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
+
+  // Resolve token: hook first, then fallback chain
+  const resolvedToken = hookToken || getMapboxTokenFallback();
+  const tokenRef = useRef(resolvedToken);
+  tokenRef.current = resolvedToken;
+
+  // Check token presence once
+  useEffect(() => {
+    if (!resolvedToken) {
+      searchLog('tokenCheck', { tokenPresent: false, source: 'all-fallbacks-exhausted' });
+      setTokenMissing(true);
+    } else {
+      setTokenMissing(false);
+    }
+  }, [resolvedToken]);
 
   const icon = type === 'pickup' ? (
     <MapPin className="h-5 w-5 text-primary" />
@@ -137,12 +168,12 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
   // When token arrives and there's a pending query, execute it
   useEffect(() => {
-    if (token && pendingQueryRef.current) {
+    if (resolvedToken && pendingQueryRef.current) {
       const query = pendingQueryRef.current;
       pendingQueryRef.current = null;
       searchPlaces(query);
     }
-  }, [token]);
+  }, [resolvedToken]);
 
   const searchPlaces = useCallback(async (query: string) => {
     const trimmed = query.trim();
@@ -157,6 +188,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     if (trimmed.length < MIN_QUERY_LENGTH) {
       setIsSearching(false);
       setErrorMessage(null);
+      searchLog('belowMinLength', { query: trimmed, status: 'idle' });
       if (type === 'dropoff' && recentDestinations.length > 0 && trimmed.length === 0) {
         setSuggestions(recentDestinations);
         setShowSuggestions(true);
@@ -167,12 +199,25 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       return;
     }
 
+    // Ignore numeric-only input
+    if (/^\d+$/.test(trimmed)) {
+      setIsSearching(false);
+      searchLog('numericOnly', { query: trimmed, status: 'idle' });
+      return;
+    }
+
     // Create new AbortController for this request
     const controller = new AbortController();
     abortRef.current = controller;
     lastQueryRef.current = trimmed;
 
-    if (isIOS) console.log('[Search] searchStarted', { query: trimmed });
+    const currentToken = tokenRef.current;
+    searchLog('searchStarted', {
+      query: trimmed,
+      provider: 'mapbox',
+      tokenPresent: !!currentToken,
+      status: 'loading',
+    });
     setIsSearching(true);
     setSearchFailed(false);
     setErrorMessage(null);
@@ -180,7 +225,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     // Hard timeout: forcibly abort after SEARCH_TIMEOUT_MS
     const timeoutId = setTimeout(() => {
       if (!controller.signal.aborted) {
-        if (isIOS) console.log('[Search] searchTimeout', { query: trimmed });
+        searchLog('searchTimeout', { query: trimmed, status: 'error', timeoutMs: SEARCH_TIMEOUT_MS });
         controller.abort();
       }
     }, SEARCH_TIMEOUT_MS);
@@ -190,17 +235,17 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       const customResults = await searchCustomLocations(query);
 
       let mapboxResults: Suggestion[] = [];
-      const currentToken = tokenRef.current;
       if (currentToken) {
         try {
-          mapboxResults = await searchMapbox(query, currentToken);
+          mapboxResults = await searchMapbox(query, currentToken, controller.signal);
         } catch (err) {
           if ((err as Error)?.name === 'AbortError') throw err;
-          console.warn('[LocationInput] Mapbox search failed, showing local results + manual fallback');
+          searchLog('searchError', { query: trimmed, provider: 'mapbox', error: (err as Error)?.message, status: 'error' });
           setSearchFailed(true);
         }
       } else {
         pendingQueryRef.current = query;
+        searchLog('tokenMissing', { query: trimmed, status: 'error', error: 'No Mapbox token available' });
       }
 
       const recentIds = new Set(recentResults.map(r => `${r.center[0]}-${r.center[1]}`));
@@ -214,8 +259,8 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     };
 
     const errorMsg = language === 'fr'
-      ? 'Impossible de charger les resultats'
-      : "Can't load results - use Enter manually";
+      ? 'Impossible de charger les résultats'
+      : "Can't load results. Retry";
 
     try {
       if (controller.signal.aborted) { const e = new Error('Aborted'); e.name = 'AbortError'; throw e; }
@@ -245,14 +290,14 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       setSuggestions(combined);
       setShowSuggestions(combined.length > 0);
       setIsSearching(false);
-      if (isIOS) console.log('[Search] searchFinished', { query: trimmed, count: combined.length });
+      searchLog('searchFinished', { query: trimmed, count: combined.length, status: 'success' });
     } catch (err) {
       clearTimeout(timeoutId);
       const isAbort = (err as Error)?.name === 'AbortError';
       if (isAbort) {
         // Only show error if this was a timeout (not superseded by newer query)
         if (lastQueryRef.current === trimmed) {
-          if (isIOS) console.log('[Search] searchTimeout/aborted showing error', { query: trimmed });
+          searchLog('searchTimeout', { query: trimmed, status: 'error', error: 'Request timed out or aborted' });
           setIsSearching(false);
           setErrorMessage(errorMsg);
           setSuggestions([{
@@ -263,11 +308,13 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
             isManual: true,
           }]);
           setShowSuggestions(true);
+        } else {
+          // Superseded by newer query — just reset loading
+          setIsSearching(false);
         }
         return;
       }
-      console.error('[Search] searchError:', err);
-      if (isIOS) console.log('[Search] searchError', { query: trimmed, error: (err as Error)?.message });
+      searchLog('searchError', { query: trimmed, error: (err as Error)?.message, status: 'error' });
       setIsSearching(false);
       setErrorMessage(errorMsg);
       setSuggestions([{
@@ -281,47 +328,45 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     }
   }, [type, recentDestinations, language]);
 
-  const searchMapbox = async (query: string, accessToken: string): Promise<Suggestion[]> => {
+  const searchMapbox = async (query: string, accessToken: string, signal: AbortSignal): Promise<Suggestion[]> => {
+    const sessionToken = crypto.randomUUID();
+    const urlNoToken = (url: string) => url.replace(accessToken, '***');
+
+    const params = new URLSearchParams({
+      access_token: accessToken,
+      session_token: sessionToken,
+      q: query,
+      country: 'CA',
+      language: 'en',
+      limit: '10',
+      types: 'poi,address,place,street,postcode,locality,neighborhood,district,region',
+      proximity: '-73.5673,45.5017',
+    });
+
+    const suggestUrl = `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`;
+    searchLog('mapboxRequest', { provider: 'searchbox', url: urlNoToken(suggestUrl), tokenPresent: true });
+
     try {
-      const tokenPrefix = accessToken ? accessToken.substring(0, 6) + '...' : 'MISSING';
-      console.log(`[LocationInput] Mapbox search: query="${query}", token=${tokenPrefix}`);
-
-      const sessionToken = crypto.randomUUID();
-
-      const params = new URLSearchParams({
-        access_token: accessToken,
-        session_token: sessionToken,
-        q: query,
-        country: 'CA',
-        language: 'en',
-        limit: '10',
-        types: 'poi,address,place,street,postcode,locality,neighborhood,district,region',
-        proximity: '-73.5673,45.5017',
-      });
-
-      const suggestUrl = `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`;
-      console.log(`[LocationInput] Suggest URL (no token): ${suggestUrl.replace(accessToken, '***')}`);
-
-      const response = await fetch(suggestUrl);
-      console.log(`[LocationInput] Suggest HTTP ${response.status}`);
+      const response = await fetch(suggestUrl, { signal });
 
       if (!response.ok) {
-        const errBody = await response.text();
-        console.error(`[LocationInput] Suggest failed ${response.status}: ${errBody.substring(0, 200)}`);
+        const errBody = await response.text().catch(() => '(unreadable)');
+        searchLog('mapboxHttpError', {
+          provider: 'searchbox',
+          httpStatus: response.status,
+          error: errBody.substring(0, 300),
+          url: urlNoToken(suggestUrl),
+        });
         if (response.status === 401 || response.status === 403 || response.status === 404) {
           setSearchFailed(true);
         }
-        return await searchMapboxGeocoding(query, accessToken);
+        return await searchMapboxGeocoding(query, accessToken, signal);
       }
 
       const data = await response.json();
-      console.log(`[LocationInput] Suggest returned ${data.suggestions?.length ?? 0} suggestions`);
+      searchLog('mapboxResponse', { provider: 'searchbox', httpStatus: 200, resultCount: data.suggestions?.length ?? 0 });
 
       if (data.suggestions && data.suggestions.length > 0) {
-        data.suggestions.slice(0, 2).forEach((s: any, i: number) => {
-          console.log(`[LocationInput] Result ${i}: "${s.name}" - ${s.full_address || s.place_formatted || ''}`);
-        });
-
         const detailedSuggestions = await Promise.all(
           data.suggestions.slice(0, 8).map(async (s: any) => {
             try {
@@ -330,17 +375,13 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                 session_token: sessionToken,
               });
               const retrieveResponse = await fetch(
-                `https://api.mapbox.com/search/searchbox/v1/retrieve/${s.mapbox_id}?${retrieveParams}`
+                `https://api.mapbox.com/search/searchbox/v1/retrieve/${s.mapbox_id}?${retrieveParams}`,
+                { signal }
               );
 
               if (!retrieveResponse.ok) {
-                console.warn(`[LocationInput] Retrieve failed for ${s.name}: HTTP ${retrieveResponse.status}`);
-                return {
-                  id: s.mapbox_id,
-                  name: s.name || 'Unknown',
-                  address: s.full_address || s.place_formatted || '',
-                  center: [0, 0] as [number, number],
-                } as Suggestion | null;
+                searchLog('mapboxRetrieveError', { httpStatus: retrieveResponse.status, name: s.name });
+                return null;
               }
 
               const retrieveData = await retrieveResponse.json();
@@ -373,32 +414,34 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
               }
               return null;
             } catch (retrieveErr) {
-              console.warn(`[LocationInput] Retrieve error for ${s.name}:`, retrieveErr);
+              if ((retrieveErr as Error)?.name === 'AbortError') throw retrieveErr;
+              searchLog('mapboxRetrieveError', { name: s.name, error: (retrieveErr as Error)?.message });
               return null;
             }
           })
         );
 
         const results = detailedSuggestions.filter((s): s is Suggestion => s !== null && s.center[0] !== 0);
-        console.log(`[LocationInput] Final results: ${results.length} after retrieve`);
+        searchLog('mapboxResults', { provider: 'searchbox', finalCount: results.length });
 
         if (results.length > 0) return results;
-        return await searchMapboxGeocoding(query, accessToken);
+        return await searchMapboxGeocoding(query, accessToken, signal);
       } else {
-        return await searchMapboxGeocoding(query, accessToken);
+        return await searchMapboxGeocoding(query, accessToken, signal);
       }
     } catch (err) {
-      console.error('[LocationInput] Mapbox search error:', err);
+      if ((err as Error)?.name === 'AbortError') throw err;
+      searchLog('mapboxCatchError', { provider: 'searchbox', error: (err as Error)?.message });
       try {
-        return await searchMapboxGeocoding(query, accessToken);
-      } catch (_e) {
+        return await searchMapboxGeocoding(query, accessToken, signal);
+      } catch (e2) {
+        if ((e2 as Error)?.name === 'AbortError') throw e2;
         return [];
       }
     }
   };
 
-  const searchMapboxGeocoding = async (query: string, accessToken: string): Promise<Suggestion[]> => {
-    console.log(`[LocationInput] Geocoding fallback for: "${query}"`);
+  const searchMapboxGeocoding = async (query: string, accessToken: string, signal: AbortSignal): Promise<Suggestion[]> => {
     const geocodeParams = new URLSearchParams({
       access_token: accessToken,
       country: 'ca',
@@ -411,22 +454,24 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     });
 
     const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${geocodeParams}`;
-    const geocodeResponse = await fetch(geocodeUrl);
-    console.log(`[LocationInput] Geocoding HTTP ${geocodeResponse.status}`);
+    searchLog('mapboxRequest', { provider: 'geocoding', url: geocodeUrl.replace(accessToken, '***'), tokenPresent: true });
+
+    const geocodeResponse = await fetch(geocodeUrl, { signal });
 
     if (!geocodeResponse.ok) {
-      console.error(`[LocationInput] Geocoding failed: HTTP ${geocodeResponse.status}`);
+      const errBody = await geocodeResponse.text().catch(() => '(unreadable)');
+      searchLog('mapboxHttpError', {
+        provider: 'geocoding',
+        httpStatus: geocodeResponse.status,
+        error: errBody.substring(0, 300),
+      });
       return [];
     }
 
     const geocodeData = await geocodeResponse.json();
-    console.log(`[LocationInput] Geocoding returned ${geocodeData.features?.length ?? 0} features`);
+    searchLog('mapboxResponse', { provider: 'geocoding', httpStatus: 200, resultCount: geocodeData.features?.length ?? 0 });
 
     if (geocodeData.features) {
-      geocodeData.features.slice(0, 2).forEach((f: any, i: number) => {
-        console.log(`[LocationInput] Geocode ${i}: "${f.place_name}"`);
-      });
-
       return geocodeData.features.map((f: any) => {
         const parts = f.place_name.split(', ');
         const name = parts[0] || f.place_name;
@@ -538,8 +583,15 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           className="pl-10 py-6 bg-background touch-manipulation"
         />
 
+        {/* Token missing banner */}
+        {tokenMissing && !resolvedToken && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-destructive/50 rounded-lg shadow-lg z-50 p-3">
+            <span className="text-sm text-destructive">Missing Mapbox token</span>
+          </div>
+        )}
+
         {/* Error banner with retry */}
-        {errorMessage && !isSearching && (
+        {errorMessage && !isSearching && !tokenMissing && (
           <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-destructive/50 rounded-lg shadow-lg z-50 p-3 flex items-center justify-between gap-2">
             <span className="text-sm text-muted-foreground">{errorMessage}</span>
             <Button
