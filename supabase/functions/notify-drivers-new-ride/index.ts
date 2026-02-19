@@ -195,28 +195,73 @@ async function getAccessToken(): Promise<string> {
   return tokenData.access_token;
 }
 
+// Send OneSignal notification to all drivers via tag filter
+async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string): Promise<{ success: boolean; error?: string }> {
+  const apiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
+  if (!apiKey) {
+    console.error("ONESIGNAL_REST_API_KEY not configured");
+    return { success: false, error: "Missing OneSignal API key" };
+  }
+
+  // Use ONESIGNAL_APP_ID if set, otherwise skip
+  const appId = Deno.env.get("ONESIGNAL_APP_ID");
+  if (!appId) {
+    console.error("ONESIGNAL_APP_ID not configured");
+    return { success: false, error: "Missing OneSignal App ID" };
+  }
+
+  const payload: Record<string, unknown> = {
+    app_id: appId,
+    // Target drivers using tag filter (role = driver)
+    filters: [
+      { field: "tag", key: "role", relation: "=", value: "driver" },
+    ],
+    headings: { en: "New Ride Request! 🚗" },
+    contents: { en: "A rider is looking for a trip nearby." },
+    data: { ride_id: rideId, type: "new_ride" },
+    priority: 10,
+    ios_sound: "default",
+    android_sound: "default",
+    android_channel_id: "ride_requests",
+    content_available: true,
+    mutable_content: true,
+  };
+
+  try {
+    const res = await fetch("https://onesignal.com/api/v1/notifications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await res.json();
+    console.log("OneSignal driver alert result:", JSON.stringify(result));
+
+    if (!res.ok) {
+      return { success: false, error: result?.errors?.[0] || `HTTP ${res.status}` };
+    }
+    return { success: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("OneSignal driver alert failed:", msg);
+    return { success: false, error: msg };
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    // Authenticate with service role key - this is an internal function
-    const authHeader = req.headers.get("Authorization");
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-
-    if (!authHeader || authHeader !== `Bearer ${serviceRoleKey}`) {
-      console.error("Unauthorized: Invalid or missing service role key");
-      return new Response(
-        JSON.stringify({ error: "Unauthorized - service role key required" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
 
-    // Parse and validate input
+    // Parse input
     let rawInput: unknown;
     try {
       rawInput = await req.json();
@@ -227,23 +272,51 @@ serve(async (req) => {
       );
     }
 
-    const validation = validateInput(rawInput);
-    if (!validation.valid || !validation.data) {
-      return new Response(
-        JSON.stringify({ error: validation.error }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    const raw = rawInput as Record<string, unknown>;
 
-    const { 
-      rideId, 
-      pickupAddress, 
-      dropoffAddress, 
-      estimatedFare,
-      pickupLat,
-      pickupLng,
-      maxDistanceKm,
-    } = validation.data;
+    // Handle trigger payload format (source: 'trigger')
+    const isTrigger = raw.source === "trigger";
+    let rideId: string;
+    let pickupAddress: string | undefined;
+    let dropoffAddress: string | undefined;
+    let estimatedFare: number | undefined;
+    let pickupLat: number | undefined;
+    let pickupLng: number | undefined;
+    let maxDistanceKm = 15;
+
+    if (isTrigger) {
+      rideId = raw.ride_id as string;
+      pickupAddress = raw.pickup_address as string | undefined;
+      dropoffAddress = raw.dropoff_address as string | undefined;
+      estimatedFare = raw.estimated_fare as number | undefined;
+      pickupLat = raw.pickup_lat as number | undefined;
+      pickupLng = raw.pickup_lng as number | undefined;
+      console.log("Trigger-invoked for new ride:", rideId);
+    } else {
+      // Existing validation for direct API calls
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader || authHeader !== `Bearer ${serviceRoleKey}`) {
+        return new Response(
+          JSON.stringify({ error: "Unauthorized" }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const validation = validateInput(rawInput);
+      if (!validation.valid || !validation.data) {
+        return new Response(
+          JSON.stringify({ error: validation.error }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      rideId = validation.data.rideId;
+      pickupAddress = validation.data.pickupAddress;
+      dropoffAddress = validation.data.dropoffAddress;
+      estimatedFare = validation.data.estimatedFare;
+      pickupLat = validation.data.pickupLat;
+      pickupLng = validation.data.pickupLng;
+      maxDistanceKm = validation.data.maxDistanceKm;
+    }
 
     console.log("Notifying nearby drivers of new ride:", rideId);
 
@@ -472,12 +545,17 @@ serve(async (req) => {
 
     const sent = results.filter((r) => r.success).length;
 
+    // Also send OneSignal broadcast to all drivers
+    const oneSignalResult = await sendOneSignalDriverAlert(rideId, pickupAddress);
+    console.log("OneSignal driver alert:", oneSignalResult);
+
     return new Response(JSON.stringify({ 
       sent, 
       total: results.length, 
       nearbyDrivers: nearbyDrivers.length,
       totalOnline: onlineDrivers.length,
       inAppNotifications: inAppNotifications.length,
+      oneSignal: oneSignalResult,
       results 
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
