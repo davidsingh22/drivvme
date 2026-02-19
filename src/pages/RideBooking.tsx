@@ -141,7 +141,7 @@ const RideBooking = () => {
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(false);
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const {
@@ -324,77 +324,115 @@ const RideBooking = () => {
     return null;
   }, [mapboxToken, language]);
 
-  // Auto-detect GPS location on mount and set as default pickup
+  // Auto-detect GPS location on mount — NEVER blocks UI.
+  // Renders "Current Location" immediately, resolves real address in parallel.
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
-    if (!navigator.geolocation) {
-      setIsDetectingLocation(false);
-      return;
-    }
     hasAutoDetectedLocation.current = true;
-    let retryCount = 0;
-    const maxRetries = 3;
-    const attemptReverseGeocode = async (lat: number, lng: number) => {
-      const address = await reverseGeocode(lat, lng);
-      if (address) {
-        setPickupAddress(address);
-        setPickup({
-          address,
-          lat,
-          lng
-        });
-        setIsDetectingLocation(false);
-        return;
-      }
 
-      // Retry if geocoding failed and we have retries left
-      if (retryCount < maxRetries && mapboxToken) {
-        retryCount++;
-        console.log(`[RideBooking] Reverse geocode retry ${retryCount}/${maxRetries}`);
-        setTimeout(() => attemptReverseGeocode(lat, lng), 1000);
-        return;
-      }
+    // Immediately set a friendly placeholder so the booking UI is interactive
+    const defaultLabel = language === 'fr' ? 'Position actuelle' : 'Current Location';
 
-      // Final fallback: use coordinates as readable address
-      const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      setPickupAddress(coordAddress);
-      setPickup({
-        address: coordAddress,
-        lat,
-        lng
-      });
-      setIsDetectingLocation(false);
+    // Try to restore last known pickup from sessionStorage
+    const cachedPickup = sessionStorage.getItem('drivveme_last_pickup');
+    if (cachedPickup) {
+      try {
+        const cached = JSON.parse(cachedPickup) as { address: string; lat: number; lng: number };
+        if (cached.lat && cached.lng && cached.address) {
+          setPickup(cached);
+          setPickupAddress(cached.address);
+          console.log('[RideBooking] Restored cached pickup:', cached.address);
+        }
+      } catch { /* ignore corrupt cache */ }
+    }
+
+    // If no cached data, set the friendly placeholder (no coords yet)
+    if (!pickupAddress) {
+      setPickupAddress(defaultLabel);
+    }
+
+    if (!navigator.geolocation) return;
+
+    let resolved = false;
+    let softTimerFired = false;
+
+    // Helper: once we have coords, try reverse geocode
+    const resolveAddress = async (lat: number, lng: number) => {
+      // Cache coords immediately
+      const tempPickup = { address: pickupAddress || defaultLabel, lat, lng };
+      setPickup(tempPickup);
+
+      if (!mapboxToken) return; // effect below will pick up when token arrives
+
+      let retries = 0;
+      const maxRetries = 2;
+      const attempt = async (): Promise<void> => {
+        const address = await reverseGeocode(lat, lng);
+        if (address) {
+          resolved = true;
+          const finalPickup = { address, lat, lng };
+          setPickupAddress(address);
+          setPickup(finalPickup);
+          // Cache for next visit
+          sessionStorage.setItem('drivveme_last_pickup', JSON.stringify(finalPickup));
+          return;
+        }
+        if (retries < maxRetries && mapboxToken) {
+          retries++;
+          await new Promise(r => setTimeout(r, 800));
+          return attempt();
+        }
+        // Fallback: coords as address
+        resolved = true;
+        const coordAddr = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        const fallback = { address: coordAddr, lat, lng };
+        setPickupAddress(coordAddr);
+        setPickup(fallback);
+      };
+      await attempt();
     };
-    navigator.geolocation.getCurrentPosition(async position => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
 
-      // Always store coords immediately so pickup is never null
-      const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
-      setPickup({
-        address: tempAddress,
-        lat,
-        lng
-      });
-      setPickupAddress(tempAddress);
+    // Soft timeout (3s): switch to low-accuracy if high-accuracy hasn't returned
+    const softTimer = setTimeout(() => {
+      if (resolved) return;
+      softTimerFired = true;
+      console.log('[RideBooking] GPS soft timeout (3s) — trying low accuracy');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (resolved) return;
+          resolveAddress(pos.coords.latitude, pos.coords.longitude);
+        },
+        () => { /* hard timeout will handle */ },
+        { enableHighAccuracy: false, timeout: 4000, maximumAge: 300000 }
+      );
+    }, 3000);
 
-      // Wait for mapboxToken if not available yet - effect below will resolve
-      if (!mapboxToken) return;
-      await attemptReverseGeocode(lat, lng);
-    }, error => {
-      console.log('[RideBooking] GPS auto-detect failed:', error.message);
-      setIsDetectingLocation(false);
-    }, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 60000
-    });
+    // Hard timeout (8s): give up on GPS entirely, keep whatever we have
+    const hardTimer = setTimeout(() => {
+      if (resolved) return;
+      console.log('[RideBooking] GPS hard timeout (8s) — using cached/default');
+      resolved = true;
+      // If we still have no coords, that's fine — user can tap "Use current location" or type
+    }, 8000);
 
-    // Safety timeout: never show detecting overlay for more than 6 seconds
-    const safetyTimer = setTimeout(() => {
-      setIsDetectingLocation(false);
-    }, 6000);
-    return () => clearTimeout(safetyTimer);
+    // Primary high-accuracy request — runs in parallel, never blocks
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        if (resolved) return;
+        resolved = true;
+        await resolveAddress(position.coords.latitude, position.coords.longitude);
+      },
+      (error) => {
+        console.log('[RideBooking] GPS high-accuracy failed:', error.message);
+        // Soft/hard timers will handle fallback
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+
+    return () => {
+      clearTimeout(softTimer);
+      clearTimeout(hardTimer);
+    };
   }, [mapboxToken, language, reverseGeocode]);
 
   // Effect to resolve address when pickup has coords but generic address
@@ -1264,7 +1302,7 @@ const RideBooking = () => {
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
   if (step === 'input') {
     // Extract short address for display - always show real address, never generic label
-    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress) ? pickupAddress.split(',')[0] : isDetectingLocation ? language === 'fr' ? 'Détection...' : 'Detecting...' : pickupAddress?.split(',')[0] || '';
+    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle', 'Current Location'].includes(pickupAddress) ? pickupAddress.split(',')[0] : language === 'fr' ? 'Position actuelle' : 'Current Location';
     return <div className="min-h-screen bg-background relative overflow-hidden">
         {/* Full-page background image */}
         <div className="absolute inset-0 z-0" style={{
@@ -1383,15 +1421,7 @@ const RideBooking = () => {
           </div>
         </motion.div>
         
-        {/* GPS Detection Overlay */}
-        {isDetectingLocation && <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
-            <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
-              <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-              <p className="text-sm font-medium text-white">
-                {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-              </p>
-            </div>
-          </div>}
+        {/* GPS Detection Overlay — REMOVED: GPS never blocks booking UI */}
           
         {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
         <motion.div initial={{
