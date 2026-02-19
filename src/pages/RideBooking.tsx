@@ -141,9 +141,30 @@ const RideBooking = () => {
       });
   }, [user?.id]);
   const [step, setStep] = useState<RideStep>('input');
-  const [pickup, setPickup] = useState<Location | null>(null);
+  // Cache-first: initialize pickup from localStorage immediately so UI never shows "Set pickup location"
+  const [pickup, setPickup] = useState<Location | null>(() => {
+    try {
+      const cached = localStorage.getItem('drivveme_last_pickup');
+      if (cached) {
+        const { lat, lng, addressLabel, ts } = JSON.parse(cached);
+        if (lat && lng && addressLabel && Date.now() - ts < 60 * 60 * 1000) {
+          return { address: addressLabel, lat, lng };
+        }
+      }
+    } catch {}
+    return null;
+  });
   const [dropoff, setDropoff] = useState<Location | null>(null);
-  const [pickupAddress, setPickupAddress] = useState('');
+  const [pickupAddress, setPickupAddress] = useState(() => {
+    try {
+      const cached = localStorage.getItem('drivveme_last_pickup');
+      if (cached) {
+        const { addressLabel, ts } = JSON.parse(cached);
+        if (addressLabel && Date.now() - ts < 60 * 60 * 1000) return addressLabel;
+      }
+    } catch {}
+    return '';
+  });
   const [dropoffAddress, setDropoffAddress] = useState('');
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
   const [distanceKm, setDistanceKm] = useState(0);
@@ -353,20 +374,7 @@ const RideBooking = () => {
   // localStorage cache key for pickup
   const PICKUP_CACHE_KEY = 'drivveme_last_pickup';
 
-  // Load cached pickup from localStorage on mount (instant, no GPS needed)
-  useEffect(() => {
-    try {
-      const cached = localStorage.getItem(PICKUP_CACHE_KEY);
-      if (cached) {
-        const { lat, lng, addressLabel, ts } = JSON.parse(cached);
-        // Use cache if less than 30 minutes old
-        if (lat && lng && addressLabel && Date.now() - ts < 30 * 60 * 1000) {
-          setPickup({ address: addressLabel, lat, lng });
-          setPickupAddress(addressLabel);
-        }
-      }
-    } catch { /* ignore */ }
-  }, []);
+  // Cache already loaded via useState initializers above — no extra effect needed.
 
   // Background GPS detection with 3s/8s timeouts, caches result
   useEffect(() => {
