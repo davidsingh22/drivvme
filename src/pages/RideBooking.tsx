@@ -386,104 +386,73 @@ const RideBooking = () => {
 
   // Cache already loaded via useState initializers above — no extra effect needed.
 
-  // Background GPS detection with 3s/8s timeouts, caches result
+  // Ref to store pending GPS coords when mapboxToken isn't ready yet
+  const pendingGpsCoords = useRef<{ lat: number; lng: number } | null>(null);
+
+  // Helper: resolve GPS coords → address and cache
+  const resolveAndCacheAddress = useCallback(async (lat: number, lng: number) => {
+    if (!mapboxToken) {
+      // Store coords for later resolution
+      pendingGpsCoords.current = { lat, lng };
+      // Still set coords on pickup so route calc can use them
+      setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
+      return;
+    }
+    const address = await reverseGeocode(lat, lng);
+    const finalAddress = address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    setPickupAddress(finalAddress);
+    setPickup({ address: finalAddress, lat, lng });
+    try {
+      localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: finalAddress, ts: Date.now() }));
+      localStorage.setItem('last_pickup_address', finalAddress);
+    } catch { /* ignore */ }
+  }, [mapboxToken, reverseGeocode]);
+
+  // Background GPS detection — fires once, stores coords immediately
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
     if (!navigator.geolocation) return;
     hasAutoDetectedLocation.current = true;
-    // Only show detecting spinner if we have NO cached address
-    // No spinner to show — cache-first model
-
-    let softTimerFired = false;
-    let resolved = false;
-
-    // 3s soft timeout – stop showing "detecting" but keep trying
-    const softTimer = setTimeout(() => {
-      softTimerFired = true;
-      // no-op: spinner removed
-    }, 3000);
-
-    // 8s hard timeout – give up entirely
-    const hardTimer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        // no-op: spinner removed
-      }
-    }, 8000);
-
-    const attemptReverseGeocode = async (lat: number, lng: number) => {
-      const address = await reverseGeocode(lat, lng);
-      if (address) {
-        setPickupAddress(address);
-        setPickup({ address, lat, lng });
-        // Cache in localStorage — both structured and simple keys
-        try {
-          localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: address, ts: Date.now() }));
-          localStorage.setItem('last_pickup_address', address);
-        } catch { /* ignore */ }
-        // no-op: spinner removed
-        resolved = true;
-        return;
-      }
-      // Fallback to coordinates
-      const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      setPickupAddress(coordAddress);
-      setPickup({ address: coordAddress, lat, lng });
-      try {
-        localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: coordAddress, ts: Date.now() }));
-        localStorage.setItem('last_pickup_address', coordAddress);
-      } catch { /* ignore */ }
-      // no-op: spinner removed
-      resolved = true;
-    };
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-
-        // Store coords immediately so pickup is never null — but don't overwrite a cached address
-        if (!pickup) {
-          setPickup({ address: pickupAddress || '', lat, lng });
-        } else if (!pickup.lat || !pickup.lng) {
-          setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
-        }
-
-        if (!mapboxToken) return; // effect below will resolve address
-        await attemptReverseGeocode(lat, lng);
+        await resolveAndCacheAddress(lat, lng);
       },
       (error) => {
         console.log('[RideBooking] GPS auto-detect failed:', error.message);
-        // no-op: spinner removed
-        resolved = true;
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
+  }, [resolveAndCacheAddress]);
 
-    return () => {
-      clearTimeout(softTimer);
-      clearTimeout(hardTimer);
-    };
-  }, [mapboxToken, language, reverseGeocode]);
-
-  // Effect to resolve address when pickup has coords but generic address
+  // When mapboxToken arrives and we have pending GPS coords, resolve the address
   useEffect(() => {
-    if (!pickup || !mapboxToken) return;
-    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle'];
+    if (!mapboxToken || !pendingGpsCoords.current) return;
+    const { lat, lng } = pendingGpsCoords.current;
+    pendingGpsCoords.current = null;
+    resolveAndCacheAddress(lat, lng);
+  }, [mapboxToken, resolveAndCacheAddress]);
+
+  // Effect to resolve address when pickup has coords but generic/empty address
+  useEffect(() => {
+    if (!pickup || !pickup.lat || !pickup.lng || !mapboxToken) return;
+    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', ''];
     const isGeneric = genericLabels.includes(pickupAddress) || pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
     if (isGeneric) {
       reverseGeocode(pickup.lat, pickup.lng).then(address => {
         if (address) {
           setPickupAddress(address);
-          setPickup(prev => prev ? {
-            ...prev,
-            address
-          } : null);
-          // no-op: spinner removed
+          setPickup(prev => prev ? { ...prev, address } : null);
+          try {
+            localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat: pickup.lat, lng: pickup.lng, addressLabel: address, ts: Date.now() }));
+            localStorage.setItem('last_pickup_address', address);
+          } catch { /* ignore */ }
         }
       });
     }
-  }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
+  }, [pickup?.lat, pickup?.lng, pickupAddress, mapboxToken, reverseGeocode]);
 
   // Restore active ride when returning to the app (especially on iOS)
   useEffect(() => {
@@ -1203,9 +1172,27 @@ const RideBooking = () => {
   };
   const resetBooking = () => {
     setStep('input');
-    setPickup(null);
+    // Re-initialize pickup from cache so we never show empty/fallback
+    let cachedPickup: Location | null = null;
+    let cachedAddr = '';
+    try {
+      const cached = localStorage.getItem('drivveme_last_pickup');
+      if (cached) {
+        const { lat, lng, addressLabel } = JSON.parse(cached);
+        if (lat && lng && addressLabel) {
+          cachedPickup = { address: addressLabel, lat, lng };
+          cachedAddr = addressLabel;
+        }
+      }
+    } catch {}
+    if (!cachedAddr) {
+      try {
+        cachedAddr = localStorage.getItem('last_pickup_address') || '';
+      } catch {}
+    }
+    setPickup(cachedPickup);
+    setPickupAddress(cachedAddr);
     setDropoff(null);
-    setPickupAddress('');
     setDropoffAddress('');
     setFareEstimate(null);
     setCurrentRide(null);
@@ -1213,6 +1200,8 @@ const RideBooking = () => {
     setDriverLocation(null);
     clearRide(); // Clear from localStorage
     hasRestoredRide.current = false;
+    // Allow GPS to re-detect on next cycle
+    hasAutoDetectedLocation.current = false;
   };
 
   // isActiveRidePhase already declared above for realtime tracking
