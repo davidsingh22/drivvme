@@ -94,7 +94,7 @@ const Navbar = () => {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
             {user ? <>
-                {isRider && <Link to="/ride?new=1" className="text-muted-foreground hover:text-foreground transition-colors">
+                {isRider && <Link to="/ride" className="text-muted-foreground hover:text-foreground transition-colors">
                     {t('nav.ride')}
                   </Link>}
                 {isDriver && <>
@@ -120,7 +120,7 @@ const Navbar = () => {
                     Admin
                   </Link>}
               </> : <>
-                <Link to="/ride?new=1" className="text-muted-foreground hover:text-foreground transition-colors">
+                <Link to="/ride" className="text-muted-foreground hover:text-foreground transition-colors">
                   {t('nav.ride')}
                 </Link>
                 
@@ -202,7 +202,7 @@ const Navbar = () => {
           }} className="md:hidden py-4 border-t border-border relative z-50 bg-background/95 backdrop-blur-lg">
             <div className="flex flex-col gap-1">
               {user ? <>
-                  {isRider && <Link to="/ride?new=1" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
+                  {isRider && <Link to="/ride" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
                       {t('nav.ride')}
                     </Link>}
                   {isDriver && <>
@@ -239,7 +239,7 @@ const Navbar = () => {
                     {t('nav.logout')}
                   </button>
                 </> : <>
-                  <Link to="/ride?new=1" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
+                  <Link to="/ride" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
                     {t('nav.ride')}
                   </Link>
                   <Link to="/drive" className="block px-4 py-3 text-muted-foreground hover:text-foreground active:bg-accent/50 touch-manipulation" onClick={() => setIsOpen(false)}>
