@@ -324,7 +324,25 @@ const RideBooking = () => {
     return null;
   }, [mapboxToken, language]);
 
-  // Auto-detect GPS location on mount and set as default pickup
+  // localStorage cache key for pickup
+  const PICKUP_CACHE_KEY = 'drivveme_last_pickup';
+
+  // Load cached pickup from localStorage on mount (instant, no GPS needed)
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(PICKUP_CACHE_KEY);
+      if (cached) {
+        const { lat, lng, addressLabel, ts } = JSON.parse(cached);
+        // Use cache if less than 30 minutes old
+        if (lat && lng && addressLabel && Date.now() - ts < 30 * 60 * 1000) {
+          setPickup({ address: addressLabel, lat, lng });
+          setPickupAddress(addressLabel);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Background GPS detection with 3s/8s timeouts, caches result
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
     if (!navigator.geolocation) {
@@ -332,69 +350,75 @@ const RideBooking = () => {
       return;
     }
     hasAutoDetectedLocation.current = true;
-    let retryCount = 0;
-    const maxRetries = 3;
+
+    let softTimerFired = false;
+    let resolved = false;
+
+    // 3s soft timeout – stop showing "detecting" but keep trying
+    const softTimer = setTimeout(() => {
+      softTimerFired = true;
+      setIsDetectingLocation(false);
+    }, 3000);
+
+    // 8s hard timeout – give up entirely
+    const hardTimer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        setIsDetectingLocation(false);
+      }
+    }, 8000);
+
     const attemptReverseGeocode = async (lat: number, lng: number) => {
       const address = await reverseGeocode(lat, lng);
       if (address) {
         setPickupAddress(address);
-        setPickup({
-          address,
-          lat,
-          lng
-        });
+        setPickup({ address, lat, lng });
+        // Cache in localStorage
+        try {
+          localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: address, ts: Date.now() }));
+        } catch { /* ignore */ }
         setIsDetectingLocation(false);
+        resolved = true;
         return;
       }
-
-      // Retry if geocoding failed and we have retries left
-      if (retryCount < maxRetries && mapboxToken) {
-        retryCount++;
-        console.log(`[RideBooking] Reverse geocode retry ${retryCount}/${maxRetries}`);
-        setTimeout(() => attemptReverseGeocode(lat, lng), 1000);
-        return;
-      }
-
-      // Final fallback: use coordinates as readable address
+      // Fallback to coordinates
       const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
       setPickupAddress(coordAddress);
-      setPickup({
-        address: coordAddress,
-        lat,
-        lng
-      });
+      setPickup({ address: coordAddress, lat, lng });
+      try {
+        localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: coordAddress, ts: Date.now() }));
+      } catch { /* ignore */ }
       setIsDetectingLocation(false);
+      resolved = true;
     };
-    navigator.geolocation.getCurrentPosition(async position => {
-      const lat = position.coords.latitude;
-      const lng = position.coords.longitude;
 
-      // Always store coords immediately so pickup is never null
-      const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
-      setPickup({
-        address: tempAddress,
-        lat,
-        lng
-      });
-      setPickupAddress(tempAddress);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
 
-      // Wait for mapboxToken if not available yet - effect below will resolve
-      if (!mapboxToken) return;
-      await attemptReverseGeocode(lat, lng);
-    }, error => {
-      console.log('[RideBooking] GPS auto-detect failed:', error.message);
-      setIsDetectingLocation(false);
-    }, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 60000
-    });
+        // Store coords immediately so pickup is never null
+        if (!pickup) {
+          const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
+          setPickup({ address: tempAddress, lat, lng });
+          setPickupAddress(tempAddress);
+        }
 
-    // Safety timeout: never show detecting overlay for more than 6 seconds
-    const safetyTimer = setTimeout(() => {
-      setIsDetectingLocation(false);
-    }, 6000);
-    return () => clearTimeout(safetyTimer);
+        if (!mapboxToken) return; // effect below will resolve address
+        await attemptReverseGeocode(lat, lng);
+      },
+      (error) => {
+        console.log('[RideBooking] GPS auto-detect failed:', error.message);
+        setIsDetectingLocation(false);
+        resolved = true;
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+
+    return () => {
+      clearTimeout(softTimer);
+      clearTimeout(hardTimer);
+    };
   }, [mapboxToken, language, reverseGeocode]);
 
   // Effect to resolve address when pickup has coords but generic address
@@ -844,8 +868,12 @@ const RideBooking = () => {
         address,
         ...location
       });
+      // Auto-navigate to estimate when destination is selected with coordinates
+      // (will be handled by the effect below)
     }
   };
+
+  // (auto-estimate effect moved below calculateRoute declaration)
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(position => {
@@ -909,6 +937,20 @@ const RideBooking = () => {
       });
     }
   }, [pickup, dropoff, toast, mapboxToken]);
+
+  // Auto-calculate route when both pickup and dropoff have coordinates
+  const hasTriggeredAutoEstimate = useRef(false);
+  useEffect(() => {
+    if (!pickup || !dropoff) {
+      hasTriggeredAutoEstimate.current = false;
+      return;
+    }
+    if (step !== 'input') return;
+    if (hasTriggeredAutoEstimate.current) return;
+    hasTriggeredAutoEstimate.current = true;
+    calculateRoute();
+  }, [pickup, dropoff, step, calculateRoute]);
+
   const handleGetEstimate = async () => {
     if (!pickup || !dropoff) {
       toast({
@@ -1261,278 +1303,194 @@ const RideBooking = () => {
       </div>;
   }
 
-  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
+  // DEFAULT BOOKING FLOW - MAP-FREE "WHERE TO?" SCREEN
   if (step === 'input') {
-    // Extract short address for display - always show real address, never generic label
-    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress) ? pickupAddress.split(',')[0] : isDetectingLocation ? language === 'fr' ? 'Détection...' : 'Detecting...' : pickupAddress?.split(',')[0] || '';
-    return <div className="min-h-screen bg-background relative overflow-hidden">
-        {/* Full-page background image */}
-        <div className="absolute inset-0 z-0" style={{
-        backgroundImage: `url(${rideBg})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center center'
-      }} />
-        {/* Gradient overlay for better contrast */}
-        <div className="absolute inset-0 z-0" style={{
-        background: 'linear-gradient(to bottom, rgba(10, 10, 25, 0.3) 0%, rgba(60, 30, 100, 0.4) 50%, rgba(10, 10, 25, 0.6) 100%)'
-      }} />
-        
-        {/* Full-bleed Map - with transparency to show background */}
-        <div className="absolute inset-0 z-10" style={{
-        opacity: 0.85
-      }}>
-          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} />
+    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress)
+      ? pickupAddress.split(',')[0]
+      : isDetectingLocation
+        ? (language === 'fr' ? 'Détection...' : 'Detecting...')
+        : (pickupAddress?.split(',')[0] || (language === 'fr' ? 'Définir le lieu de départ' : 'Set pickup location'));
+
+    return (
+      <div className="min-h-[100dvh] bg-background flex flex-col">
+        {/* ── Header Bar ── */}
+        <div className="flex items-center justify-between px-5 pt-[env(safe-area-inset-top,12px)] pb-3" style={{ paddingTop: 'max(env(safe-area-inset-top, 12px), 12px)' }}>
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center logo-icon-pulse">
+              <Car className="h-4 w-4 text-primary-foreground" />
+            </div>
+            <span className="font-display font-bold text-xl logo-flash">Drivveme</span>
+          </div>
+
+          {/* Menu */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onTouchEnd={(e) => { e.preventDefault(); navigate('/history'); }}
+              onClick={() => navigate('/history')}
+              className="p-2 rounded-lg hover:bg-muted transition-colors touch-manipulation"
+              aria-label="Ride history"
+            >
+              <History className="h-5 w-5 text-muted-foreground" />
+            </button>
+            <button
+              type="button"
+              onTouchEnd={(e) => { e.preventDefault(); setHelpDialogOpen(true); }}
+              onClick={() => setHelpDialogOpen(true)}
+              className="p-2 rounded-lg hover:bg-muted transition-colors touch-manipulation relative"
+              aria-label="Help"
+            >
+              <HelpCircle className="h-5 w-5 text-muted-foreground" />
+              {unreadSupportMessages > 0 && <span className="absolute top-1 right-1 h-2.5 w-2.5 bg-destructive rounded-full animate-pulse" />}
+            </button>
+            <button
+              type="button"
+              onTouchEnd={(e) => { e.preventDefault(); signOut(); navigate('/'); }}
+              onClick={() => { signOut(); navigate('/'); }}
+              className="p-2 rounded-lg hover:bg-muted transition-colors touch-manipulation"
+              aria-label="Log out"
+            >
+              <LogOut className="h-5 w-5 text-muted-foreground" />
+            </button>
+          </div>
+          <HelpDialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen} />
         </div>
-            
-        {/* Compact Frosted Top Bar */}
-        <motion.div initial={{
-        y: -100,
-        opacity: 0
-      }} animate={{
-        y: 0,
-        opacity: 1
-      }} className="absolute z-20" style={{
-        top: '12px',
-        left: '12px',
-        right: '12px'
-      }}>
-          <div className="flex items-center justify-between px-5" style={{
-          height: '58px',
-          borderRadius: '16px',
-          background: 'rgba(10, 10, 15, 0.55)',
-          backdropFilter: 'blur(14px)',
-          WebkitBackdropFilter: 'blur(14px)',
-          border: '1px solid rgba(255, 255, 255, 0.10)',
-          boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)'
-        }}>
-            {/* Logo with flash animation */}
-            <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center logo-icon-pulse">
-                <Car className="h-4 w-4 text-primary-foreground" />
-              </div>
-              <span className="font-display font-bold text-xl logo-flash">
-                Drivveme
-              </span>
+
+        {/* ── Greeting ── */}
+        <div className="px-5 pb-2">
+          <GreetingHeader />
+        </div>
+
+        {/* ── Destination Search Bar ── */}
+        <div className="px-5 pb-3">
+          <div className="rounded-2xl border border-primary/40 bg-card/80 shadow-glow overflow-hidden">
+            <LocationInput
+              type="dropoff"
+              value={dropoffAddress}
+              onChange={(addr, coords) => handleDropoffChange(addr, coords)}
+              placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
+            />
+          </div>
+        </div>
+
+        {/* ── Pickup Row with Edit ── */}
+        <div className="px-5 pb-4">
+          <button
+            type="button"
+            onTouchEnd={(e) => { e.preventDefault(); setShowFullInput(true); }}
+            onClick={() => setShowFullInput(true)}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-secondary/60 border border-border hover:bg-secondary transition-colors touch-manipulation text-left"
+            aria-label="Edit pickup location"
+          >
+            <div className="h-8 w-8 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
+              <Navigation className="h-4 w-4 text-accent" />
             </div>
-            
-            {/* Menu Button with Dropdown */}
-            <div className="relative group">
-              <button className="p-2 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1">
-                <div className="flex flex-col gap-1">
-                  <div className="w-5 h-0.5 bg-white rounded-full" />
-                  <div className="w-5 h-0.5 bg-white rounded-full" />
-                  <div className="w-5 h-0.5 bg-white rounded-full" />
-                </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Départ' : 'Pickup'}</p>
+              <p className="text-sm font-medium text-foreground truncate">{displayPickupAddress}</p>
+            </div>
+            {isDetectingLocation && (
+              <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin flex-shrink-0" />
+            )}
+            <span className="text-xs font-medium text-primary flex-shrink-0 px-2.5 py-1 rounded-full border border-primary/30">
+              {language === 'fr' ? 'Éditer' : 'Edit'}
+            </span>
+          </button>
+        </div>
+
+        {/* ── Recent / Quick Destinations ── */}
+        <div className="flex-1 overflow-y-auto px-5 pb-4 space-y-4">
+          {!dropoffAddress && (
+            <>
+              <QuickDestinations onSelectDestination={(dest) => {
+                handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+              }} />
+              <RecentDestinations onSelectDestination={(dest) => {
+                handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+              }} />
+            </>
+          )}
+
+          {/* Manual pickup/destination buttons */}
+          {!dropoffAddress && (
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onTouchEnd={(e) => { e.preventDefault(); setShowFullInput(true); }}
+                onClick={() => setShowFullInput(true)}
+                className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl bg-secondary/40 border border-border hover:bg-secondary transition-colors touch-manipulation"
+              >
+                <MapPin className="h-4 w-4 text-primary" />
+                <span className="text-sm font-medium text-foreground">
+                  {language === 'fr' ? 'Saisir manuellement' : 'Enter manually'}
+                </span>
               </button>
-              
-              {/* Dropdown Menu */}
-              <div className="absolute right-0 top-full mt-2 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                <div className="rounded-xl overflow-hidden" style={{
-                background: 'rgba(20, 10, 35, 0.95)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5)'
-              }}>
-                  <button onClick={() => navigate('/history')} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
-                    <History className="h-5 w-5 text-primary" />
-                    <span className="text-white font-medium">
-                      {language === 'fr' ? 'Mes trajets' : 'Past Rides'}
-                    </span>
-                  </button>
-                  <div className="h-px bg-white/10" />
-                  <button onClick={() => {
-                  // Force a full page refresh to reset everything
-                  window.location.href = '/ride';
-                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
-                    <Car className="h-5 w-5 text-accent" />
-                    <span className="text-white font-medium">
-                      {language === 'fr' ? 'Réserver' : 'Book a Ride'}
-                    </span>
-                  </button>
-                  <div className="h-px bg-white/10" />
-                  <button onClick={() => {
-                  setHelpDialogOpen(true);
-                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left relative">
-                    <div className="relative">
-                      <HelpCircle className="h-5 w-5 text-primary" />
-                      {unreadSupportMessages > 0 && <span className="absolute -top-1 -right-1 h-3 w-3 bg-destructive rounded-full animate-pulse" />}
-                    </div>
-                    <span className="text-white font-medium">
-                      {language === 'fr' ? 'Aide' : 'Help'}
-                    </span>
-                    {unreadSupportMessages > 0 && <span className="ml-auto bg-destructive text-destructive-foreground text-xs font-bold px-2 py-0.5 rounded-full animate-pulse">
-                        {unreadSupportMessages}
-                      </span>}
-                  </button>
-                  <div className="h-px bg-white/10" />
-                  <button onClick={() => {
-                  signOut();
-                  navigate('/');
-                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
-                    <LogOut className="h-5 w-5 text-destructive" />
-                    <span className="text-white font-medium">
-                      {language === 'fr' ? 'Déconnexion' : 'Log Out'}
-                    </span>
-                  </button>
-                </div>
-              </div>
             </div>
+          )}
 
-            <HelpDialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen} />
-          </div>
-        </motion.div>
-        
-        {/* GPS Detection Overlay */}
-        {isDetectingLocation && <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
-            <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
-              <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-              <p className="text-sm font-medium text-white">
-                {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-              </p>
-            </div>
-          </div>}
-          
-        {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
-        <motion.div initial={{
-        y: 100,
-        opacity: 0
-      }} animate={{
-        y: 0,
-        opacity: 1
-      }} className="absolute z-20 overflow-hidden" style={{
-        left: '12px',
-        right: '12px',
-        bottom: '12px',
-        height: 'min(65vh, calc(100dvh - 200px))',
-        borderRadius: '20px',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)'
-      }}>
-          {/* Background image layer */}
-          <div className="absolute inset-0" style={{
-          backgroundImage: `url(${welcomeBg})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center top'
-        }} />
-          {/* Frosted glass overlay */}
-          <div className="absolute inset-0" style={{
-          background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.3) 0%, rgba(30, 15, 60, 0.4) 50%, rgba(60, 30, 100, 0.3) 100%)'
-        }} />
-          {/* Glowing logo + brand name at top center */}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
-            
-            
-          </div>
-          {/* Content layer */}
-          <div className="relative h-full p-5 pt-6 space-y-3 overflow-y-auto z-10">
-            {/* Greeting */}
-            <GreetingHeader />
-            
-            {/* Pickup Location Row */}
-            <div onClick={() => setShowFullInput(true)} className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" style={{
-            background: 'rgba(40, 20, 60, 0.7)',
-            border: '1.5px solid rgba(200, 50, 255, 0.6)',
-            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
-          }}>
-              <div className="h-9 w-9 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0">
-                <Navigation className="h-4 w-4 text-lime-400" />
-              </div>
-              <span className="flex-1 text-white font-semibold truncate drop-shadow-sm">
-                {displayPickupAddress}
-              </span>
-              <span className="text-white font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/15">
-                {language === 'fr' ? 'Éditer' : 'Edit'}
-              </span>
-            </div>
+          {/* Get Estimate button when destination selected but no auto-route yet */}
+          {dropoffAddress && pickup && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+              <Button
+                onClick={handleGetEstimate}
+                className="w-full gradient-primary shadow-button py-5 text-lg font-semibold"
+                disabled={!pickupAddress || !dropoffAddress}
+              >
+                {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
+              </Button>
+            </motion.div>
+          )}
+        </div>
 
-            {/* Destination Input - Where to? */}
-            <div className="rounded-xl" style={{
-            background: 'rgba(40, 20, 60, 0.7)',
-            border: '1.5px solid rgba(200, 50, 255, 0.6)',
-            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
-          }}>
-              <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => handleDropoffChange(addr, coords)} placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'} />
-            </div>
-
-            {/* Quick Destinations - Top 2 Most Visited */}
-            {!dropoffAddress && <QuickDestinations onSelectDestination={dest => {
-            handleDropoffChange(dest.address, {
-              lat: dest.lat,
-              lng: dest.lng
-            });
-          }} />}
-
-            {/* Get Estimate Button - shows when destination is selected */}
-            {dropoffAddress && pickup && <motion.div initial={{
-            opacity: 0,
-            y: 10
-          }} animate={{
-            opacity: 1,
-            y: 0
-          }} transition={{
-            delay: 0.1
-          }}>
-                <Button onClick={handleGetEstimate} className="w-full gradient-primary shadow-button py-5 text-lg font-semibold" disabled={!pickupAddress || !dropoffAddress}>
-                  {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
-                </Button>
-              </motion.div>}
-          </div>
-        </motion.div>
-
-        {/* Full Input Modal - for editing pickup or when tapped */}
+        {/* ── Full Input Modal (editing pickup) ── */}
         <AnimatePresence>
-          {showFullInput && <motion.div initial={{
-          opacity: 0
-        }} animate={{
-          opacity: 1
-        }} exit={{
-          opacity: 0
-        }} className="fixed inset-0 z-50 bg-background">
+          {showFullInput && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 bg-background"
+            >
               <div className="h-full flex flex-col">
-                {/* Header */}
                 <div className="flex items-center gap-4 p-4 border-b border-border">
                   <Button variant="ghost" size="icon" onClick={() => setShowFullInput(false)}>
                     <X className="h-5 w-5" />
                   </Button>
                   <h2 className="font-semibold">
-                    {language === 'fr' ? 'Où allons-nous?' : 'Where to?'}
+                    {language === 'fr' ? 'Modifier les lieux' : 'Edit Locations'}
                   </h2>
                 </div>
 
-                {/* Location Inputs */}
                 <div className="p-4 space-y-3">
                   <LocationInput type="pickup" value={pickupAddress} onChange={handlePickupChange} onUseCurrentLocation={useCurrentLocation} />
-                  
                   <LocationInput type="dropoff" value={dropoffAddress} onChange={handleDropoffChange} />
                 </div>
 
-                {/* Recent Destinations */}
                 <div className="flex-1 overflow-y-auto p-4">
-                  <RecentDestinations onSelectDestination={dest => {
-                handleDropoffChange(dest.address, {
-                  lat: dest.lat,
-                  lng: dest.lng
-                });
-                setShowFullInput(false);
-              }} />
+                  <RecentDestinations onSelectDestination={(dest) => {
+                    handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+                    setShowFullInput(false);
+                  }} />
                 </div>
 
-                {/* Action Button */}
-                <div className="p-4 border-t border-border">
-                  <Button onClick={() => {
-                setShowFullInput(false);
-                if (pickup && dropoff) {
-                  handleGetEstimate();
-                }
-              }} className="w-full gradient-primary shadow-button py-6 text-lg" disabled={!pickupAddress || !dropoffAddress}>
-                    {pickup && dropoff ? t('booking.estimate') : language === 'fr' ? 'Confirmer' : 'Confirm'}
+                <div className="p-4 border-t border-border" style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 12px), 12px)' }}>
+                  <Button
+                    onClick={() => {
+                      setShowFullInput(false);
+                      if (pickup && dropoff) handleGetEstimate();
+                    }}
+                    className="w-full gradient-primary shadow-button py-6 text-lg"
+                    disabled={!pickupAddress || !dropoffAddress}
+                  >
+                    {pickup && dropoff ? (language === 'fr' ? 'Obtenir un prix' : 'Get Estimate') : (language === 'fr' ? 'Confirmer' : 'Confirm')}
                   </Button>
                 </div>
               </div>
-            </motion.div>}
+            </motion.div>
+          )}
         </AnimatePresence>
-      </div>;
+      </div>
+    );
   }
 
   // ESTIMATE, PAYMENT, SEARCHING STEPS (side panel layout)
