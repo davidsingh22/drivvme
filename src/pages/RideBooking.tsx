@@ -325,16 +325,17 @@ const RideBooking = () => {
   }, [mapboxToken, language]);
 
   // Auto-detect GPS location on mount — NEVER blocks UI.
-  // Renders instantly with cached pickup or "Current Location" placeholder.
+  // Renders instantly with cached pickup or "Set pickup location" placeholder.
   // GPS resolves in parallel; pin/address update smoothly when ready.
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
     hasAutoDetectedLocation.current = true;
 
-    const defaultLabel = language === 'fr' ? 'Position actuelle' : 'Current Location';
     const CACHE_KEY = 'drivveme_last_pickup';
+    const placeholderLabel = language === 'fr' ? 'Définir le lieu de prise en charge' : 'Set pickup location';
 
     // 1. Restore from localStorage (persists across cold starts)
+    let restoredFromCache = false;
     const cachedRaw = localStorage.getItem(CACHE_KEY);
     if (cachedRaw) {
       try {
@@ -342,14 +343,15 @@ const RideBooking = () => {
         if (cached.lat && cached.lng && cached.address) {
           setPickup(cached);
           setPickupAddress(cached.address);
+          restoredFromCache = true;
           console.log('[RideBooking] Restored cached pickup:', cached.address);
         }
       } catch { /* ignore corrupt cache */ }
     }
 
-    // 2. Always show a label so UI is interactive
-    if (!pickupAddress && !cachedRaw) {
-      setPickupAddress(defaultLabel);
+    // 2. If no cache, show placeholder — never "Current Location"
+    if (!restoredFromCache && !pickupAddress) {
+      setPickupAddress(placeholderLabel);
     }
 
     if (!navigator.geolocation) {
@@ -363,7 +365,7 @@ const RideBooking = () => {
     const resolveAddress = async (lat: number, lng: number) => {
       // Set coords immediately so map pin moves
       setPickup(prev => {
-        const addr = prev?.address || pickupAddress || defaultLabel;
+        const addr = prev?.address || pickupAddress || placeholderLabel;
         return { address: addr, lat, lng };
       });
 
@@ -457,7 +459,7 @@ const RideBooking = () => {
   // Effect to resolve address when pickup has coords but generic address
   useEffect(() => {
     if (!pickup || !mapboxToken) return;
-    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', 'Current Location'];
+    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', 'Current Location', 'Set pickup location', 'Définir le lieu de prise en charge'];
     const isGeneric = genericLabels.includes(pickupAddress) || pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
     if (isGeneric) {
       reverseGeocode(pickup.lat, pickup.lng).then(address => {
@@ -1319,7 +1321,8 @@ const RideBooking = () => {
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
   if (step === 'input') {
     // Extract short address for display - always show real address, never generic label
-    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle', 'Current Location'].includes(pickupAddress) ? pickupAddress.split(',')[0] : language === 'fr' ? 'Position actuelle' : 'Current Location';
+    const genericPickupLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', 'Current Location', 'Set pickup location', 'Définir le lieu de prise en charge'];
+    const displayPickupAddress = pickupAddress && !genericPickupLabels.includes(pickupAddress) ? pickupAddress.split(',')[0] : language === 'fr' ? 'Définir le lieu de prise en charge' : 'Set pickup location';
     return <div className="min-h-screen bg-background relative overflow-hidden">
         {/* Full-page background image */}
         <div className="absolute inset-0 z-0" style={{
