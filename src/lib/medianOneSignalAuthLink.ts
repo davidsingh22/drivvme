@@ -51,33 +51,6 @@ export function initMedianOneSignalAuthLink() {
       applyExternalId(pendingUid);
       pendingUid = undefined;
     }
-
-    // Register Median native notification open handler
-    try {
-      const median = (window as any).median;
-      if (median?.oneSignalPushOpened) {
-        // Median v2+ callback
-        (window as any).gonative_onesignal_push_opened = (payload: any) => {
-          console.log("🔔 Median push opened, payload:", payload);
-          const data = payload?.additionalData || payload?.custom?.a || {};
-          if (data.ride_id) {
-            window.location.href = "/ride";
-          }
-        };
-        console.log("✅ Median push open handler registered");
-      }
-    } catch (e) {
-      console.log("Median push open handler failed (non-fatal):", e);
-    }
-  };
-
-  // Also register the global handler for Median GoNative push opens
-  (window as any).gonative_onesignal_push_opened = (payload: any) => {
-    console.log("🔔 Median push opened (early), payload:", payload);
-    const data = payload?.additionalData || payload?.custom?.a || {};
-    if (data.ride_id) {
-      window.location.href = "/ride";
-    }
   };
 
   supabase.auth.onAuthStateChange((_event, session) => {
