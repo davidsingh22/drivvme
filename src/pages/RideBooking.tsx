@@ -1363,7 +1363,7 @@ const RideBooking = () => {
 
         {/* ── Destination Search Bar ── */}
         <div className="px-5 pb-3">
-          <div className="rounded-2xl border border-primary/40 bg-card/80 shadow-glow overflow-hidden">
+          <div className="rounded-2xl border border-primary/40 bg-card/80 shadow-glow">
             <LocationInput
               type="dropoff"
               value={dropoffAddress}
