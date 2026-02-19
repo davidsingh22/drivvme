@@ -153,6 +153,9 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
       const recentResults = searchRecentDestinations(query);
       const customResults = await searchCustomLocations(query);
       
+      // Show local results immediately regardless of token status
+      const localResults = [...recentResults, ...customResults];
+      
       // Search Mapbox only if token is available
       let mapboxResults: Suggestion[] = [];
       const currentToken = tokenRef.current;
@@ -164,8 +167,9 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           setSearchFailed(true);
         }
       } else {
-        // Token not ready yet — save query and retry when token arrives
+        // Token not ready yet — save query for retry when token arrives
         pendingQueryRef.current = query;
+        console.log('[LocationInput] No Mapbox token yet, showing local results only');
       }
 
       // Combine results: recent first, then custom, then Mapbox
@@ -179,8 +183,8 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
       const combined = [...recentResults, ...customResults, ...filteredMapbox];
       
-      // If no results and token failed or missing, add "enter manually" fallback
-      if (combined.length === 0 || searchFailed) {
+      // Always add "enter manually" fallback when no Mapbox results or token missing
+      if (mapboxResults.length === 0 || !currentToken || searchFailed) {
         combined.push({
           id: 'manual-entry',
           name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
@@ -430,7 +434,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
   return (
     <div ref={ref || containerRef} className="relative flex gap-2">
-      <div className="flex-1 relative" ref={containerRef}>
+      <div className="flex-1 relative" ref={ref ? undefined : containerRef}>
         <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
           {isSearching ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : icon}
         </div>
