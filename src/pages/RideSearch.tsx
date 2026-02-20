@@ -36,22 +36,22 @@ const RideSearch = () => {
   const destRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Cache recent destinations to localStorage for offline/slow network
+  const CACHE_KEY = 'drivveme_recent_destinations';
+
   // Phase 1 warm-up: read cached GPS immediately (no blocking)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('drivveme_gps_warm');
       if (raw) {
         const data = JSON.parse(raw);
-        // If cache is less than 10 min old use it
         if (Date.now() - data.ts < 600_000) {
           setPickupCoords({ lat: data.lat, lng: data.lng });
-          // Reverse geocode in background
           reverseGeocode(data.lat, data.lng);
         }
       }
     } catch { /* ignore */ }
 
-    // Also try live GPS in background
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -69,7 +69,17 @@ const RideSearch = () => {
     }
   }, []);
 
-  // Load past destinations from DB
+  // Load cached destinations from localStorage immediately (instant UI)
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        setDestinations(JSON.parse(cached));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Load past destinations from DB and cache to localStorage
   useEffect(() => {
     if (!user?.id) return;
     supabase
@@ -79,7 +89,10 @@ const RideSearch = () => {
       .order('last_visited_at', { ascending: false })
       .limit(20)
       .then(({ data }) => {
-        if (data) setDestinations(data as SavedDestination[]);
+        if (data && data.length > 0) {
+          setDestinations(data as SavedDestination[]);
+          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        }
       });
   }, [user?.id]);
 
@@ -112,7 +125,7 @@ const RideSearch = () => {
     [mapboxToken, language]
   );
 
-  // Mapbox search for typed queries
+  // Mapbox Search Box API for typed queries (superior POI discovery)
   const searchMapbox = useCallback(
     async (query: string) => {
       if (!mapboxToken || query.length < 2) {
@@ -121,26 +134,84 @@ const RideSearch = () => {
       }
       setIsSearching(true);
       try {
-        const res = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&language=${language}&country=ca&limit=5&types=address,poi`
-        );
+        const sessionToken = crypto.randomUUID();
+        const params = new URLSearchParams({
+          access_token: mapboxToken,
+          session_token: sessionToken,
+          q: query,
+          country: 'CA',
+          language: language,
+          limit: '8',
+          types: 'poi,address,place,street,postcode,locality,neighborhood',
+          proximity: pickupCoords ? `${pickupCoords.lng},${pickupCoords.lat}` : '-73.5673,45.5017',
+        });
+
+        const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params}`);
         const data = await res.json();
-        setSearchResults(
-          (data.features || []).map((f: any) => ({
-            id: f.id,
-            name: f.text || f.place_name?.split(',')[0],
-            address: f.place_name,
-            lat: f.center[1],
-            lng: f.center[0],
-          }))
-        );
+
+        if (data.suggestions && data.suggestions.length > 0) {
+          // Retrieve full details for top suggestions
+          const detailed = await Promise.all(
+            data.suggestions.slice(0, 6).map(async (s: any) => {
+              try {
+                const rParams = new URLSearchParams({
+                  access_token: mapboxToken,
+                  session_token: sessionToken,
+                });
+                const rRes = await fetch(
+                  `https://api.mapbox.com/search/searchbox/v1/retrieve/${s.mapbox_id}?${rParams}`
+                );
+                const rData = await rRes.json();
+                if (rData.features?.[0]) {
+                  const f = rData.features[0];
+                  const props = f.properties || {};
+                  const streetParts: string[] = [];
+                  if (props.address) streetParts.push(props.address);
+                  if (props.street) streetParts.push(props.street);
+                  const street = streetParts.join(' ');
+                  const locParts: string[] = [];
+                  if (props.place) locParts.push(props.place);
+                  if (props.region) locParts.push(props.region);
+                  if (props.postcode) locParts.push(props.postcode);
+                  const fullAddr = street
+                    ? `${street}, ${locParts.join(', ')}`
+                    : locParts.join(', ');
+                  return {
+                    id: s.mapbox_id,
+                    name: s.name || props.name || query,
+                    address: fullAddr || s.full_address || '',
+                    lat: f.geometry.coordinates[1],
+                    lng: f.geometry.coordinates[0],
+                  };
+                }
+                return null;
+              } catch { return null; }
+            })
+          );
+          setSearchResults(detailed.filter(Boolean));
+        } else {
+          // Fallback to geocoding API
+          const geoRes = await fetch(
+            `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&language=${language}&country=ca&limit=5&types=poi,address,place,locality,neighborhood&autocomplete=true&fuzzyMatch=true&proximity=${pickupCoords ? `${pickupCoords.lng},${pickupCoords.lat}` : '-73.5673,45.5017'}`
+          );
+          const geoData = await geoRes.json();
+          setSearchResults(
+            (geoData.features || []).map((f: any) => ({
+              id: f.id,
+              name: f.text || f.place_name?.split(',')[0],
+              address: f.place_name,
+              lat: f.center[1],
+              lng: f.center[0],
+            }))
+          );
+        }
       } catch {
         setSearchResults([]);
       } finally {
         setIsSearching(false);
       }
     },
-    [mapboxToken, language]
+    [mapboxToken, language, pickupCoords]
   );
 
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
