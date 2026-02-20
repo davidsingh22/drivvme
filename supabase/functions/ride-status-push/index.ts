@@ -109,6 +109,44 @@ async function sendPush(
   return { ok: osRes.ok, status: osRes.status, data: osData };
 }
 
+async function sendPushByPlayerId(
+  playerId: string,
+  title: string,
+  message: string,
+  data: Record<string, string>
+) {
+  const restApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
+  if (!restApiKey) throw new Error("ONESIGNAL_REST_API_KEY not configured");
+
+  console.log("[ride-status-push] sending via player_id:", playerId);
+
+  const osPayload: Record<string, unknown> = {
+    app_id: ONESIGNAL_APP_ID,
+    include_player_ids: [playerId],
+    headings: { en: String(title) },
+    contents: { en: String(message) },
+    priority: 10,
+    content_available: true,
+    mutable_content: true,
+    ios_sound: "default",
+    data,
+  };
+
+  const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      Authorization: `Basic ${restApiKey}`,
+    },
+    body: JSON.stringify(osPayload),
+  });
+
+  const osData = await osRes.json();
+  console.log("[ride-status-push] player_id response:", osRes.status, JSON.stringify(osData));
+
+  return { ok: osRes.ok, status: osRes.status, data: osData };
+}
+
 serve(async (req) => {
   console.log("Function ride-status-push was called!");
   console.log("[ride-status-push] method:", req.method, "url:", req.url);
@@ -138,8 +176,21 @@ serve(async (req) => {
       });
     }
 
-    const pushData = { ride_id: payload.ride_id, status: payload.new_status };
-    const result = await sendPush(config.targetUserId, config.title, config.message, pushData);
+    const pushData = { ride_id: payload.ride_id, status: payload.new_status, targetUrl: '/ride' };
+    let result = await sendPush(config.targetUserId, config.title, config.message, pushData);
+
+    // If external_user_id delivery had unsubscribed warnings, retry with player_id
+    const hasUnsubWarning = result.data?.warnings?.invalid_external_user_ids;
+    if (hasUnsubWarning) {
+      console.log("[ride-status-push] External ID unsubscribed, trying player_id fallback for:", config.targetUserId);
+      const playerId = await getPlayerIdFromProfiles(config.targetUserId);
+      if (playerId) {
+        console.log("[ride-status-push] Found player_id:", playerId, "- retrying with include_player_ids");
+        result = await sendPushByPlayerId(playerId, config.title, config.message, pushData);
+      } else {
+        console.log("[ride-status-push] No player_id found in profiles for fallback");
+      }
+    }
 
     if (!result.ok) {
       return new Response(
