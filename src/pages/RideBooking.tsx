@@ -112,30 +112,6 @@ const CalculatingRouteIndicator = ({ language, dropoff, onRetry }: { language: s
   );
 };
 
-// Payment preparing timeout — prevents infinite spinner if ride creation fails silently after idle
-const PaymentPreparingTimeout = ({ onCancel }: { onCancel: () => void }) => {
-  const [elapsed, setElapsed] = useState(0);
-
-  useEffect(() => {
-    const interval = setInterval(() => setElapsed(e => e + 1), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <Card className="p-6 flex flex-col items-center justify-center space-y-4">
-      <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent" />
-      <p className="text-muted-foreground text-center">
-        {elapsed >= 15 ? 'Taking longer than expected...' : 'Preparing your payment...'}
-      </p>
-      {elapsed >= 15 && (
-        <Button variant="outline" size="sm" onClick={onCancel}>
-          Cancel & try again
-        </Button>
-      )}
-    </Card>
-  );
-};
-
 const RideBooking = () => {
   const {
     t,
@@ -1124,14 +1100,32 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // Create the ride directly — session is already valid from recent user interaction.
-    // The visibility handler already refreshes stale sessions on app resume.
+    // Create the ride in the background as fast as possible.
+    // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
     (async () => {
       try {
-        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-        console.log('[RideBooking] Creating ride, skipPayment:', skipPayment, 'status:', rideStatus);
+        const {
+          data: {
+            session
+          }
+        } = await supabase.auth.getSession();
+        if (!session) {
+          toast({
+            title: 'Session expired',
+            description: 'Please sign in again to continue.',
+            variant: 'destructive'
+          });
+          setStep('estimate');
+          navigate('/login');
+          return;
+        }
 
-        const { data: ride, error: insertErr } = await supabase.from('rides').insert({
+        // Test accounts create ride directly with 'searching' status
+        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
+        const {
+          data: ride,
+          error: rideErr
+        } = await supabase.from('rides').insert({
           rider_id: user.id,
           pickup_address: pickup.address,
           pickup_lat: pickup.lat,
@@ -1149,52 +1143,10 @@ const RideBooking = () => {
           platform_fee: fareEstimate.platformFee,
           status: rideStatus
         }).select('*').single();
-
-        if (insertErr) {
-          // If auth error, try one session refresh and retry
-          if (insertErr.message?.includes('JWT') || insertErr.code === 'PGRST301' || insertErr.code === '401') {
-            console.warn('[RideBooking] Auth error on insert, refreshing session and retrying...');
-            await supabase.auth.refreshSession();
-            const { data: retryRide, error: retryErr } = await supabase.from('rides').insert({
-              rider_id: user.id,
-              pickup_address: pickup.address,
-              pickup_lat: pickup.lat,
-              pickup_lng: pickup.lng,
-              dropoff_address: dropoff.address,
-              dropoff_lat: dropoff.lat,
-              dropoff_lng: dropoff.lng,
-              distance_km: distanceKm,
-              estimated_duration_minutes: Math.round(durationMinutes),
-              estimated_fare: fareEstimate.total,
-              promo_discount: fareEstimate.promoDiscount,
-              subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-              gst_amount: fareEstimate.gstAmount,
-              qst_amount: fareEstimate.qstAmount,
-              platform_fee: fareEstimate.platformFee,
-              status: rideStatus
-            }).select('*').single();
-            if (retryErr || !retryRide?.id) throw retryErr || new Error('Ride creation failed after retry');
-            console.log('[RideBooking] Ride created on retry:', retryRide.id);
-            setCurrentRide(retryRide);
-            updateRide(retryRide);
-            void supabase.from('notifications').insert({
-              user_id: user.id, ride_id: retryRide.id, type: 'ride_booked',
-              title: skipPayment ? 'Test ride created' : 'Payment required',
-              message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
-            });
-            if (skipPayment) {
-              if (!isUnlimited && freeRidesLeft > 0 && user.email) incrementFreeRidesUsed(user.email);
-              setStep('searching');
-              const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
-              toast({ title: 'Test mode', description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.` });
-            }
-            setIsSubmitting(false);
-            return;
-          }
-          throw insertErr;
+        if (rideErr || !ride?.id) {
+          console.error('Ride insert error:', rideErr);
+          throw new Error(rideErr?.message || 'Ride creation failed');
         }
-        if (!ride?.id) throw new Error('No ride ID returned');
-        console.log('[RideBooking] Ride created:', ride.id);
 
         // Optional rider notification (non-blocking)
         void supabase.from('notifications').insert({
@@ -1957,11 +1909,18 @@ const RideBooking = () => {
                     </div>
                   </Card>
 
-                  {currentRide?.id ? <PaymentForm rideId={currentRide.id} amount={fareEstimate.total} onSuccess={handlePaymentSuccess} onCancel={handlePaymentCancel} /> : <PaymentPreparingTimeout onCancel={() => {
-                    setStep('estimate');
-                    setIsSubmitting(false);
-                    toast({ title: 'Payment timed out', description: 'Please try again.', variant: 'destructive' });
-                  }} />}
+                  {currentRide?.id ? <PaymentForm rideId={currentRide.id} amount={fareEstimate.total} onSuccess={handlePaymentSuccess} onCancel={handlePaymentCancel} /> : <Card className="p-6 flex flex-col items-center justify-center space-y-4">
+                      <motion.div animate={{
+                  rotate: 360
+                }} transition={{
+                  duration: 1,
+                  repeat: Infinity,
+                  ease: 'linear'
+                }} className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent" />
+                      <p className="text-muted-foreground text-center">
+                        Preparing your payment...
+                      </p>
+                    </Card>}
                 </motion.div>}
 
             {/* Searching Step */}
