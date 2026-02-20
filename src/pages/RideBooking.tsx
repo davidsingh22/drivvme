@@ -1124,58 +1124,38 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // Create the ride in the background as fast as possible.
-    // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
+    // Create the ride directly — session is already valid from recent user interaction.
+    // The visibility handler already refreshes stale sessions on app resume.
     (async () => {
       try {
-        // Proactively refresh session with a 6-second hard timeout
-        let session: any = null;
-        try {
-          const refreshResult = await Promise.race([
-            supabase.auth.refreshSession(),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Session refresh timed out')), 6000)
-            )
-          ]);
-          session = (refreshResult as any)?.data?.session;
-          console.log('[RideBooking] Session refreshed:', !!session);
-        } catch (refreshErr) {
-          console.warn('[RideBooking] Session refresh failed, using existing:', refreshErr);
-        }
-        // Fallback: grab existing session if refresh failed/timed out
-        if (!session) {
-          try {
-            const { data: existing } = await Promise.race([
-              supabase.auth.getSession(),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('getSession timed out')), 4000)
-              )
-            ]);
-            session = (existing as any)?.session;
-          } catch { /* ignore */ }
-        }
-        if (!session) {
-          toast({
-            title: 'Session expired',
-            description: 'Please sign in again to continue.',
-            variant: 'destructive'
-          });
-          setStep('estimate');
-          setIsSubmitting(false);
-          navigate('/login');
-          return;
-        }
-
-        // Test accounts create ride directly with 'searching' status
         const rideStatus = skipPayment ? 'searching' : 'pending_payment';
         console.log('[RideBooking] Creating ride, skipPayment:', skipPayment, 'status:', rideStatus);
 
-        // Ride insert with retry (2 attempts) and 8-second timeout each
-        let ride: any = null;
-        let lastInsertErr: any = null;
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          try {
-            const insertPromise = supabase.from('rides').insert({
+        const { data: ride, error: insertErr } = await supabase.from('rides').insert({
+          rider_id: user.id,
+          pickup_address: pickup.address,
+          pickup_lat: pickup.lat,
+          pickup_lng: pickup.lng,
+          dropoff_address: dropoff.address,
+          dropoff_lat: dropoff.lat,
+          dropoff_lng: dropoff.lng,
+          distance_km: distanceKm,
+          estimated_duration_minutes: Math.round(durationMinutes),
+          estimated_fare: fareEstimate.total,
+          promo_discount: fareEstimate.promoDiscount,
+          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+          gst_amount: fareEstimate.gstAmount,
+          qst_amount: fareEstimate.qstAmount,
+          platform_fee: fareEstimate.platformFee,
+          status: rideStatus
+        }).select('*').single();
+
+        if (insertErr) {
+          // If auth error, try one session refresh and retry
+          if (insertErr.message?.includes('JWT') || insertErr.code === 'PGRST301' || insertErr.code === '401') {
+            console.warn('[RideBooking] Auth error on insert, refreshing session and retrying...');
+            await supabase.auth.refreshSession();
+            const { data: retryRide, error: retryErr } = await supabase.from('rides').insert({
               rider_id: user.id,
               pickup_address: pickup.address,
               pickup_lat: pickup.lat,
@@ -1193,33 +1173,27 @@ const RideBooking = () => {
               platform_fee: fareEstimate.platformFee,
               status: rideStatus
             }).select('*').single();
-
-            const result = await Promise.race([
-              insertPromise,
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('Ride creation timed out')), 8000)
-              )
-            ]) as any;
-
-            if (result?.error) throw result.error;
-            if (!result?.data?.id) throw new Error('No ride ID returned');
-            ride = result.data;
-            console.log('[RideBooking] Ride created (attempt ' + attempt + '):', ride.id);
-            break;
-          } catch (err: any) {
-            lastInsertErr = err;
-            console.warn('[RideBooking] Ride insert attempt ' + attempt + ' failed:', err?.message);
-            if (attempt < 2) {
-              // Brief pause before retry, also re-refresh session
-              await new Promise(r => setTimeout(r, 1500));
-              try { await supabase.auth.refreshSession(); } catch { /* ignore */ }
+            if (retryErr || !retryRide?.id) throw retryErr || new Error('Ride creation failed after retry');
+            console.log('[RideBooking] Ride created on retry:', retryRide.id);
+            setCurrentRide(retryRide);
+            updateRide(retryRide);
+            void supabase.from('notifications').insert({
+              user_id: user.id, ride_id: retryRide.id, type: 'ride_booked',
+              title: skipPayment ? 'Test ride created' : 'Payment required',
+              message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
+            });
+            if (skipPayment) {
+              if (!isUnlimited && freeRidesLeft > 0 && user.email) incrementFreeRidesUsed(user.email);
+              setStep('searching');
+              const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
+              toast({ title: 'Test mode', description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.` });
             }
+            setIsSubmitting(false);
+            return;
           }
+          throw insertErr;
         }
-
-        if (!ride?.id) {
-          throw new Error(lastInsertErr?.message || 'Ride creation failed after retries');
-        }
+        if (!ride?.id) throw new Error('No ride ID returned');
         console.log('[RideBooking] Ride created:', ride.id);
 
         // Optional rider notification (non-blocking)
