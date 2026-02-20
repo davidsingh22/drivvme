@@ -381,9 +381,16 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
           | { data: any; error: any }
           | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
-          paymentResult = await supabase.functions.invoke('create-payment-intent', {
+          const invokePromise = supabase.functions.invoke('create-payment-intent', {
             body: { rideId, amount },
           });
+          // 12-second timeout per attempt to prevent hanging after idle
+          paymentResult = await Promise.race([
+            invokePromise,
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Payment request timed out')), 12000)
+            )
+          ]) as { data: any; error: any };
 
           if (!paymentResult?.error && paymentResult?.data?.clientSecret) break;
           lastErr = paymentResult?.error ?? new Error('No client secret returned');
