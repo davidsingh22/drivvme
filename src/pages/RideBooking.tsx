@@ -56,6 +56,7 @@ const TEST_ACCOUNTS = ['alsenesa@hotmail.com'];
 // Limited test accounts - bypass payment for a limited number of rides
 const LIMITED_TEST_ACCOUNTS: Record<string, number> = {
   'sean.mcturk@outlook.com': 3,
+  'mcturksean@gmail.com': 3,
   'patsy@hotmail.com': 999,
   'rymcturk@gmail.com': 3,
   'kissmebaby@hotmail.com': 999
