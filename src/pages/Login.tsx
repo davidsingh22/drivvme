@@ -6,7 +6,6 @@ import Logo from '@/components/Logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import LanguageToggle from '@/components/LanguageToggle';
@@ -28,7 +27,7 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  const [rememberMe] = useState(true); // Always stay signed in
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -50,11 +49,9 @@ const Login = () => {
         replace: true
       });else if (isDriver) navigate('/driver', {
         replace: true
-      });else if (isRider) navigate('/ride', {
+      });else navigate('/rider-home', {
         replace: true
-      });else navigate('/ride', {
-        replace: true
-      }); // Default for new users
+      }); // Riders & new users → rider home
       return;
     }
 
@@ -62,7 +59,7 @@ const Login = () => {
     const timeout = setTimeout(() => {
       if (isAdmin) navigate('/admin', { replace: true });
       else if (isDriver) navigate('/driver', { replace: true });
-      else navigate('/ride', { replace: true });
+      else navigate('/rider-home', { replace: true });
     }, 2000);
     return () => clearTimeout(timeout);
   }, [user, roles.length, isAdmin, isDriver, isRider, navigate]);
@@ -146,12 +143,7 @@ const Login = () => {
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2">
-                <Checkbox id="rememberMe" checked={rememberMe} onCheckedChange={checked => setRememberMe(checked === true)} />
-                <Label htmlFor="rememberMe" className="text-sm font-normal text-muted-foreground cursor-pointer">
-                  Se souvenir de moi
-                </Label>
-              </div>
+              {/* Session is always persistent — no checkbox needed */}
 
               {error && <p className="text-destructive text-sm text-center">{error}</p>}
 
