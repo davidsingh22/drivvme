@@ -60,7 +60,7 @@ const Login = () => {
     const timeout = setTimeout(() => {
       if (isAdmin) navigate('/admin', { replace: true });
       else if (isDriver) navigate('/driver', { replace: true });
-      else navigate('/ride', { replace: true });
+      else navigate('/rider-home', { replace: true });
     }, 2000);
     return () => clearTimeout(timeout);
   }, [user, roles.length, isAdmin, isDriver, isRider, navigate]);
