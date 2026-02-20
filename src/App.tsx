@@ -37,6 +37,7 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 const Debug = lazy(() => import("./pages/Debug"));
 const DriverFloatingGPSButton = lazy(() => import("@/components/DriverFloatingGPSButton"));
 const RiderHome = lazy(() => import("./pages/RiderHome"));
+const WhereToSearch = lazy(() => import("./pages/WhereToSearch"));
 
 const queryClient = new QueryClient();
 
@@ -182,6 +183,7 @@ const AppRoutes = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         <Route path="/rider-home" element={<RiderHome />} />
+        <Route path="/where-to" element={<WhereToSearch />} />
         <Route path="/ride" element={<RideRoute />} />
         <Route
           path="/driver"
