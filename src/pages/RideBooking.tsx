@@ -112,6 +112,30 @@ const CalculatingRouteIndicator = ({ language, dropoff, onRetry }: { language: s
   );
 };
 
+// Payment preparing timeout — prevents infinite spinner if ride creation fails silently after idle
+const PaymentPreparingTimeout = ({ onCancel }: { onCancel: () => void }) => {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setElapsed(e => e + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <Card className="p-6 flex flex-col items-center justify-center space-y-4">
+      <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent" />
+      <p className="text-muted-foreground text-center">
+        {elapsed >= 15 ? 'Taking longer than expected...' : 'Preparing your payment...'}
+      </p>
+      {elapsed >= 15 && (
+        <Button variant="outline" size="sm" onClick={onCancel}>
+          Cancel & try again
+        </Button>
+      )}
+    </Card>
+  );
+};
+
 const RideBooking = () => {
   const {
     t,
@@ -1104,11 +1128,16 @@ const RideBooking = () => {
     // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
     (async () => {
       try {
-        const {
-          data: {
-            session
-          }
-        } = await supabase.auth.getSession();
+        // Proactively refresh session to prevent stale-token failures after idle
+        let session: any = null;
+        try {
+          const { data: refreshed } = await supabase.auth.refreshSession();
+          session = refreshed?.session;
+        } catch {
+          // Fallback to existing session if refresh fails
+          const { data: existing } = await supabase.auth.getSession();
+          session = existing?.session;
+        }
         if (!session) {
           toast({
             title: 'Session expired',
@@ -1909,18 +1938,11 @@ const RideBooking = () => {
                     </div>
                   </Card>
 
-                  {currentRide?.id ? <PaymentForm rideId={currentRide.id} amount={fareEstimate.total} onSuccess={handlePaymentSuccess} onCancel={handlePaymentCancel} /> : <Card className="p-6 flex flex-col items-center justify-center space-y-4">
-                      <motion.div animate={{
-                  rotate: 360
-                }} transition={{
-                  duration: 1,
-                  repeat: Infinity,
-                  ease: 'linear'
-                }} className="w-10 h-10 rounded-full border-4 border-primary border-t-transparent" />
-                      <p className="text-muted-foreground text-center">
-                        Preparing your payment...
-                      </p>
-                    </Card>}
+                  {currentRide?.id ? <PaymentForm rideId={currentRide.id} amount={fareEstimate.total} onSuccess={handlePaymentSuccess} onCancel={handlePaymentCancel} /> : <PaymentPreparingTimeout onCancel={() => {
+                    setStep('estimate');
+                    setIsSubmitting(false);
+                    toast({ title: 'Payment timed out', description: 'Please try again.', variant: 'destructive' });
+                  }} />}
                 </motion.div>}
 
             {/* Searching Step */}
