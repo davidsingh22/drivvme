@@ -424,43 +424,85 @@ const RideBooking = () => {
   // Ref to store GPS coords obtained before mapboxToken is ready
   const pendingGpsCoords = useRef<{ lat: number; lng: number } | null>(null);
 
-  // Step 1: Get GPS coords immediately — no dependencies on mapboxToken
+  // Helper: apply GPS coords to pickup state
+  const applyGpsCoords = useCallback((lat: number, lng: number) => {
+    console.log('[RideBooking] GPS acquired:', lat.toFixed(4), lng.toFixed(4));
+    setPickup({ address: language === 'fr' ? 'Position actuelle' : 'Current Location', lat, lng });
+    pendingGpsCoords.current = { lat, lng };
+    setGpsResolved(false); // Will be resolved once address is reverse geocoded
+  }, [language]);
+
+  // Step 1: Get GPS coords immediately with aggressive retry + watchPosition fallback
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
     if (!navigator.geolocation) return;
     hasAutoDetectedLocation.current = true;
 
-    console.log('[RideBooking] Requesting GPS position...');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        console.log('[RideBooking] GPS acquired:', lat.toFixed(4), lng.toFixed(4));
-        // Immediately set coords on pickup state so route calc can work
-        setPickup({ address: language === 'fr' ? 'Position actuelle' : 'Current Location', lat, lng });
-        // Store for address resolution once mapboxToken arrives
-        pendingGpsCoords.current = { lat, lng };
-        // Also try to resolve address right away if token is already available
-        // (handled by the effect below)
-      },
-      (error) => {
-        console.warn('[RideBooking] GPS failed:', error.message);
-        // Fallback: try to use any cached location so the user can still book
-        try {
-          const cached = localStorage.getItem(PICKUP_CACHE_KEY);
-          if (cached) {
-            const { lat, lng, addressLabel } = JSON.parse(cached);
-            if (lat && lng && addressLabel) {
-              setPickup({ address: addressLabel, lat, lng });
-              setPickupAddress(addressLabel);
-              setGpsResolved(true);
-            }
+    let watchId: number | null = null;
+    let resolved = false;
+    let attempt = 0;
+    const MAX_ATTEMPTS = 3;
+
+    const onSuccess = (position: GeolocationPosition) => {
+      if (resolved) return;
+      resolved = true;
+      if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+      applyGpsCoords(position.coords.latitude, position.coords.longitude);
+    };
+
+    const tryGetPosition = () => {
+      attempt++;
+      const useHighAccuracy = attempt <= 2; // Last attempt uses low accuracy as fallback
+      const timeout = attempt === 1 ? 8000 : attempt === 2 ? 12000 : 15000;
+      console.log(`[RideBooking] GPS attempt ${attempt}/${MAX_ATTEMPTS} (highAccuracy=${useHighAccuracy}, timeout=${timeout}ms)`);
+
+      navigator.geolocation.getCurrentPosition(
+        onSuccess,
+        (error) => {
+          console.warn(`[RideBooking] GPS attempt ${attempt} failed:`, error.code, error.message);
+          if (!resolved && attempt < MAX_ATTEMPTS) {
+            // Retry after a brief delay
+            setTimeout(tryGetPosition, 1000);
+          } else if (!resolved) {
+            // All attempts failed — start watchPosition as last resort
+            console.log('[RideBooking] All getCurrentPosition attempts failed, starting watchPosition...');
+            watchId = navigator.geolocation.watchPosition(
+              onSuccess,
+              (watchErr) => {
+                console.warn('[RideBooking] watchPosition error:', watchErr.code, watchErr.message);
+              },
+              { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 }
+            );
+            // Give watchPosition 15s then give up and use cache
+            setTimeout(() => {
+              if (!resolved) {
+                console.warn('[RideBooking] GPS completely unavailable, using cache fallback');
+                if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+                try {
+                  const cached = localStorage.getItem(PICKUP_CACHE_KEY);
+                  if (cached) {
+                    const { lat, lng, addressLabel } = JSON.parse(cached);
+                    if (lat && lng && addressLabel) {
+                      setPickup({ address: addressLabel, lat, lng });
+                      setPickupAddress(addressLabel);
+                      setGpsResolved(true);
+                    }
+                  }
+                } catch {}
+              }
+            }, 15000);
           }
-        } catch {}
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
-    );
-  }, [language]);
+        },
+        { enableHighAccuracy: useHighAccuracy, timeout, maximumAge: 0 }
+      );
+    };
+
+    tryGetPosition();
+
+    return () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [language, applyGpsCoords]);
 
   // Step 2: Once we have BOTH GPS coords AND mapboxToken, reverse geocode to get the real street address
   useEffect(() => {
@@ -972,31 +1014,55 @@ const RideBooking = () => {
   // (auto-estimate effect moved below calculateRoute declaration)
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(async (position) => {
+    setPickupAddress(language === 'fr' ? 'Détection en cours...' : 'Getting your location...');
+    setGpsResolved(false);
+    let resolved = false;
+    let attempt = 0;
+
+    const onGot = async (position: GeolocationPosition) => {
+      if (resolved) return;
+      resolved = true;
       const lat = position.coords.latitude;
       const lng = position.coords.longitude;
-      // Set coords immediately
       setPickup({ address: language === 'fr' ? 'Position actuelle' : 'Current Location', lat, lng });
-      setPickupAddress(language === 'fr' ? 'Position actuelle' : 'Current Location');
-      // Reverse geocode for real street address
+      pendingGpsCoords.current = { lat, lng };
       if (mapboxToken) {
         const address = await reverseGeocode(lat, lng);
         if (address) {
           setPickupAddress(address);
           setPickup({ address, lat, lng });
+          setGpsResolved(true);
           try {
             localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: address, ts: Date.now() }));
             localStorage.setItem('last_pickup_address', address);
           } catch {}
         }
       }
-    }, () => {
-      toast({
-        title: 'Location error',
-        description: 'Unable to get your current location',
-        variant: 'destructive'
-      });
-    }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+    };
+
+    const tryGet = () => {
+      attempt++;
+      const highAccuracy = attempt <= 2;
+      navigator.geolocation.getCurrentPosition(onGot, (err) => {
+        console.warn(`[RideBooking] useCurrentLocation attempt ${attempt} failed:`, err.message);
+        if (!resolved && attempt < 3) {
+          setTimeout(tryGet, 1000);
+        } else if (!resolved) {
+          // Last resort: try low accuracy with long timeout
+          navigator.geolocation.getCurrentPosition(onGot, () => {
+            if (!resolved) {
+              toast({
+                title: language === 'fr' ? 'Erreur de localisation' : 'Location error',
+                description: language === 'fr' ? 'Impossible de détecter votre position. Veuillez entrer votre adresse manuellement.' : 'Unable to detect your location. Please enter your address manually.',
+                variant: 'destructive'
+              });
+            }
+          }, { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 });
+        }
+      }, { enableHighAccuracy: highAccuracy, timeout: highAccuracy ? 8000 : 15000, maximumAge: 0 });
+    };
+
+    tryGet();
   };
   const calculateRoute = useCallback(async () => {
     if (!dropoff) return;
