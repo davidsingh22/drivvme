@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -1583,11 +1583,14 @@ const RideBooking = () => {
               y: -20
             }} className="space-y-6">
                   <div className="flex items-center justify-between">
+                    <Button variant="ghost" size="icon" onClick={() => { resetBooking(); navigate('/search'); }}>
+                      <ArrowLeft className="h-5 w-5" />
+                    </Button>
                     <h2 className="font-display text-2xl font-bold fare-header-glow">
                       {t('pricing.estimated')}
                     </h2>
-                    <Button variant="ghost" size="icon" onClick={() => setStep('input')}>
-                      <X className="h-5 w-5" />
+                    <Button variant="ghost" size="sm" onClick={() => navigate('/search')} className="text-primary text-sm">
+                      {language === 'fr' ? 'Modifier' : 'Modify'}
                     </Button>
                   </div>
 
