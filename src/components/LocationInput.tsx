@@ -136,55 +136,70 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
   const searchPlaces = useCallback(async (query: string) => {
     if (query.length < 2) {
-      // If no query but we have recent destinations (dropoff only), show them
       if (type === 'dropoff' && recentDestinations.length > 0 && query.length === 0) {
         setSuggestions(recentDestinations);
         setShowSuggestions(true);
       } else {
         setSuggestions([]);
+        setShowSuggestions(false);
       }
+      setIsSearching(false);
       return;
     }
 
-    setIsSearching(true);
     setSearchFailed(false);
-    try {
-      // Search recent destinations and custom locations (no token needed)
-      const recentResults = searchRecentDestinations(query);
-      const customResults = await searchCustomLocations(query);
-      
-      // Show local results immediately regardless of token status
-      const localResults = [...recentResults, ...customResults];
-      
-      // Search Mapbox only if token is available
-      let mapboxResults: Suggestion[] = [];
-      const currentToken = tokenRef.current;
-      if (currentToken) {
-        try {
-          mapboxResults = await searchMapbox(query, currentToken);
-        } catch (err) {
-          console.warn('[LocationInput] Mapbox search failed, showing local results + manual fallback');
-          setSearchFailed(true);
-        }
-      } else {
-        // Token not ready yet — save query for retry when token arrives
-        pendingQueryRef.current = query;
-        console.log('[LocationInput] No Mapbox token yet, showing local results only');
-      }
 
-      // Combine results: recent first, then custom, then Mapbox
-      const recentIds = new Set(recentResults.map(r => `${r.center[0]}-${r.center[1]}`));
-      const customIds = new Set(customResults.map(r => `${r.center[0]}-${r.center[1]}`));
+    // ── STEP 1: Show local results IMMEDIATELY (synchronous filter) ──
+    const recentResults = searchRecentDestinations(query);
+    // Build instant local list before any async work
+    const instantResults: Suggestion[] = [...recentResults];
+    // Always add manual entry so user is never stuck
+    instantResults.push({
+      id: 'manual-entry',
+      name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
+      address: query,
+      center: [0, 0],
+      isManual: true,
+    });
+    // Render local results NOW — no skeletons
+    setSuggestions(instantResults);
+    setShowSuggestions(true);
+
+    // ── STEP 2: Fetch custom locations (async but fast, local DB) ──
+    const customResults = await searchCustomLocations(query);
+    if (customResults.length > 0) {
+      const withCustom = [...recentResults, ...customResults];
+      withCustom.push({
+        id: 'manual-entry',
+        name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
+        address: query,
+        center: [0, 0],
+        isManual: true,
+      });
+      setSuggestions(withCustom);
+    }
+
+    // ── STEP 3: Fetch Mapbox in background (non-blocking) ──
+    const currentToken = tokenRef.current;
+    if (!currentToken) {
+      pendingQueryRef.current = query;
+      console.log('[LocationInput] No Mapbox token yet, showing local results only');
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true); // show spinner icon only, NOT skeletons
+    try {
+      const mapboxResults = await searchMapbox(query, currentToken);
       
+      const localIds = new Set([...recentResults, ...customResults].map(r => `${r.center[0]}-${r.center[1]}`));
       const filteredMapbox = mapboxResults.filter(m => {
         const key = `${m.center[0]}-${m.center[1]}`;
-        return !recentIds.has(key) && !customIds.has(key);
+        return !localIds.has(key);
       });
 
       const combined = [...recentResults, ...customResults, ...filteredMapbox];
-      
-      // Always add "enter manually" fallback when no Mapbox results or token missing
-      if (mapboxResults.length === 0 || !currentToken || searchFailed) {
+      if (filteredMapbox.length === 0) {
         combined.push({
           id: 'manual-entry',
           name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
@@ -193,20 +208,11 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           isManual: true,
         });
       }
-      
       setSuggestions(combined);
       setShowSuggestions(combined.length > 0);
     } catch (err) {
-      console.error('Search error:', err);
-      // Show manual entry fallback on error
-      setSuggestions([{
-        id: 'manual-entry',
-        name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
-        address: query,
-        center: [0, 0],
-        isManual: true,
-      }]);
-      setShowSuggestions(true);
+      console.warn('[LocationInput] Mapbox search failed, keeping local results');
+      setSearchFailed(true);
     } finally {
       setIsSearching(false);
     }
@@ -455,20 +461,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
           className="pl-10 py-6 bg-background touch-manipulation"
         />
 
-        {/* Loading skeletons while searching */}
-        {isSearching && !showSuggestions && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 p-2 space-y-2">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="flex items-center gap-3 px-2 py-2">
-                <Skeleton className="h-5 w-5 rounded-full shrink-0" />
-                <div className="flex-1 space-y-1">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {/* No more skeleton loaders — local results render instantly */}
 
         {/* Suggestions dropdown */}
         {showSuggestions && suggestions.length > 0 && (
@@ -503,6 +496,11 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                 </div>
               </button>
             ))}
+            {isSearching && (
+              <div className="px-4 py-2 text-xs text-muted-foreground text-center">
+                {language === 'fr' ? 'Recherche en cours...' : 'Searching...'}
+              </div>
+            )}
           </div>
         )}
       </div>
