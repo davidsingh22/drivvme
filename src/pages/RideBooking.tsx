@@ -1133,7 +1133,9 @@ const RideBooking = () => {
         try {
           const { data: refreshed } = await supabase.auth.refreshSession();
           session = refreshed?.session;
-        } catch {
+          console.log('[RideBooking] Session refreshed:', !!session);
+        } catch (refreshErr) {
+          console.warn('[RideBooking] Session refresh failed, using existing:', refreshErr);
           // Fallback to existing session if refresh fails
           const { data: existing } = await supabase.auth.getSession();
           session = existing?.session;
@@ -1151,10 +1153,10 @@ const RideBooking = () => {
 
         // Test accounts create ride directly with 'searching' status
         const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-        const {
-          data: ride,
-          error: rideErr
-        } = await supabase.from('rides').insert({
+        console.log('[RideBooking] Creating ride, skipPayment:', skipPayment, 'status:', rideStatus);
+
+        // Wrap insert in a 10-second timeout to prevent hanging on stale connections
+        const insertPromise = supabase.from('rides').insert({
           rider_id: user.id,
           pickup_address: pickup.address,
           pickup_lat: pickup.lat,
@@ -1172,10 +1174,20 @@ const RideBooking = () => {
           platform_fee: fareEstimate.platformFee,
           status: rideStatus
         }).select('*').single();
+
+        const rideResult = await Promise.race([
+          insertPromise,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Ride creation timed out. Please try again.')), 10000)
+          )
+        ]);
+
+        const { data: ride, error: rideErr } = rideResult as any;
         if (rideErr || !ride?.id) {
-          console.error('Ride insert error:', rideErr);
+          console.error('[RideBooking] Ride insert error:', rideErr);
           throw new Error(rideErr?.message || 'Ride creation failed');
         }
+        console.log('[RideBooking] Ride created:', ride.id);
 
         // Optional rider notification (non-blocking)
         void supabase.from('notifications').insert({
