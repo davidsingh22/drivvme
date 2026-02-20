@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -16,7 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
 import { useActiveRide } from '@/hooks/useActiveRide';
-import { useMapboxToken, clearMapboxTokenCache } from '@/hooks/useMapboxToken';
+import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { useDriverNotificationEscalation } from '@/hooks/useDriverNotificationEscalation';
 import useRideNotifications from '@/hooks/useRideNotifications';
 import InRideStatusBar from '@/components/ride/InRideStatusBar';
@@ -78,40 +78,6 @@ const incrementFreeRidesUsed = (email: string): void => {
   const used = parseInt(localStorage.getItem(usedKey) || '0', 10);
   localStorage.setItem(usedKey, String(used + 1));
 };
-
-// Auto-retry indicator that won't hang forever
-const CalculatingRouteIndicator = ({ language, dropoff, onRetry }: { language: string; dropoff: any; onRetry: () => void }) => {
-  const [elapsed, setElapsed] = useState(0);
-  const retriedRef = useRef(false);
-
-  useEffect(() => {
-    retriedRef.current = false;
-    setElapsed(0);
-    const interval = setInterval(() => setElapsed(e => e + 1), 1000);
-    return () => clearInterval(interval);
-  }, [dropoff?.lat, dropoff?.lng]);
-
-  // Auto-retry after 6 seconds if still showing
-  useEffect(() => {
-    if (elapsed >= 6 && !retriedRef.current) {
-      retriedRef.current = true;
-      console.log('[RideBooking] Calculating route timed out, auto-retrying...');
-      onRetry();
-    }
-  }, [elapsed, onRetry]);
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center gap-3 py-8">
-      <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-      <span className="text-sm text-muted-foreground">
-        {elapsed >= 6
-          ? (language === 'fr' ? 'Nouvelle tentative...' : 'Retrying...')
-          : (language === 'fr' ? 'Calcul du trajet...' : 'Calculating route...')}
-      </span>
-    </motion.div>
-  );
-};
-
 const RideBooking = () => {
   const {
     t,
@@ -148,67 +114,10 @@ const RideBooking = () => {
     clearRide
   } = useActiveRide(user?.id);
   const hasRestoredRide = useRef(false);
-
-  // Cache-first destinations: render from localStorage instantly, update from DB in background
-  const DEST_CACHE_KEY = 'drivveme_cached_destinations';
-  const [prefetchedDestinations, setPrefetchedDestinations] = useState<any[]>(() => {
-    try {
-      const cached = localStorage.getItem(DEST_CACHE_KEY);
-      return cached ? JSON.parse(cached) : [];
-    } catch { return []; }
-  });
-  const hasPrefetched = useRef(false);
-  useEffect(() => {
-    if (!user?.id || hasPrefetched.current) return;
-    hasPrefetched.current = true;
-    supabase
-      .from('rider_destinations')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('last_visited_at', { ascending: false })
-      .limit(10)
-      .then(({ data }) => {
-        if (data && data.length > 0) {
-          setPrefetchedDestinations(data);
-          try { localStorage.setItem(DEST_CACHE_KEY, JSON.stringify(data)); } catch {}
-        }
-      });
-  }, [user?.id]);
   const [step, setStep] = useState<RideStep>('input');
-  // Cache-first: initialize pickup from localStorage immediately — never show placeholder
-  const [pickup, setPickup] = useState<Location | null>(() => {
-    try {
-      const cached = localStorage.getItem('drivveme_last_pickup');
-      if (cached) {
-        const { lat, lng, addressLabel } = JSON.parse(cached);
-        if (lat && lng && addressLabel) {
-          return { address: addressLabel, lat, lng };
-        }
-      }
-    } catch {}
-    // Fallback: try simple key
-    try {
-      const simple = localStorage.getItem('last_pickup_address');
-      if (simple) return { address: simple, lat: 0, lng: 0 };
-    } catch {}
-    return null;
-  });
+  const [pickup, setPickup] = useState<Location | null>(null);
   const [dropoff, setDropoff] = useState<Location | null>(null);
-  const [pickupAddress, setPickupAddress] = useState(() => {
-    try {
-      const cached = localStorage.getItem('drivveme_last_pickup');
-      if (cached) {
-        const { addressLabel } = JSON.parse(cached);
-        if (addressLabel) return addressLabel;
-      }
-    } catch {}
-    // Fallback: try simple key
-    try {
-      const simple = localStorage.getItem('last_pickup_address');
-      if (simple) return simple;
-    } catch {}
-    return '';
-  });
+  const [pickupAddress, setPickupAddress] = useState('');
   const [dropoffAddress, setDropoffAddress] = useState('');
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
   const [distanceKm, setDistanceKm] = useState(0);
@@ -232,7 +141,7 @@ const RideBooking = () => {
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
-  // Spinner fully removed — no detecting state needed
+  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const {
@@ -268,34 +177,6 @@ const RideBooking = () => {
   const {
     token: mapboxToken
   } = useMapboxToken();
-
-  // Session recovery: refresh session + Mapbox token when returning from background after idle
-  useEffect(() => {
-    let lastVisible = Date.now();
-    const handleVisibility = async () => {
-      if (document.visibilityState === 'visible') {
-        const idleMs = Date.now() - lastVisible;
-        // If idle > 5 minutes, proactively refresh session and clear stale token cache
-        if (idleMs > 5 * 60 * 1000) {
-          console.log('[RideBooking] Returning after', Math.round(idleMs / 1000), 's idle — refreshing session');
-          try {
-            const { data } = await supabase.auth.refreshSession();
-            if (data?.session) {
-              console.log('[RideBooking] Session refreshed successfully');
-              // Clear stale Mapbox token so it re-fetches with fresh session
-              clearMapboxTokenCache();
-            }
-          } catch (err) {
-            console.error('[RideBooking] Session refresh failed:', err);
-          }
-        }
-      } else {
-        lastVisible = Date.now();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, []);
 
   // Track rider location for admin visibility
   useRiderLocationTracking(true);
@@ -443,78 +324,97 @@ const RideBooking = () => {
     return null;
   }, [mapboxToken, language]);
 
-  // localStorage cache key for pickup
-  const PICKUP_CACHE_KEY = 'drivveme_last_pickup';
-
-  // Cache already loaded via useState initializers above — no extra effect needed.
-
-  // Ref to store pending GPS coords when mapboxToken isn't ready yet
-  const pendingGpsCoords = useRef<{ lat: number; lng: number } | null>(null);
-
-  // Helper: resolve GPS coords → address and cache
-  const resolveAndCacheAddress = useCallback(async (lat: number, lng: number) => {
-    if (!mapboxToken) {
-      // Store coords for later resolution
-      pendingGpsCoords.current = { lat, lng };
-      // Still set coords on pickup so route calc can use them
-      setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
-      return;
-    }
-    const address = await reverseGeocode(lat, lng);
-    const finalAddress = address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-    setPickupAddress(finalAddress);
-    setPickup({ address: finalAddress, lat, lng });
-    try {
-      localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: finalAddress, ts: Date.now() }));
-      localStorage.setItem('last_pickup_address', finalAddress);
-    } catch { /* ignore */ }
-  }, [mapboxToken, reverseGeocode]);
-
-  // Background GPS detection — fires once, stores coords immediately
+  // Auto-detect GPS location on mount and set as default pickup
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      setIsDetectingLocation(false);
+      return;
+    }
     hasAutoDetectedLocation.current = true;
+    let retryCount = 0;
+    const maxRetries = 3;
+    const attemptReverseGeocode = async (lat: number, lng: number) => {
+      const address = await reverseGeocode(lat, lng);
+      if (address) {
+        setPickupAddress(address);
+        setPickup({
+          address,
+          lat,
+          lng
+        });
+        setIsDetectingLocation(false);
+        return;
+      }
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        await resolveAndCacheAddress(lat, lng);
-      },
-      (error) => {
-        console.log('[RideBooking] GPS auto-detect failed:', error.message);
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-    );
-  }, [resolveAndCacheAddress]);
+      // Retry if geocoding failed and we have retries left
+      if (retryCount < maxRetries && mapboxToken) {
+        retryCount++;
+        console.log(`[RideBooking] Reverse geocode retry ${retryCount}/${maxRetries}`);
+        setTimeout(() => attemptReverseGeocode(lat, lng), 1000);
+        return;
+      }
 
-  // When mapboxToken arrives and we have pending GPS coords, resolve the address
+      // Final fallback: use coordinates as readable address
+      const coordAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      setPickupAddress(coordAddress);
+      setPickup({
+        address: coordAddress,
+        lat,
+        lng
+      });
+      setIsDetectingLocation(false);
+    };
+    navigator.geolocation.getCurrentPosition(async position => {
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+
+      // Always store coords immediately so pickup is never null
+      const tempAddress = language === 'fr' ? 'Détection...' : 'Detecting...';
+      setPickup({
+        address: tempAddress,
+        lat,
+        lng
+      });
+      setPickupAddress(tempAddress);
+
+      // Wait for mapboxToken if not available yet - effect below will resolve
+      if (!mapboxToken) return;
+      await attemptReverseGeocode(lat, lng);
+    }, error => {
+      console.log('[RideBooking] GPS auto-detect failed:', error.message);
+      setIsDetectingLocation(false);
+    }, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 60000
+    });
+
+    // Safety timeout: never show detecting overlay for more than 6 seconds
+    const safetyTimer = setTimeout(() => {
+      setIsDetectingLocation(false);
+    }, 6000);
+    return () => clearTimeout(safetyTimer);
+  }, [mapboxToken, language, reverseGeocode]);
+
+  // Effect to resolve address when pickup has coords but generic address
   useEffect(() => {
-    if (!mapboxToken || !pendingGpsCoords.current) return;
-    const { lat, lng } = pendingGpsCoords.current;
-    pendingGpsCoords.current = null;
-    resolveAndCacheAddress(lat, lng);
-  }, [mapboxToken, resolveAndCacheAddress]);
-
-  // Effect to resolve address when pickup has coords but generic/empty address
-  useEffect(() => {
-    if (!pickup || !pickup.lat || !pickup.lng || !mapboxToken) return;
-    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', ''];
+    if (!pickup || !mapboxToken) return;
+    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle'];
     const isGeneric = genericLabels.includes(pickupAddress) || pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
     if (isGeneric) {
       reverseGeocode(pickup.lat, pickup.lng).then(address => {
         if (address) {
           setPickupAddress(address);
-          setPickup(prev => prev ? { ...prev, address } : null);
-          try {
-            localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat: pickup.lat, lng: pickup.lng, addressLabel: address, ts: Date.now() }));
-            localStorage.setItem('last_pickup_address', address);
-          } catch { /* ignore */ }
+          setPickup(prev => prev ? {
+            ...prev,
+            address
+          } : null);
+          setIsDetectingLocation(false);
         }
       });
     }
-  }, [pickup?.lat, pickup?.lng, pickupAddress, mapboxToken, reverseGeocode]);
+  }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
   // Restore active ride when returning to the app (especially on iOS)
   useEffect(() => {
@@ -710,11 +610,11 @@ const RideBooking = () => {
     };
   }, [currentRide?.id, step, fareEstimate, toast, isTestAccount]);
 
-  // Fallback polling: poll every 5s for ANY active ride status (not just searching)
+  // Fallback polling: if realtime misses updates, poll every 5 seconds
   useEffect(() => {
     if (!currentRide?.id) return;
-    const activeStatuses = ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
-    if (!activeStatuses.includes(currentRide.status)) return;
+    // Only poll when in 'searching' status
+    if (currentRide.status !== 'searching') return;
     const pollInterval = setInterval(async () => {
       console.log('[RideBooking] Polling ride status...');
       const {
@@ -729,44 +629,18 @@ const RideBooking = () => {
         console.log('[RideBooking] Poll detected status change:', data.status);
         setCurrentRide(data);
         updateRide(data);
-        switch (data.status) {
-          case 'driver_assigned':
-            setStep('matched');
-            fetchDriverInfo(data.driver_id);
-            toast({ title: t('booking.found'), description: 'Your driver is on the way!' });
-            break;
-          case 'driver_en_route':
-            setStep('arriving');
-            break;
-          case 'arrived':
-            setStep('arrived');
-            break;
-          case 'in_progress':
-            setStep('inProgress');
-            break;
-          case 'completed':
-            setStep('completed');
-            clearRide();
-            if (dropoff && user?.id) saveDropoffDestination(dropoff);
-            break;
-          case 'cancelled':
-            toast({ title: t('booking.cancelled'), variant: 'destructive' });
-            clearRide();
-            resetBooking();
-            break;
+        if (data.status === 'driver_assigned') {
+          setStep('matched');
+          fetchDriverInfo(data.driver_id);
+          toast({
+            title: t('booking.found'),
+            description: 'Your driver is on the way!'
+          });
         }
       }
     }, 5000);
     return () => clearInterval(pollInterval);
   }, [currentRide?.id, currentRide?.status, t, toast]);
-
-  // Fetch driver info when ride completes but driverInfo is missing
-  useEffect(() => {
-    if (step === 'completed' && currentRide?.driver_id && !driverInfo) {
-      console.log('[RideBooking] Fetching missing driverInfo for completion screen');
-      fetchDriverInfo(currentRide.driver_id);
-    }
-  }, [step, currentRide?.driver_id, driverInfo]);
 
   // Subscribe to driver location updates
   useEffect(() => {
@@ -958,11 +832,6 @@ const RideBooking = () => {
         address,
         ...location
       });
-      // Force-save to localStorage on every manual pickup change
-      try {
-        localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat: location.lat, lng: location.lng, addressLabel: address, ts: Date.now() }));
-        localStorage.setItem('last_pickup_address', address);
-      } catch {}
     }
   };
   const handleDropoffChange = (address: string, location?: {
@@ -975,12 +844,8 @@ const RideBooking = () => {
         address,
         ...location
       });
-      // Auto-navigate to estimate when destination is selected with coordinates
-      // (will be handled by the effect below)
     }
   };
-
-  // (auto-estimate effect moved below calculateRoute declaration)
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(position => {
@@ -1002,51 +867,34 @@ const RideBooking = () => {
     });
   };
   const calculateRoute = useCallback(async () => {
-    if (!dropoff) return;
-    // Use pickup coords if available; if pickup has no real coords (lat=0), skip Mapbox and use fallback math
-    const pickupToUse = pickup && pickup.lat !== 0 && pickup.lng !== 0 ? pickup : null;
+    if (!pickup || !dropoff) return;
     try {
+      // Use the same Directions API as the map rendering so the estimate matches the real route.
+      // Fallback to a rough estimate only if we don't have a token.
       let estimatedDistance = 0;
       let estimatedDuration = 0;
-      if (pickupToUse && mapboxToken) {
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${pickupToUse.lng},${pickupToUse.lat};${dropoff.lng},${dropoff.lat}?overview=false&alternatives=false&access_token=${mapboxToken}`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-        try {
-          const res = await fetch(url, { signal: controller.signal });
-          clearTimeout(timeout);
-          const data = await res.json();
-          const route = data?.routes?.[0];
-          if (route?.distance && route?.duration) {
-            estimatedDistance = route.distance / 1000;
-            estimatedDuration = route.duration / 60;
-          } else {
-            throw new Error('No route returned');
-          }
-        } catch {
-          clearTimeout(timeout);
-          // Fallback to straight-line
-          if (pickupToUse) {
-            const R = 6371;
-            const dLat = (dropoff.lat - pickupToUse.lat) * Math.PI / 180;
-            const dLon = (dropoff.lng - pickupToUse.lng) * Math.PI / 180;
-            const a = Math.sin(dLat / 2) ** 2 + Math.cos(pickupToUse.lat * Math.PI / 180) * Math.cos(dropoff.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-            estimatedDistance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.4;
-            estimatedDuration = estimatedDistance / 30 * 60;
-          }
+      if (mapboxToken) {
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${pickup.lng},${pickup.lat};${dropoff.lng},${dropoff.lat}?overview=false&alternatives=false&access_token=${mapboxToken}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const route = data?.routes?.[0];
+
+        // Mapbox returns distance in meters, duration in seconds
+        if (!route?.distance || !route?.duration) {
+          throw new Error('No route returned');
         }
-      } else if (pickupToUse) {
-        // No token — rough fallback
-        const R = 6371;
-        const dLat = (dropoff.lat - pickupToUse.lat) * Math.PI / 180;
-        const dLon = (dropoff.lng - pickupToUse.lng) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) ** 2 + Math.cos(pickupToUse.lat * Math.PI / 180) * Math.cos(dropoff.lat * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-        estimatedDistance = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 1.4;
-        estimatedDuration = estimatedDistance / 30 * 60;
+        estimatedDistance = route.distance / 1000;
+        estimatedDuration = route.duration / 60;
       } else {
-        // No pickup coords at all — use a default 5km estimate so the user isn't stuck
-        estimatedDistance = 5;
-        estimatedDuration = 12;
+        // Rough fallback (straight-line with a road factor)
+        const R = 6371; // Earth's radius in km
+        const dLat = (dropoff.lat - pickup.lat) * Math.PI / 180;
+        const dLon = (dropoff.lng - pickup.lng) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(pickup.lat * Math.PI / 180) * Math.cos(dropoff.lat * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const straightLineDistance = R * c;
+        estimatedDistance = straightLineDistance * 1.4;
+        estimatedDuration = estimatedDistance / 30 * 60;
       }
       setDistanceKm(estimatedDistance);
       setDurationMinutes(estimatedDuration);
@@ -1061,20 +909,6 @@ const RideBooking = () => {
       });
     }
   }, [pickup, dropoff, toast, mapboxToken]);
-
-  // Auto-calculate route when both pickup and dropoff have coordinates
-  const hasTriggeredAutoEstimate = useRef(false);
-  useEffect(() => {
-    if (!dropoff) {
-      hasTriggeredAutoEstimate.current = false;
-      return;
-    }
-    if (step !== 'input') return;
-    if (hasTriggeredAutoEstimate.current) return;
-    hasTriggeredAutoEstimate.current = true;
-    calculateRoute();
-  }, [pickup, dropoff, step, calculateRoute]);
-
   const handleGetEstimate = async () => {
     if (!pickup || !dropoff) {
       toast({
@@ -1260,27 +1094,9 @@ const RideBooking = () => {
   };
   const resetBooking = () => {
     setStep('input');
-    // Re-initialize pickup from cache so we never show empty/fallback
-    let cachedPickup: Location | null = null;
-    let cachedAddr = '';
-    try {
-      const cached = localStorage.getItem('drivveme_last_pickup');
-      if (cached) {
-        const { lat, lng, addressLabel } = JSON.parse(cached);
-        if (lat && lng && addressLabel) {
-          cachedPickup = { address: addressLabel, lat, lng };
-          cachedAddr = addressLabel;
-        }
-      }
-    } catch {}
-    if (!cachedAddr) {
-      try {
-        cachedAddr = localStorage.getItem('last_pickup_address') || '';
-      } catch {}
-    }
-    setPickup(cachedPickup);
-    setPickupAddress(cachedAddr);
+    setPickup(null);
     setDropoff(null);
+    setPickupAddress('');
     setDropoffAddress('');
     setFareEstimate(null);
     setCurrentRide(null);
@@ -1288,8 +1104,6 @@ const RideBooking = () => {
     setDriverLocation(null);
     clearRide(); // Clear from localStorage
     hasRestoredRide.current = false;
-    // Allow GPS to re-detect on next cycle
-    hasAutoDetectedLocation.current = false;
   };
 
   // isActiveRidePhase already declared above for realtime tracking
@@ -1437,228 +1251,288 @@ const RideBooking = () => {
       </div>;
   }
 
-
   // TRIP COMPLETION SCREEN
-  if (step === 'completed' && currentRide) {
-    const fallbackDriverInfo = driverInfo || { first_name: language === 'fr' ? 'Chauffeur' : 'Driver', avatar_url: null, vehicle_make: '', vehicle_model: '', vehicle_color: '', license_plate: '' };
+  if (step === 'completed' && currentRide && driverInfo) {
     return <div className="min-h-screen bg-background">
         <Navbar />
         <div className="pt-20 pb-12 container mx-auto px-4 max-w-md">
-          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={fallbackDriverInfo} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={resetBooking} />
+          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={driverInfo} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={resetBooking} />
         </div>
       </div>;
   }
 
-  // DEFAULT BOOKING FLOW - MAP-FREE "WHERE TO?" SCREEN
+  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
   if (step === 'input') {
-    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', ''];
-    const hasRealAddress = pickupAddress && !genericLabels.includes(pickupAddress);
-    const displayPickupAddress = hasRealAddress
-      ? pickupAddress.split(',')[0]
-      : (language === 'fr' ? 'Position actuelle' : 'Current Location');
-    const isFallback = !hasRealAddress;
-
-    return (
-      <div className="min-h-[100dvh] bg-background flex flex-col">
-        {/* ── Header Bar ── */}
-        <div className="flex items-center justify-between px-5 pt-[env(safe-area-inset-top,12px)] pb-3" style={{ paddingTop: 'max(env(safe-area-inset-top, 12px), 12px)' }}>
-          <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center logo-icon-pulse">
-              <Car className="h-4 w-4 text-primary-foreground" />
+    // Extract short address for display - always show real address, never generic label
+    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress) ? pickupAddress.split(',')[0] : isDetectingLocation ? language === 'fr' ? 'Détection...' : 'Detecting...' : pickupAddress?.split(',')[0] || '';
+    return <div className="min-h-screen bg-background relative overflow-hidden">
+        {/* Full-page background image */}
+        <div className="absolute inset-0 z-0" style={{
+        backgroundImage: `url(${rideBg})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center center'
+      }} />
+        {/* Gradient overlay for better contrast */}
+        <div className="absolute inset-0 z-0" style={{
+        background: 'linear-gradient(to bottom, rgba(10, 10, 25, 0.3) 0%, rgba(60, 30, 100, 0.4) 50%, rgba(10, 10, 25, 0.6) 100%)'
+      }} />
+        
+        {/* Full-bleed Map - with transparency to show background */}
+        <div className="absolute inset-0 z-10" style={{
+        opacity: 0.85
+      }}>
+          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} />
+        </div>
+            
+        {/* Compact Frosted Top Bar */}
+        <motion.div initial={{
+        y: -100,
+        opacity: 0
+      }} animate={{
+        y: 0,
+        opacity: 1
+      }} className="absolute z-20" style={{
+        top: '12px',
+        left: '12px',
+        right: '12px'
+      }}>
+          <div className="flex items-center justify-between px-5" style={{
+          height: '58px',
+          borderRadius: '16px',
+          background: 'rgba(10, 10, 15, 0.55)',
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          border: '1px solid rgba(255, 255, 255, 0.10)',
+          boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)'
+        }}>
+            {/* Logo with flash animation */}
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center logo-icon-pulse">
+                <Car className="h-4 w-4 text-primary-foreground" />
+              </div>
+              <span className="font-display font-bold text-xl logo-flash">
+                Drivveme
+              </span>
             </div>
-            <span className="font-display font-bold text-xl logo-flash">Drivveme</span>
-          </div>
-
-          {/* Menu */}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onTouchEnd={(e) => { e.preventDefault(); navigate('/history'); }}
-              onClick={() => navigate('/history')}
-              className="p-2 rounded-lg hover:bg-muted transition-colors touch-manipulation"
-              aria-label="Ride history"
-            >
-              <History className="h-5 w-5 text-muted-foreground" />
-            </button>
-            <button
-              type="button"
-              onTouchEnd={(e) => { e.preventDefault(); setHelpDialogOpen(true); }}
-              onClick={() => setHelpDialogOpen(true)}
-              className="p-2 rounded-lg hover:bg-muted transition-colors touch-manipulation relative"
-              aria-label="Help"
-            >
-              <HelpCircle className="h-5 w-5 text-muted-foreground" />
-              {unreadSupportMessages > 0 && <span className="absolute top-1 right-1 h-2.5 w-2.5 bg-destructive rounded-full animate-pulse" />}
-            </button>
-            <button
-              type="button"
-              onTouchEnd={(e) => { e.preventDefault(); signOut(); navigate('/'); }}
-              onClick={() => { signOut(); navigate('/'); }}
-              className="p-2 rounded-lg hover:bg-muted transition-colors touch-manipulation"
-              aria-label="Log out"
-            >
-              <LogOut className="h-5 w-5 text-muted-foreground" />
-            </button>
-          </div>
-          <HelpDialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen} />
-        </div>
-
-        {/* ── Greeting ── */}
-        <div className="px-5 pb-2">
-          <GreetingHeader />
-        </div>
-
-        {/* ── Destination Search Bar ── */}
-        <div className="px-5 pb-3">
-          <div className="rounded-2xl border border-primary/40 bg-card/80 shadow-glow">
-            <LocationInput
-              type="dropoff"
-              value={dropoffAddress}
-              onChange={(addr, coords) => handleDropoffChange(addr, coords)}
-              placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
-            />
-          </div>
-        </div>
-
-        {/* ── Pickup Row with Edit ── */}
-        <div className="px-5 pb-4">
-          <button
-            type="button"
-            onTouchEnd={(e) => { e.preventDefault(); setShowFullInput(true); }}
-            onClick={() => setShowFullInput(true)}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-secondary/60 border border-border hover:bg-secondary transition-colors touch-manipulation text-left"
-            aria-label="Edit pickup location"
-          >
-            <div className="h-8 w-8 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
-              <Navigation className="h-4 w-4 text-accent" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Départ' : 'Pickup'}</p>
-              <p className={`text-sm truncate transition-all duration-300 ${isFallback ? 'font-bold text-primary' : 'font-medium text-foreground animate-fade-in'}`}>{displayPickupAddress}</p>
-            </div>
-            {/* Spinner removed — address or fallback always visible */}
-            <span className="text-xs font-medium text-primary flex-shrink-0 px-2.5 py-1 rounded-full border border-primary/30">
-              {language === 'fr' ? 'Éditer' : 'Edit'}
-            </span>
-          </button>
-        </div>
-
-        {/* ── Recent / Quick Destinations ── */}
-        <div className="flex-1 overflow-y-auto px-5 pb-4 space-y-4">
-          {!dropoffAddress && (
-            <>
-              {/* Show prefetched destinations instantly while React Query loads */}
-              {prefetchedDestinations.length > 0 && (
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold text-muted-foreground px-1">
-                    {language === 'fr' ? 'Récents' : 'Recent'}
-                  </h3>
-                  {prefetchedDestinations.slice(0, 5).map((dest) => (
-                    <button
-                      key={dest.id}
-                      type="button"
-                      onClick={() => handleDropoffChange(dest.address || dest.name, { lat: dest.lat, lng: dest.lng })}
-                      onTouchEnd={(e) => { e.preventDefault(); handleDropoffChange(dest.address || dest.name, { lat: dest.lat, lng: dest.lng }); }}
-                      className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-secondary/60 transition-colors touch-manipulation text-left"
-                    >
-                      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{dest.name}</p>
-                        <p className="text-xs text-muted-foreground truncate">{dest.address}</p>
-                      </div>
-                    </button>
-                  ))}
+            
+            {/* Menu Button with Dropdown */}
+            <div className="relative group">
+              <button className="p-2 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1">
+                <div className="flex flex-col gap-1">
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
                 </div>
-              )}
-              <QuickDestinations onSelectDestination={(dest) => {
-                handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-              }} />
-              {prefetchedDestinations.length === 0 && (
-                <RecentDestinations onSelectDestination={(dest) => {
-                  handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-                }} />
-              )}
-            </>
-          )}
-
-          {/* Show calculating indicator when destination selected — with auto-retry timeout */}
-          {dropoffAddress && !fareEstimate && step === 'input' && (
-            <CalculatingRouteIndicator
-              language={language}
-              dropoff={dropoff}
-              onRetry={calculateRoute}
-            />
-          )}
-
-          {/* Manual pickup/destination buttons */}
-          {!dropoffAddress && (
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onTouchEnd={(e) => { e.preventDefault(); setShowFullInput(true); }}
-                onClick={() => setShowFullInput(true)}
-                className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl bg-secondary/40 border border-border hover:bg-secondary transition-colors touch-manipulation"
-              >
-                <MapPin className="h-4 w-4 text-primary" />
-                <span className="text-sm font-medium text-foreground">
-                  {language === 'fr' ? 'Saisir manuellement' : 'Enter manually'}
-                </span>
               </button>
+              
+              {/* Dropdown Menu */}
+              <div className="absolute right-0 top-full mt-2 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                <div className="rounded-xl overflow-hidden" style={{
+                background: 'rgba(20, 10, 35, 0.95)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5)'
+              }}>
+                  <button onClick={() => navigate('/history')} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                    <History className="h-5 w-5 text-primary" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Mes trajets' : 'Past Rides'}
+                    </span>
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button onClick={() => {
+                  // Force a full page refresh to reset everything
+                  window.location.href = '/ride';
+                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                    <Car className="h-5 w-5 text-accent" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Réserver' : 'Book a Ride'}
+                    </span>
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button onClick={() => {
+                  setHelpDialogOpen(true);
+                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left relative">
+                    <div className="relative">
+                      <HelpCircle className="h-5 w-5 text-primary" />
+                      {unreadSupportMessages > 0 && <span className="absolute -top-1 -right-1 h-3 w-3 bg-destructive rounded-full animate-pulse" />}
+                    </div>
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Aide' : 'Help'}
+                    </span>
+                    {unreadSupportMessages > 0 && <span className="ml-auto bg-destructive text-destructive-foreground text-xs font-bold px-2 py-0.5 rounded-full animate-pulse">
+                        {unreadSupportMessages}
+                      </span>}
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button onClick={() => {
+                  signOut();
+                  navigate('/');
+                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                    <LogOut className="h-5 w-5 text-destructive" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Déconnexion' : 'Log Out'}
+                    </span>
+                  </button>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
 
-        {/* ── Full Input Modal (editing pickup) ── */}
+            <HelpDialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen} />
+          </div>
+        </motion.div>
+        
+        {/* GPS Detection Overlay */}
+        {isDetectingLocation && <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
+            <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
+              <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <p className="text-sm font-medium text-white">
+                {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+              </p>
+            </div>
+          </div>}
+          
+        {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
+        <motion.div initial={{
+        y: 100,
+        opacity: 0
+      }} animate={{
+        y: 0,
+        opacity: 1
+      }} className="absolute z-20 overflow-hidden" style={{
+        left: '12px',
+        right: '12px',
+        bottom: '12px',
+        height: 'min(65vh, calc(100dvh - 200px))',
+        borderRadius: '20px',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)'
+      }}>
+          {/* Background image layer */}
+          <div className="absolute inset-0" style={{
+          backgroundImage: `url(${welcomeBg})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center top'
+        }} />
+          {/* Frosted glass overlay */}
+          <div className="absolute inset-0" style={{
+          background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.3) 0%, rgba(30, 15, 60, 0.4) 50%, rgba(60, 30, 100, 0.3) 100%)'
+        }} />
+          {/* Glowing logo + brand name at top center */}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
+            
+            
+          </div>
+          {/* Content layer */}
+          <div className="relative h-full p-5 pt-6 space-y-3 overflow-y-auto z-10">
+            {/* Greeting */}
+            <GreetingHeader />
+            
+            {/* Pickup Location Row */}
+            <div onClick={() => setShowFullInput(true)} className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" style={{
+            background: 'rgba(40, 20, 60, 0.7)',
+            border: '1.5px solid rgba(200, 50, 255, 0.6)',
+            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
+          }}>
+              <div className="h-9 w-9 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0">
+                <Navigation className="h-4 w-4 text-lime-400" />
+              </div>
+              <span className="flex-1 text-white font-semibold truncate drop-shadow-sm">
+                {displayPickupAddress}
+              </span>
+              <span className="text-white font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/15">
+                {language === 'fr' ? 'Éditer' : 'Edit'}
+              </span>
+            </div>
+
+            {/* Destination Input - Where to? */}
+            <div className="rounded-xl" style={{
+            background: 'rgba(40, 20, 60, 0.7)',
+            border: '1.5px solid rgba(200, 50, 255, 0.6)',
+            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
+          }}>
+              <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => handleDropoffChange(addr, coords)} placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'} />
+            </div>
+
+            {/* Quick Destinations - Top 2 Most Visited */}
+            {!dropoffAddress && <QuickDestinations onSelectDestination={dest => {
+            handleDropoffChange(dest.address, {
+              lat: dest.lat,
+              lng: dest.lng
+            });
+          }} />}
+
+            {/* Get Estimate Button - shows when destination is selected */}
+            {dropoffAddress && pickup && <motion.div initial={{
+            opacity: 0,
+            y: 10
+          }} animate={{
+            opacity: 1,
+            y: 0
+          }} transition={{
+            delay: 0.1
+          }}>
+                <Button onClick={handleGetEstimate} className="w-full gradient-primary shadow-button py-5 text-lg font-semibold" disabled={!pickupAddress || !dropoffAddress}>
+                  {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
+                </Button>
+              </motion.div>}
+          </div>
+        </motion.div>
+
+        {/* Full Input Modal - for editing pickup or when tapped */}
         <AnimatePresence>
-          {showFullInput && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-background"
-            >
+          {showFullInput && <motion.div initial={{
+          opacity: 0
+        }} animate={{
+          opacity: 1
+        }} exit={{
+          opacity: 0
+        }} className="fixed inset-0 z-50 bg-background">
               <div className="h-full flex flex-col">
+                {/* Header */}
                 <div className="flex items-center gap-4 p-4 border-b border-border">
                   <Button variant="ghost" size="icon" onClick={() => setShowFullInput(false)}>
                     <X className="h-5 w-5" />
                   </Button>
                   <h2 className="font-semibold">
-                    {language === 'fr' ? 'Modifier les lieux' : 'Edit Locations'}
+                    {language === 'fr' ? 'Où allons-nous?' : 'Where to?'}
                   </h2>
                 </div>
 
+                {/* Location Inputs */}
                 <div className="p-4 space-y-3">
                   <LocationInput type="pickup" value={pickupAddress} onChange={handlePickupChange} onUseCurrentLocation={useCurrentLocation} />
+                  
                   <LocationInput type="dropoff" value={dropoffAddress} onChange={handleDropoffChange} />
                 </div>
 
+                {/* Recent Destinations */}
                 <div className="flex-1 overflow-y-auto p-4">
-                  <RecentDestinations onSelectDestination={(dest) => {
-                    handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
-                    setShowFullInput(false);
-                  }} />
+                  <RecentDestinations onSelectDestination={dest => {
+                handleDropoffChange(dest.address, {
+                  lat: dest.lat,
+                  lng: dest.lng
+                });
+                setShowFullInput(false);
+              }} />
                 </div>
 
-                <div className="p-4 border-t border-border" style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 12px), 12px)' }}>
-                  <Button
-                    onClick={() => {
-                      setShowFullInput(false);
-                      if (pickup && dropoff) handleGetEstimate();
-                    }}
-                    className="w-full gradient-primary shadow-button py-6 text-lg"
-                    disabled={!pickupAddress || !dropoffAddress}
-                  >
-                    {pickup && dropoff ? (language === 'fr' ? 'Obtenir un prix' : 'Get Estimate') : (language === 'fr' ? 'Confirmer' : 'Confirm')}
+                {/* Action Button */}
+                <div className="p-4 border-t border-border">
+                  <Button onClick={() => {
+                setShowFullInput(false);
+                if (pickup && dropoff) {
+                  handleGetEstimate();
+                }
+              }} className="w-full gradient-primary shadow-button py-6 text-lg" disabled={!pickupAddress || !dropoffAddress}>
+                    {pickup && dropoff ? t('booking.estimate') : language === 'fr' ? 'Confirmer' : 'Confirm'}
                   </Button>
                 </div>
               </div>
-            </motion.div>
-          )}
+            </motion.div>}
         </AnimatePresence>
-      </div>
-    );
+      </div>;
   }
 
   // ESTIMATE, PAYMENT, SEARCHING STEPS (side panel layout)
@@ -1694,28 +1568,11 @@ const RideBooking = () => {
               y: -20
             }} className="space-y-6">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => {
-                        setStep('input');
-                        setDropoff(null);
-                        setDropoffAddress('');
-                        setFareEstimate(null);
-                        hasTriggeredAutoEstimate.current = false;
-                      }}>
-                        <ArrowLeft className="h-5 w-5" />
-                      </Button>
-                      <h2 className="font-display text-2xl font-bold fare-header-glow">
-                        {t('pricing.estimated')}
-                      </h2>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={() => {
-                      setStep('input');
-                      setDropoff(null);
-                      setDropoffAddress('');
-                      setFareEstimate(null);
-                      hasTriggeredAutoEstimate.current = false;
-                    }} className="text-primary text-sm">
-                      {language === 'fr' ? 'Modifier' : 'Modify'}
+                    <h2 className="font-display text-2xl font-bold fare-header-glow">
+                      {t('pricing.estimated')}
+                    </h2>
+                    <Button variant="ghost" size="icon" onClick={() => setStep('input')}>
+                      <X className="h-5 w-5" />
                     </Button>
                   </div>
 

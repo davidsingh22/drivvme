@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect, useCallback, forwardRef } from 'react';
-import { MapPin, Navigation, Loader2, Clock, Star, Edit3 } from 'lucide-react';
+import { MapPin, Navigation, Loader2, Clock, Star } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 import { supabase } from '@/integrations/supabase/client';
@@ -24,7 +23,6 @@ interface Suggestion {
   isCustom?: boolean;
   isRecent?: boolean;
   visitCount?: number;
-  isManual?: boolean;
 }
 
 const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
@@ -34,20 +32,16 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   placeholder,
   onUseCurrentLocation,
 }, ref) => {
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const { user } = useAuth();
-  const { token } = useMapboxToken();
+  const { token, loading: tokenLoading } = useMapboxToken();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [recentDestinations, setRecentDestinations] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
-  const [searchFailed, setSearchFailed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
-  const pendingQueryRef = useRef<string | null>(null);
-  const tokenRef = useRef(token);
-  tokenRef.current = token;
 
   const icon = type === 'pickup' ? (
     <MapPin className="h-5 w-5 text-primary" />
@@ -125,105 +119,49 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
     );
   };
 
-  // When token arrives and there's a pending query, execute it
-  useEffect(() => {
-    if (token && pendingQueryRef.current) {
-      const query = pendingQueryRef.current;
-      pendingQueryRef.current = null;
-      searchPlaces(query);
-    }
-  }, [token]);
-
   const searchPlaces = useCallback(async (query: string) => {
-    if (query.length < 2) {
+    if (!token || query.length < 2) {
+      // If no query but we have recent destinations (dropoff only), show them
       if (type === 'dropoff' && recentDestinations.length > 0 && query.length === 0) {
         setSuggestions(recentDestinations);
         setShowSuggestions(true);
       } else {
         setSuggestions([]);
-        setShowSuggestions(false);
       }
-      setIsSearching(false);
       return;
     }
 
-    setSearchFailed(false);
-
-    // ── STEP 1: Show local results IMMEDIATELY (synchronous filter) ──
-    const recentResults = searchRecentDestinations(query);
-    // Build instant local list before any async work
-    const instantResults: Suggestion[] = [...recentResults];
-    // Always add manual entry so user is never stuck
-    instantResults.push({
-      id: 'manual-entry',
-      name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
-      address: query,
-      center: [0, 0],
-      isManual: true,
-    });
-    // Render local results NOW — no skeletons
-    setSuggestions(instantResults);
-    setShowSuggestions(true);
-
-    // ── STEP 2: Fetch custom locations (async but fast, local DB) ──
-    const customResults = await searchCustomLocations(query);
-    if (customResults.length > 0) {
-      const withCustom = [...recentResults, ...customResults];
-      withCustom.push({
-        id: 'manual-entry',
-        name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
-        address: query,
-        center: [0, 0],
-        isManual: true,
-      });
-      setSuggestions(withCustom);
-    }
-
-    // ── STEP 3: Fetch Mapbox in background (non-blocking) ──
-    const currentToken = tokenRef.current;
-    if (!currentToken) {
-      pendingQueryRef.current = query;
-      console.log('[LocationInput] No Mapbox token yet, showing local results only');
-      setIsSearching(false);
-      return;
-    }
-
-    setIsSearching(true); // show spinner icon only, NOT skeletons
+    setIsSearching(true);
     try {
-      const mapboxResults = await searchMapbox(query, currentToken);
+      // Search recent destinations, custom locations, and Mapbox in parallel
+      const recentResults = searchRecentDestinations(query);
+      const [customResults, mapboxResults] = await Promise.all([
+        searchCustomLocations(query),
+        searchMapbox(query, token),
+      ]);
+
+      // Combine results: recent first, then custom, then Mapbox
+      // Deduplicate by removing Mapbox results that match recent destinations
+      const recentIds = new Set(recentResults.map(r => `${r.center[0]}-${r.center[1]}`));
+      const customIds = new Set(customResults.map(r => `${r.center[0]}-${r.center[1]}`));
       
-      const localIds = new Set([...recentResults, ...customResults].map(r => `${r.center[0]}-${r.center[1]}`));
       const filteredMapbox = mapboxResults.filter(m => {
         const key = `${m.center[0]}-${m.center[1]}`;
-        return !localIds.has(key);
+        return !recentIds.has(key) && !customIds.has(key);
       });
 
       const combined = [...recentResults, ...customResults, ...filteredMapbox];
-      if (filteredMapbox.length === 0) {
-        combined.push({
-          id: 'manual-entry',
-          name: language === 'fr' ? 'Entrer manuellement' : 'Enter manually',
-          address: query,
-          center: [0, 0],
-          isManual: true,
-        });
-      }
       setSuggestions(combined);
       setShowSuggestions(combined.length > 0);
     } catch (err) {
-      console.warn('[LocationInput] Mapbox search failed, keeping local results');
-      setSearchFailed(true);
+      console.error('Search error:', err);
     } finally {
       setIsSearching(false);
     }
-  }, [type, recentDestinations, language]);
+  }, [token, type, recentDestinations]);
 
   const searchMapbox = async (query: string, accessToken: string): Promise<Suggestion[]> => {
     try {
-      // ── Diagnostic: log token availability (masked) ──
-      const tokenPrefix = accessToken ? accessToken.substring(0, 6) + '...' : 'MISSING';
-      console.log(`[LocationInput] Mapbox search: query="${query}", token=${tokenPrefix}`);
-
       // Use Mapbox Search Box API for superior POI discovery
       const sessionToken = crypto.randomUUID();
       
@@ -238,31 +176,12 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
         proximity: '-73.5673,45.5017',
       });
       
-      const suggestUrl = `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`;
-      console.log(`[LocationInput] Suggest URL (no token): ${suggestUrl.replace(accessToken, '***')}`);
-      
-      const response = await fetch(suggestUrl);
-      console.log(`[LocationInput] Suggest HTTP ${response.status}`);
-
-      if (!response.ok) {
-        const errBody = await response.text();
-        console.error(`[LocationInput] Suggest failed ${response.status}: ${errBody.substring(0, 200)}`);
-        if (response.status === 401 || response.status === 403 || response.status === 404) {
-          setSearchFailed(true);
-        }
-        // Fallback to direct geocoding on auth errors
-        return await searchMapboxGeocoding(query, accessToken);
-      }
-
+      const response = await fetch(
+        `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`
+      );
       const data = await response.json();
-      console.log(`[LocationInput] Suggest returned ${data.suggestions?.length ?? 0} suggestions`);
 
       if (data.suggestions && data.suggestions.length > 0) {
-        // Log first 2 results for diagnostics
-        data.suggestions.slice(0, 2).forEach((s: any, i: number) => {
-          console.log(`[LocationInput] Result ${i}: "${s.name}" — ${s.full_address || s.place_formatted || ''}`);
-        });
-
         const detailedSuggestions = await Promise.all(
           data.suggestions.slice(0, 8).map(async (s: any) => {
             try {
@@ -273,18 +192,6 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
               const retrieveResponse = await fetch(
                 `https://api.mapbox.com/search/searchbox/v1/retrieve/${s.mapbox_id}?${retrieveParams}`
               );
-              
-              if (!retrieveResponse.ok) {
-                console.warn(`[LocationInput] Retrieve failed for ${s.name}: HTTP ${retrieveResponse.status}`);
-                // Return suggestion from suggest data as fallback
-                return {
-                  id: s.mapbox_id,
-                  name: s.name || 'Unknown',
-                  address: s.full_address || s.place_formatted || '',
-                  center: [0, 0] as [number, number], // Will be filtered if no coords
-                } as Suggestion | null;
-              }
-              
               const retrieveData = await retrieveResponse.json();
               
               if (retrieveData.features && retrieveData.features.length > 0) {
@@ -314,78 +221,50 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                 };
               }
               return null;
-            } catch (retrieveErr) {
-              console.warn(`[LocationInput] Retrieve error for ${s.name}:`, retrieveErr);
+            } catch {
               return null;
             }
           })
         );
 
-        const results = detailedSuggestions.filter((s): s is Suggestion => s !== null && s.center[0] !== 0);
-        console.log(`[LocationInput] Final results: ${results.length} after retrieve`);
-        
-        if (results.length > 0) return results;
-        // If all retrieves failed, fall back to geocoding
-        return await searchMapboxGeocoding(query, accessToken);
+        return detailedSuggestions.filter((s): s is Suggestion => s !== null);
       } else {
-        // No suggestions, fallback to geocoding API
-        return await searchMapboxGeocoding(query, accessToken);
-      }
-    } catch (err) {
-      console.error('[LocationInput] Mapbox search error:', err);
-      // Last resort: try direct geocoding
-      try {
-        return await searchMapboxGeocoding(query, accessToken);
-      } catch {
-        return [];
-      }
-    }
-  };
+        // Fallback to geocoding API
+        const geocodeParams = new URLSearchParams({
+          access_token: accessToken,
+          country: 'ca',
+          types: 'poi,address,place,locality,neighborhood',
+          limit: '10',
+          fuzzyMatch: 'true',
+          autocomplete: 'true',
+          proximity: '-73.5673,45.5017',
+          language: 'en,fr',
+        });
+        
+        const geocodeResponse = await fetch(
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${geocodeParams}`
+        );
+        const geocodeData = await geocodeResponse.json();
 
-  // Direct Mapbox Geocoding v5 fallback — no map needed, works independently
-  const searchMapboxGeocoding = async (query: string, accessToken: string): Promise<Suggestion[]> => {
-    console.log(`[LocationInput] Geocoding fallback for: "${query}"`);
-    const geocodeParams = new URLSearchParams({
-      access_token: accessToken,
-      country: 'ca',
-      types: 'poi,address,place,locality,neighborhood',
-      limit: '10',
-      fuzzyMatch: 'true',
-      autocomplete: 'true',
-      proximity: '-73.5673,45.5017',
-      language: 'en,fr',
-    });
-    
-    const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${geocodeParams}`;
-    const geocodeResponse = await fetch(geocodeUrl);
-    console.log(`[LocationInput] Geocoding HTTP ${geocodeResponse.status}`);
-    
-    if (!geocodeResponse.ok) {
-      console.error(`[LocationInput] Geocoding failed: HTTP ${geocodeResponse.status}`);
+        if (geocodeData.features) {
+          return geocodeData.features.map((f: any) => {
+            const parts = f.place_name.split(', ');
+            const name = parts[0] || f.place_name;
+            const address = parts.slice(1).join(', ') || '';
+            return {
+              id: f.id,
+              name,
+              address,
+              center: f.center,
+            };
+          });
+        }
+      }
+      return [];
+    } catch (err) {
+      console.error('Mapbox search error:', err);
       return [];
     }
-    
-    const geocodeData = await geocodeResponse.json();
-    console.log(`[LocationInput] Geocoding returned ${geocodeData.features?.length ?? 0} features`);
-
-    if (geocodeData.features) {
-      geocodeData.features.slice(0, 2).forEach((f: any, i: number) => {
-        console.log(`[LocationInput] Geocode ${i}: "${f.place_name}"`);
-      });
-      
-      return geocodeData.features.map((f: any) => {
-        const parts = f.place_name.split(', ');
-        const name = parts[0] || f.place_name;
-        const address = parts.slice(1).join(', ') || '';
-        return {
-          id: f.id,
-          name,
-          address,
-          center: f.center,
-        };
-      });
-    }
-    return [];
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -402,13 +281,6 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
   };
 
   const handleSelectSuggestion = (suggestion: Suggestion) => {
-    if (suggestion.isManual) {
-      // Manual entry: use the typed text as the address, no coordinates
-      onChange(suggestion.address);
-      setSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
     const fullAddress = suggestion.address ? `${suggestion.name}, ${suggestion.address}` : suggestion.name;
     onChange(fullAddress, {
       lat: suggestion.center[1],
@@ -440,7 +312,7 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
 
   return (
     <div ref={ref || containerRef} className="relative flex gap-2">
-      <div className="flex-1 relative" ref={ref ? undefined : containerRef}>
+      <div className="flex-1 relative" ref={containerRef}>
         <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
           {isSearching ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : icon}
         </div>
@@ -458,25 +330,21 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
             }
           }}
           placeholder={placeholder || t(`booking.${type}`)}
-          className="pl-10 py-6 bg-background touch-manipulation"
+          className="pl-10 py-6 bg-background"
+          disabled={tokenLoading}
         />
-
-        {/* No more skeleton loaders — local results render instantly */}
 
         {/* Suggestions dropdown */}
         {showSuggestions && suggestions.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 overflow-hidden max-h-[60vh] overflow-y-auto">
+          <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 overflow-hidden">
             {suggestions.map((suggestion) => (
               <button
                 key={suggestion.id}
                 type="button"
-                className="w-full px-4 py-3 text-left hover:bg-muted active:bg-muted transition-colors border-b border-border last:border-b-0 flex items-start gap-3 touch-manipulation"
-                onTouchEnd={(e) => { e.preventDefault(); handleSelectSuggestion(suggestion); }}
+                className="w-full px-4 py-3 text-left hover:bg-muted transition-colors border-b border-border last:border-b-0 flex items-start gap-3"
                 onClick={() => handleSelectSuggestion(suggestion)}
               >
-                {suggestion.isManual ? (
-                  <Edit3 className="h-5 w-5 text-accent mt-0.5 shrink-0" />
-                ) : suggestion.isRecent ? (
+                {suggestion.isRecent ? (
                   <Clock className="h-5 w-5 text-primary mt-0.5 shrink-0" />
                 ) : (
                   <MapPin className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
@@ -490,17 +358,12 @@ const LocationInput = forwardRef<HTMLDivElement, LocationInputProps>(({
                       </span>
                     )}
                   </div>
-                  {suggestion.address && !suggestion.isManual && (
+                  {suggestion.address && (
                     <span className="text-sm text-muted-foreground truncate">{suggestion.address}</span>
                   )}
                 </div>
               </button>
             ))}
-            {isSearching && (
-              <div className="px-4 py-2 text-xs text-muted-foreground text-center">
-                {language === 'fr' ? 'Recherche en cours...' : 'Searching...'}
-              </div>
-            )}
           </div>
         )}
       </div>

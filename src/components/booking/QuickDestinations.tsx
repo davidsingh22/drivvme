@@ -19,14 +19,11 @@ interface QuickDestinationsProps {
   onSelectDestination: (destination: { address: string; lat: number; lng: number }) => void;
 }
 
-const CACHE_KEY = 'drivveme_quick_destinations';
-
 export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDestination }) => {
   const { language } = useLanguage();
   const { user } = useAuth();
 
-  // Cache-first: initialData from localStorage, no skeletons
-  const { data: destinations = [] } = useQuery({
+  const { data: destinations = [], isLoading } = useQuery({
     queryKey: ['quick-destinations', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
@@ -43,18 +40,10 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
         return [];
       }
       
-      const result = data as QuickDestination[];
-      try { localStorage.setItem(CACHE_KEY, JSON.stringify(result)); } catch {}
-      return result;
+      return data as QuickDestination[];
     },
     enabled: !!user?.id,
     staleTime: 60000,
-    initialData: () => {
-      try {
-        const cached = localStorage.getItem(CACHE_KEY);
-        return cached ? JSON.parse(cached) : undefined;
-      } catch { return undefined; }
-    },
   });
 
   // Get icon based on destination name
@@ -94,6 +83,16 @@ export const QuickDestinations: React.FC<QuickDestinationsProps> = ({ onSelectDe
     const parts = name.split(/[\s,]/);
     return parts[0]?.substring(0, 12) || name.substring(0, 12);
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex gap-3">
+        {[1, 2].map((i) => (
+          <div key={i} className="flex-1 animate-pulse h-16 rounded-2xl bg-muted/30" />
+        ))}
+      </div>
+    );
+  }
 
   if (destinations.length === 0) {
     return null;

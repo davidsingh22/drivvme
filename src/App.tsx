@@ -216,43 +216,31 @@ const AppRoutes = () => {
 };
 
 const RouteRestorer = () => {
-  const { session, roles, authLoading, isDriver, isRider, isAdmin } = useAuth();
+  const { session, roles, authLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Persist last visited role-based route
-  useEffect(() => {
-    if (['/driver', '/ride', '/admin'].includes(location.pathname)) {
-      try { localStorage.setItem('last_route', location.pathname); } catch {}
-    }
-  }, [location.pathname]);
-
-  // On cold start at /, restore to the correct role-based route immediately
+  // If a driver session exists, restore them to /driver on cold start or iOS reload.
   useEffect(() => {
     if (authLoading) return;
     if (!session) return;
     if (location.pathname !== '/') return;
 
-    // Try cached last_route first for instant restore (before roles load)
     const last = (() => {
-      try { return localStorage.getItem('last_route'); } catch { return null; }
+      try {
+        return localStorage.getItem('last_route');
+      } catch {
+        return null;
+      }
     })();
 
-    if (last && roles.length === 0) {
-      // Roles not loaded yet but we have a cached route — use it
-      navigate(last, { replace: true });
-      return;
+    if (last === '/driver') {
+      // If the driver last used /driver, restore them there immediately on iOS reload.
+      if (roles.length === 0 || roles.includes('driver')) {
+        navigate('/driver', { replace: true });
+      }
     }
-
-    // Once roles are loaded, route by role
-    if (isAdmin) {
-      navigate('/admin', { replace: true });
-    } else if (isDriver) {
-      navigate('/driver', { replace: true });
-    } else if (isRider) {
-      navigate('/ride', { replace: true });
-    }
-  }, [authLoading, session, roles, isAdmin, isDriver, isRider, location.pathname, navigate]);
+  }, [authLoading, session, roles, location.pathname, navigate]);
 
   return null;
 };
