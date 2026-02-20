@@ -160,6 +160,7 @@ const RideSearch = () => {
         pickupAddress: pickupLabel,
         pickupLat: pickupCoords?.lat,
         pickupLng: pickupCoords?.lng,
+        autoEstimate: true,
       },
     });
   };
