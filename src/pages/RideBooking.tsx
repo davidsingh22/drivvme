@@ -16,7 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { NotificationPermissionHelpDialog } from '@/components/NotificationPermissionHelpDialog';
 import { useActiveRide } from '@/hooks/useActiveRide';
-import { useMapboxToken } from '@/hooks/useMapboxToken';
+import { useMapboxToken, clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 import { useDriverNotificationEscalation } from '@/hooks/useDriverNotificationEscalation';
 import useRideNotifications from '@/hooks/useRideNotifications';
 import InRideStatusBar from '@/components/ride/InRideStatusBar';
@@ -78,6 +78,40 @@ const incrementFreeRidesUsed = (email: string): void => {
   const used = parseInt(localStorage.getItem(usedKey) || '0', 10);
   localStorage.setItem(usedKey, String(used + 1));
 };
+
+// Auto-retry indicator that won't hang forever
+const CalculatingRouteIndicator = ({ language, dropoff, onRetry }: { language: string; dropoff: any; onRetry: () => void }) => {
+  const [elapsed, setElapsed] = useState(0);
+  const retriedRef = useRef(false);
+
+  useEffect(() => {
+    retriedRef.current = false;
+    setElapsed(0);
+    const interval = setInterval(() => setElapsed(e => e + 1), 1000);
+    return () => clearInterval(interval);
+  }, [dropoff?.lat, dropoff?.lng]);
+
+  // Auto-retry after 6 seconds if still showing
+  useEffect(() => {
+    if (elapsed >= 6 && !retriedRef.current) {
+      retriedRef.current = true;
+      console.log('[RideBooking] Calculating route timed out, auto-retrying...');
+      onRetry();
+    }
+  }, [elapsed, onRetry]);
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center gap-3 py-8">
+      <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+      <span className="text-sm text-muted-foreground">
+        {elapsed >= 6
+          ? (language === 'fr' ? 'Nouvelle tentative...' : 'Retrying...')
+          : (language === 'fr' ? 'Calcul du trajet...' : 'Calculating route...')}
+      </span>
+    </motion.div>
+  );
+};
+
 const RideBooking = () => {
   const {
     t,
@@ -234,6 +268,34 @@ const RideBooking = () => {
   const {
     token: mapboxToken
   } = useMapboxToken();
+
+  // Session recovery: refresh session + Mapbox token when returning from background after idle
+  useEffect(() => {
+    let lastVisible = Date.now();
+    const handleVisibility = async () => {
+      if (document.visibilityState === 'visible') {
+        const idleMs = Date.now() - lastVisible;
+        // If idle > 5 minutes, proactively refresh session and clear stale token cache
+        if (idleMs > 5 * 60 * 1000) {
+          console.log('[RideBooking] Returning after', Math.round(idleMs / 1000), 's idle — refreshing session');
+          try {
+            const { data } = await supabase.auth.refreshSession();
+            if (data?.session) {
+              console.log('[RideBooking] Session refreshed successfully');
+              // Clear stale Mapbox token so it re-fetches with fresh session
+              clearMapboxTokenCache();
+            }
+          } catch (err) {
+            console.error('[RideBooking] Session refresh failed:', err);
+          }
+        }
+      } else {
+        lastVisible = Date.now();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
 
   // Track rider location for admin visibility
   useRiderLocationTracking(true);
@@ -1521,14 +1583,13 @@ const RideBooking = () => {
             </>
           )}
 
-          {/* Show calculating indicator when destination selected */}
-          {dropoffAddress && !fareEstimate && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center justify-center gap-3 py-8">
-              <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-              <span className="text-sm text-muted-foreground">
-                {language === 'fr' ? 'Calcul du trajet...' : 'Calculating route...'}
-              </span>
-            </motion.div>
+          {/* Show calculating indicator when destination selected — with auto-retry timeout */}
+          {dropoffAddress && !fareEstimate && step === 'input' && (
+            <CalculatingRouteIndicator
+              language={language}
+              dropoff={dropoff}
+              onRetry={calculateRoute}
+            />
           )}
 
           {/* Manual pickup/destination buttons */}
