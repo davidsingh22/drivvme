@@ -419,6 +419,7 @@ const RideBooking = () => {
 
   // Phase 3: If arriving from /search with a destination, auto-fill and jump to estimate
   const hasAppliedSearchState = useRef(false);
+  const shouldAutoEstimate = useRef(false);
   useEffect(() => {
     const state = routeLocation.state as any;
     if (!state?.dropoffAddress || hasAppliedSearchState.current) return;
@@ -438,14 +439,14 @@ const RideBooking = () => {
       setIsDetectingLocation(false);
     }
 
+    if (state.autoEstimate) {
+      shouldAutoEstimate.current = true;
+    }
+
     // Clear the state so refreshing doesn't re-trigger
     window.history.replaceState({}, document.title);
-
-    // Auto-trigger estimate after a tick so state has settled
-    setTimeout(() => {
-      // calculateRoute will be called by the Get Estimate button or we skip to estimate
-    }, 100);
   }, [routeLocation.state]);
+
 
   useEffect(() => {
     if (activeRideLoading || !activeRide || hasRestoredRide.current) return;
@@ -939,6 +940,14 @@ const RideBooking = () => {
       });
     }
   }, [pickup, dropoff, toast, mapboxToken]);
+
+  // Auto-trigger estimate once pickup + dropoff are both set from search
+  useEffect(() => {
+    if (!shouldAutoEstimate.current || !pickup || !dropoff) return;
+    shouldAutoEstimate.current = false;
+    calculateRoute();
+  }, [pickup, dropoff, calculateRoute]);
+
   const handleGetEstimate = async () => {
     if (!pickup || !dropoff) {
       toast({
