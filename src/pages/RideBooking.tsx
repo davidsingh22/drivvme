@@ -1128,17 +1128,31 @@ const RideBooking = () => {
     // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
     (async () => {
       try {
-        // Proactively refresh session to prevent stale-token failures after idle
+        // Proactively refresh session with a 6-second hard timeout
         let session: any = null;
         try {
-          const { data: refreshed } = await supabase.auth.refreshSession();
-          session = refreshed?.session;
+          const refreshResult = await Promise.race([
+            supabase.auth.refreshSession(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Session refresh timed out')), 6000)
+            )
+          ]);
+          session = (refreshResult as any)?.data?.session;
           console.log('[RideBooking] Session refreshed:', !!session);
         } catch (refreshErr) {
           console.warn('[RideBooking] Session refresh failed, using existing:', refreshErr);
-          // Fallback to existing session if refresh fails
-          const { data: existing } = await supabase.auth.getSession();
-          session = existing?.session;
+        }
+        // Fallback: grab existing session if refresh failed/timed out
+        if (!session) {
+          try {
+            const { data: existing } = await Promise.race([
+              supabase.auth.getSession(),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('getSession timed out')), 4000)
+              )
+            ]);
+            session = (existing as any)?.session;
+          } catch { /* ignore */ }
         }
         if (!session) {
           toast({
@@ -1147,6 +1161,7 @@ const RideBooking = () => {
             variant: 'destructive'
           });
           setStep('estimate');
+          setIsSubmitting(false);
           navigate('/login');
           return;
         }
@@ -1155,37 +1170,55 @@ const RideBooking = () => {
         const rideStatus = skipPayment ? 'searching' : 'pending_payment';
         console.log('[RideBooking] Creating ride, skipPayment:', skipPayment, 'status:', rideStatus);
 
-        // Wrap insert in a 10-second timeout to prevent hanging on stale connections
-        const insertPromise = supabase.from('rides').insert({
-          rider_id: user.id,
-          pickup_address: pickup.address,
-          pickup_lat: pickup.lat,
-          pickup_lng: pickup.lng,
-          dropoff_address: dropoff.address,
-          dropoff_lat: dropoff.lat,
-          dropoff_lng: dropoff.lng,
-          distance_km: distanceKm,
-          estimated_duration_minutes: Math.round(durationMinutes),
-          estimated_fare: fareEstimate.total,
-          promo_discount: fareEstimate.promoDiscount,
-          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-          gst_amount: fareEstimate.gstAmount,
-          qst_amount: fareEstimate.qstAmount,
-          platform_fee: fareEstimate.platformFee,
-          status: rideStatus
-        }).select('*').single();
+        // Ride insert with retry (2 attempts) and 8-second timeout each
+        let ride: any = null;
+        let lastInsertErr: any = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const insertPromise = supabase.from('rides').insert({
+              rider_id: user.id,
+              pickup_address: pickup.address,
+              pickup_lat: pickup.lat,
+              pickup_lng: pickup.lng,
+              dropoff_address: dropoff.address,
+              dropoff_lat: dropoff.lat,
+              dropoff_lng: dropoff.lng,
+              distance_km: distanceKm,
+              estimated_duration_minutes: Math.round(durationMinutes),
+              estimated_fare: fareEstimate.total,
+              promo_discount: fareEstimate.promoDiscount,
+              subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+              gst_amount: fareEstimate.gstAmount,
+              qst_amount: fareEstimate.qstAmount,
+              platform_fee: fareEstimate.platformFee,
+              status: rideStatus
+            }).select('*').single();
 
-        const rideResult = await Promise.race([
-          insertPromise,
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('Ride creation timed out. Please try again.')), 10000)
-          )
-        ]);
+            const result = await Promise.race([
+              insertPromise,
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('Ride creation timed out')), 8000)
+              )
+            ]) as any;
 
-        const { data: ride, error: rideErr } = rideResult as any;
-        if (rideErr || !ride?.id) {
-          console.error('[RideBooking] Ride insert error:', rideErr);
-          throw new Error(rideErr?.message || 'Ride creation failed');
+            if (result?.error) throw result.error;
+            if (!result?.data?.id) throw new Error('No ride ID returned');
+            ride = result.data;
+            console.log('[RideBooking] Ride created (attempt ' + attempt + '):', ride.id);
+            break;
+          } catch (err: any) {
+            lastInsertErr = err;
+            console.warn('[RideBooking] Ride insert attempt ' + attempt + ' failed:', err?.message);
+            if (attempt < 2) {
+              // Brief pause before retry, also re-refresh session
+              await new Promise(r => setTimeout(r, 1500));
+              try { await supabase.auth.refreshSession(); } catch { /* ignore */ }
+            }
+          }
+        }
+
+        if (!ride?.id) {
+          throw new Error(lastInsertErr?.message || 'Ride creation failed after retries');
         }
         console.log('[RideBooking] Ride created:', ride.id);
 
