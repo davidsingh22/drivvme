@@ -56,7 +56,6 @@ const TEST_ACCOUNTS = ['alsenesa@hotmail.com'];
 // Limited test accounts - bypass payment for a limited number of rides
 const LIMITED_TEST_ACCOUNTS: Record<string, number> = {
   'sean.mcturk@outlook.com': 3,
-  'mcturksean@gmail.com': 3,
   'patsy@hotmail.com': 999,
   'rymcturk@gmail.com': 3,
   'kissmebaby@hotmail.com': 999
@@ -176,14 +175,40 @@ const RideBooking = () => {
       });
   }, [user?.id]);
   const [step, setStep] = useState<RideStep>('input');
-  // Show "Current Location" as placeholder — GPS will replace it with a real address
-  const [pickup, setPickup] = useState<Location | null>(null);
+  // Cache-first: initialize pickup from localStorage immediately — never show placeholder
+  const [pickup, setPickup] = useState<Location | null>(() => {
+    try {
+      const cached = localStorage.getItem('drivveme_last_pickup');
+      if (cached) {
+        const { lat, lng, addressLabel } = JSON.parse(cached);
+        if (lat && lng && addressLabel) {
+          return { address: addressLabel, lat, lng };
+        }
+      }
+    } catch {}
+    // Fallback: try simple key
+    try {
+      const simple = localStorage.getItem('last_pickup_address');
+      if (simple) return { address: simple, lat: 0, lng: 0 };
+    } catch {}
+    return null;
+  });
   const [dropoff, setDropoff] = useState<Location | null>(null);
   const [pickupAddress, setPickupAddress] = useState(() => {
-    return language === 'fr' ? 'Position actuelle' : 'Current Location';
+    try {
+      const cached = localStorage.getItem('drivveme_last_pickup');
+      if (cached) {
+        const { addressLabel } = JSON.parse(cached);
+        if (addressLabel) return addressLabel;
+      }
+    } catch {}
+    // Fallback: try simple key
+    try {
+      const simple = localStorage.getItem('last_pickup_address');
+      if (simple) return simple;
+    } catch {}
+    return '';
   });
-  // Flag: true once GPS has resolved a real address
-  const [gpsResolved, setGpsResolved] = useState(false);
   const [dropoffAddress, setDropoffAddress] = useState('');
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
   const [distanceKm, setDistanceKm] = useState(0);
@@ -418,134 +443,78 @@ const RideBooking = () => {
     return null;
   }, [mapboxToken, language]);
 
-   // localStorage cache key for pickup
+  // localStorage cache key for pickup
   const PICKUP_CACHE_KEY = 'drivveme_last_pickup';
 
-  // Ref to store GPS coords obtained before mapboxToken is ready
+  // Cache already loaded via useState initializers above — no extra effect needed.
+
+  // Ref to store pending GPS coords when mapboxToken isn't ready yet
   const pendingGpsCoords = useRef<{ lat: number; lng: number } | null>(null);
 
-  // Helper: apply GPS coords to pickup state
-  const applyGpsCoords = useCallback((lat: number, lng: number) => {
-    console.log('[RideBooking] GPS acquired:', lat.toFixed(4), lng.toFixed(4));
-    setPickup({ address: language === 'fr' ? 'Position actuelle' : 'Current Location', lat, lng });
-    pendingGpsCoords.current = { lat, lng };
-    setGpsResolved(false); // Will be resolved once address is reverse geocoded
-  }, [language]);
+  // Helper: resolve GPS coords → address and cache
+  const resolveAndCacheAddress = useCallback(async (lat: number, lng: number) => {
+    if (!mapboxToken) {
+      // Store coords for later resolution
+      pendingGpsCoords.current = { lat, lng };
+      // Still set coords on pickup so route calc can use them
+      setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
+      return;
+    }
+    const address = await reverseGeocode(lat, lng);
+    const finalAddress = address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    setPickupAddress(finalAddress);
+    setPickup({ address: finalAddress, lat, lng });
+    try {
+      localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: finalAddress, ts: Date.now() }));
+      localStorage.setItem('last_pickup_address', finalAddress);
+    } catch { /* ignore */ }
+  }, [mapboxToken, reverseGeocode]);
 
-  // Step 1: Get GPS coords immediately with aggressive retry + watchPosition fallback
+  // Background GPS detection — fires once, stores coords immediately
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
     if (!navigator.geolocation) return;
     hasAutoDetectedLocation.current = true;
 
-    let watchId: number | null = null;
-    let resolved = false;
-    let attempt = 0;
-    const MAX_ATTEMPTS = 3;
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        await resolveAndCacheAddress(lat, lng);
+      },
+      (error) => {
+        console.log('[RideBooking] GPS auto-detect failed:', error.message);
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+  }, [resolveAndCacheAddress]);
 
-    const onSuccess = (position: GeolocationPosition) => {
-      if (resolved) return;
-      resolved = true;
-      if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-      applyGpsCoords(position.coords.latitude, position.coords.longitude);
-    };
-
-    const tryGetPosition = () => {
-      attempt++;
-      const useHighAccuracy = attempt <= 2; // Last attempt uses low accuracy as fallback
-      const timeout = attempt === 1 ? 8000 : attempt === 2 ? 12000 : 15000;
-      console.log(`[RideBooking] GPS attempt ${attempt}/${MAX_ATTEMPTS} (highAccuracy=${useHighAccuracy}, timeout=${timeout}ms)`);
-
-      navigator.geolocation.getCurrentPosition(
-        onSuccess,
-        (error) => {
-          console.warn(`[RideBooking] GPS attempt ${attempt} failed:`, error.code, error.message);
-          if (!resolved && attempt < MAX_ATTEMPTS) {
-            // Retry after a brief delay
-            setTimeout(tryGetPosition, 1000);
-          } else if (!resolved) {
-            // All attempts failed — start watchPosition as last resort
-            console.log('[RideBooking] All getCurrentPosition attempts failed, starting watchPosition...');
-            watchId = navigator.geolocation.watchPosition(
-              onSuccess,
-              (watchErr) => {
-                console.warn('[RideBooking] watchPosition error:', watchErr.code, watchErr.message);
-              },
-              { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 }
-            );
-            // Give watchPosition 15s then give up and use cache
-            setTimeout(() => {
-              if (!resolved) {
-                console.warn('[RideBooking] GPS completely unavailable, using cache fallback');
-                if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-                try {
-                  const cached = localStorage.getItem(PICKUP_CACHE_KEY);
-                  if (cached) {
-                    const { lat, lng, addressLabel } = JSON.parse(cached);
-                    if (lat && lng && addressLabel) {
-                      setPickup({ address: addressLabel, lat, lng });
-                      setPickupAddress(addressLabel);
-                      setGpsResolved(true);
-                    }
-                  }
-                } catch {}
-              }
-            }, 15000);
-          }
-        },
-        { enableHighAccuracy: useHighAccuracy, timeout, maximumAge: 0 }
-      );
-    };
-
-    tryGetPosition();
-
-    return () => {
-      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
-    };
-  }, [language, applyGpsCoords]);
-
-  // Step 2: Once we have BOTH GPS coords AND mapboxToken, reverse geocode to get the real street address
+  // When mapboxToken arrives and we have pending GPS coords, resolve the address
   useEffect(() => {
-    if (!pendingGpsCoords.current) return;
-    if (!mapboxToken) return; // Wait for token
+    if (!mapboxToken || !pendingGpsCoords.current) return;
     const { lat, lng } = pendingGpsCoords.current;
-    pendingGpsCoords.current = null; // Clear so this only runs once
+    pendingGpsCoords.current = null;
+    resolveAndCacheAddress(lat, lng);
+  }, [mapboxToken, resolveAndCacheAddress]);
 
-    console.log('[RideBooking] Resolving address for GPS coords...');
-    reverseGeocode(lat, lng).then(address => {
-      const finalAddress = address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      console.log('[RideBooking] Address resolved:', finalAddress);
-      setPickupAddress(finalAddress);
-      setPickup({ address: finalAddress, lat, lng });
-      setGpsResolved(true);
-      try {
-        localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: finalAddress, ts: Date.now() }));
-        localStorage.setItem('last_pickup_address', finalAddress);
-      } catch {}
-    });
-  }, [mapboxToken, reverseGeocode]);
-
-  // Step 3: Safety net — if pickup has coords but still shows generic text, resolve when token is ready
+  // Effect to resolve address when pickup has coords but generic/empty address
   useEffect(() => {
-    if (!pickup || !pickup.lat || !pickup.lng || !mapboxToken || gpsResolved) return;
-    const genericLabels = ['Current Location', 'Position actuelle', 'Current location', ''];
+    if (!pickup || !pickup.lat || !pickup.lng || !mapboxToken) return;
+    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', ''];
     const isGeneric = genericLabels.includes(pickupAddress) || pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
-    if (!isGeneric) {
-      setGpsResolved(true);
-      return;
+    if (isGeneric) {
+      reverseGeocode(pickup.lat, pickup.lng).then(address => {
+        if (address) {
+          setPickupAddress(address);
+          setPickup(prev => prev ? { ...prev, address } : null);
+          try {
+            localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat: pickup.lat, lng: pickup.lng, addressLabel: address, ts: Date.now() }));
+            localStorage.setItem('last_pickup_address', address);
+          } catch { /* ignore */ }
+        }
+      });
     }
-    reverseGeocode(pickup.lat, pickup.lng).then(address => {
-      if (address) {
-        setPickupAddress(address);
-        setPickup(prev => prev ? { ...prev, address } : null);
-        setGpsResolved(true);
-        try {
-          localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat: pickup.lat, lng: pickup.lng, addressLabel: address, ts: Date.now() }));
-          localStorage.setItem('last_pickup_address', address);
-        } catch {}
-      }
-    });
-  }, [pickup?.lat, pickup?.lng, pickupAddress, mapboxToken, reverseGeocode, gpsResolved]);
+  }, [pickup?.lat, pickup?.lng, pickupAddress, mapboxToken, reverseGeocode]);
 
   // Restore active ride when returning to the app (especially on iOS)
   useEffect(() => {
@@ -1014,55 +983,23 @@ const RideBooking = () => {
   // (auto-estimate effect moved below calculateRoute declaration)
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return;
-    setPickupAddress(language === 'fr' ? 'Détection en cours...' : 'Getting your location...');
-    setGpsResolved(false);
-    let resolved = false;
-    let attempt = 0;
-
-    const onGot = async (position: GeolocationPosition) => {
-      if (resolved) return;
-      resolved = true;
+    navigator.geolocation.getCurrentPosition(position => {
       const lat = position.coords.latitude;
       const lng = position.coords.longitude;
-      setPickup({ address: language === 'fr' ? 'Position actuelle' : 'Current Location', lat, lng });
-      pendingGpsCoords.current = { lat, lng };
-      if (mapboxToken) {
-        const address = await reverseGeocode(lat, lng);
-        if (address) {
-          setPickupAddress(address);
-          setPickup({ address, lat, lng });
-          setGpsResolved(true);
-          try {
-            localStorage.setItem(PICKUP_CACHE_KEY, JSON.stringify({ lat, lng, addressLabel: address, ts: Date.now() }));
-            localStorage.setItem('last_pickup_address', address);
-          } catch {}
-        }
-      }
-    };
-
-    const tryGet = () => {
-      attempt++;
-      const highAccuracy = attempt <= 2;
-      navigator.geolocation.getCurrentPosition(onGot, (err) => {
-        console.warn(`[RideBooking] useCurrentLocation attempt ${attempt} failed:`, err.message);
-        if (!resolved && attempt < 3) {
-          setTimeout(tryGet, 1000);
-        } else if (!resolved) {
-          // Last resort: try low accuracy with long timeout
-          navigator.geolocation.getCurrentPosition(onGot, () => {
-            if (!resolved) {
-              toast({
-                title: language === 'fr' ? 'Erreur de localisation' : 'Location error',
-                description: language === 'fr' ? 'Impossible de détecter votre position. Veuillez entrer votre adresse manuellement.' : 'Unable to detect your location. Please enter your address manually.',
-                variant: 'destructive'
-              });
-            }
-          }, { enableHighAccuracy: false, timeout: 20000, maximumAge: 60000 });
-        }
-      }, { enableHighAccuracy: highAccuracy, timeout: highAccuracy ? 8000 : 15000, maximumAge: 0 });
-    };
-
-    tryGet();
+      const fallbackAddress = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      setPickupAddress(fallbackAddress);
+      setPickup({
+        address: fallbackAddress,
+        lat,
+        lng
+      });
+    }, () => {
+      toast({
+        title: 'Location error',
+        description: 'Unable to get your current location',
+        variant: 'destructive'
+      });
+    });
   };
   const calculateRoute = useCallback(async () => {
     if (!dropoff) return;
@@ -1514,11 +1451,11 @@ const RideBooking = () => {
 
   // DEFAULT BOOKING FLOW - MAP-FREE "WHERE TO?" SCREEN
   if (step === 'input') {
-    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Current Location', 'Position actuelle', ''];
-    const hasRealAddress = pickupAddress && !genericLabels.includes(pickupAddress) && !pickupAddress.match(/^-?\d+\.\d+,\s*-?\d+\.\d+$/);
+    const genericLabels = ['Detecting...', 'Détection...', 'Current location', 'Position actuelle', ''];
+    const hasRealAddress = pickupAddress && !genericLabels.includes(pickupAddress);
     const displayPickupAddress = hasRealAddress
       ? pickupAddress.split(',')[0]
-      : (language === 'fr' ? 'Localisation en cours...' : 'Getting your location...');
+      : (language === 'fr' ? 'Position actuelle' : 'Current Location');
     const isFallback = !hasRealAddress;
 
     return (
@@ -1597,10 +1534,7 @@ const RideBooking = () => {
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground">{language === 'fr' ? 'Départ' : 'Pickup'}</p>
-              <div className="flex items-center gap-2">
-                {isFallback && <div className="h-2 w-2 rounded-full bg-primary animate-pulse flex-shrink-0" />}
-                <p className={`text-sm truncate transition-all duration-300 ${isFallback ? 'font-medium text-primary' : 'font-medium text-foreground animate-fade-in'}`}>{displayPickupAddress}</p>
-              </div>
+              <p className={`text-sm truncate transition-all duration-300 ${isFallback ? 'font-bold text-primary' : 'font-medium text-foreground animate-fade-in'}`}>{displayPickupAddress}</p>
             </div>
             {/* Spinner removed — address or fallback always visible */}
             <span className="text-xs font-medium text-primary flex-shrink-0 px-2.5 py-1 rounded-full border border-primary/30">
