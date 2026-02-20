@@ -1,14 +1,17 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Car } from 'lucide-react';
+import { Search, History, Car } from 'lucide-react';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
+import { useAuth } from '@/contexts/AuthContext';
 
 const RiderHome = () => {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const firstName = profile?.first_name;
 
   return (
-    <div className="min-h-screen w-full relative overflow-hidden flex flex-col items-center justify-between">
+    <div className="min-h-screen w-full relative overflow-hidden flex flex-col">
       {/* Full-screen background */}
       <div className="absolute inset-0 z-0">
         <img
@@ -16,89 +19,85 @@ const RiderHome = () => {
           alt="DrivveMe"
           className="w-full h-full object-cover object-center"
         />
-        {/* Dark overlay so text is readable */}
         <div
           className="absolute inset-0"
           style={{
             background:
-              'linear-gradient(to bottom, rgba(15,5,30,0.45) 0%, rgba(15,5,30,0.15) 40%, rgba(15,5,30,0.65) 100%)',
+              'linear-gradient(to bottom, rgba(10,5,20,0.55) 0%, rgba(10,5,20,0.10) 35%, rgba(10,5,20,0.70) 100%)',
           }}
         />
       </div>
 
-      {/* Logo top */}
-      <div className="relative z-10 pt-12">
-        <Logo size="lg" />
+      {/* Top: Logo + greeting */}
+      <div className="relative z-10 flex flex-col items-start px-6 pt-12 pb-4">
+        <Logo size="md" />
+        <motion.p
+          className="mt-4 text-white/80 text-base font-medium"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+        >
+          {firstName
+            ? `Good to see you, ${firstName} 👋`
+            : 'Good to see you 👋'}
+        </motion.p>
       </div>
 
-      {/* Center greeting */}
+      {/* Spacer to push content down */}
+      <div className="flex-1" />
+
+      {/* Bottom content */}
       <motion.div
-        className="relative z-10 flex flex-col items-center gap-10 px-6 pb-24"
-        initial={{ opacity: 0, y: 30 }}
+        className="relative z-10 px-5 pb-10 space-y-4"
+        initial={{ opacity: 0, y: 40 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: 'easeOut' }}
+        transition={{ duration: 0.5, ease: 'easeOut', delay: 0.1 }}
       >
-        <div className="text-center space-y-2">
-          <h1
-            className="font-display text-4xl font-bold text-white"
-            style={{ textShadow: '0 0 30px rgba(147,51,234,0.8), 0 2px 8px rgba(0,0,0,0.8)' }}
-          >
+        {/* "Where to?" tappable search bar */}
+        <motion.button
+          onClick={() => navigate('/where-to')}
+          className="w-full flex items-center gap-3 px-5 py-4 rounded-2xl text-left"
+          style={{
+            background: 'rgba(255,255,255,0.97)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.25)',
+          }}
+          whileTap={{ scale: 0.98 }}
+        >
+          <Search className="h-5 w-5 text-foreground/50 flex-shrink-0" />
+          <span className="text-foreground/50 font-medium text-base">
             Where to?
-          </h1>
-          <p className="text-white/70 text-base">Your ride is just one tap away</p>
-        </div>
+          </span>
+        </motion.button>
 
         {/* Glowing Book a Ride button */}
         <motion.button
-          onClick={() => navigate('/ride')}
-          className="relative group flex items-center gap-3 px-10 py-5 rounded-2xl font-display font-bold text-xl text-white overflow-hidden"
+          onClick={() => navigate('/where-to')}
+          className="relative w-full flex items-center justify-center gap-3 px-6 py-5 rounded-2xl font-display font-bold text-xl text-white overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, hsl(270 80% 45%), hsl(280 90% 35%))',
-            boxShadow:
-              '0 0 30px hsl(270 80% 55% / 0.9), 0 0 60px hsl(270 70% 50% / 0.6), 0 0 100px hsl(270 60% 45% / 0.4)',
           }}
           animate={{
             boxShadow: [
-              '0 0 25px hsl(270 80% 55% / 0.8), 0 0 50px hsl(270 70% 50% / 0.5), 0 0 80px hsl(270 60% 45% / 0.3)',
-              '0 0 45px hsl(270 80% 65% / 1), 0 0 90px hsl(270 70% 60% / 0.8), 0 0 140px hsl(270 60% 55% / 0.6)',
-              '0 0 25px hsl(270 80% 55% / 0.8), 0 0 50px hsl(270 70% 50% / 0.5), 0 0 80px hsl(270 60% 45% / 0.3)',
+              '0 0 20px hsl(270 80% 55% / 0.7), 0 0 40px hsl(270 70% 50% / 0.4)',
+              '0 0 40px hsl(270 80% 65% / 1), 0 0 80px hsl(270 70% 60% / 0.7)',
+              '0 0 20px hsl(270 80% 55% / 0.7), 0 0 40px hsl(270 70% 50% / 0.4)',
             ],
           }}
-          transition={{
-            duration: 1.4,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-          whileTap={{ scale: 0.96 }}
+          transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+          whileTap={{ scale: 0.97 }}
         >
-          {/* Shimmer sweep */}
-          <span
-            className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-            style={{
-              background:
-                'linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.25) 50%, transparent 60%)',
-              backgroundSize: '200% 100%',
-              animation: 'shimmer 1.2s infinite',
-            }}
-          />
-          <Car className="h-6 w-6 relative z-10" />
-          <span className="relative z-10">Book a Ride</span>
+          <Car className="h-6 w-6" />
+          <span>Book a Ride</span>
         </motion.button>
 
         {/* Sub-links */}
-        <div className="flex gap-6 text-white/60 text-sm">
+        <div className="flex items-center justify-center gap-6 pt-1">
           <button
             onClick={() => navigate('/history')}
-            className="hover:text-white transition-colors"
+            className="flex items-center gap-1.5 text-white/60 text-sm hover:text-white transition-colors"
           >
-            Past Rides
-          </button>
-          <span className="text-white/20">|</span>
-          <button
-            onClick={() => navigate('/login')}
-            className="hover:text-white transition-colors"
-          >
-            Sign Out
+            <History className="h-4 w-4" />
+            <span>Past Rides</span>
           </button>
         </div>
       </motion.div>
@@ -107,3 +106,4 @@ const RiderHome = () => {
 };
 
 export default RiderHome;
+
