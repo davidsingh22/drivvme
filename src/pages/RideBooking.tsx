@@ -648,11 +648,11 @@ const RideBooking = () => {
     };
   }, [currentRide?.id, step, fareEstimate, toast, isTestAccount]);
 
-  // Fallback polling: if realtime misses updates, poll every 5 seconds
+  // Fallback polling: poll every 5s for ANY active ride status (not just searching)
   useEffect(() => {
     if (!currentRide?.id) return;
-    // Only poll when in 'searching' status
-    if (currentRide.status !== 'searching') return;
+    const activeStatuses = ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
+    if (!activeStatuses.includes(currentRide.status)) return;
     const pollInterval = setInterval(async () => {
       console.log('[RideBooking] Polling ride status...');
       const {
@@ -667,18 +667,44 @@ const RideBooking = () => {
         console.log('[RideBooking] Poll detected status change:', data.status);
         setCurrentRide(data);
         updateRide(data);
-        if (data.status === 'driver_assigned') {
-          setStep('matched');
-          fetchDriverInfo(data.driver_id);
-          toast({
-            title: t('booking.found'),
-            description: 'Your driver is on the way!'
-          });
+        switch (data.status) {
+          case 'driver_assigned':
+            setStep('matched');
+            fetchDriverInfo(data.driver_id);
+            toast({ title: t('booking.found'), description: 'Your driver is on the way!' });
+            break;
+          case 'driver_en_route':
+            setStep('arriving');
+            break;
+          case 'arrived':
+            setStep('arrived');
+            break;
+          case 'in_progress':
+            setStep('inProgress');
+            break;
+          case 'completed':
+            setStep('completed');
+            clearRide();
+            if (dropoff && user?.id) saveDropoffDestination(dropoff);
+            break;
+          case 'cancelled':
+            toast({ title: t('booking.cancelled'), variant: 'destructive' });
+            clearRide();
+            resetBooking();
+            break;
         }
       }
     }, 5000);
     return () => clearInterval(pollInterval);
   }, [currentRide?.id, currentRide?.status, t, toast]);
+
+  // Fetch driver info when ride completes but driverInfo is missing
+  useEffect(() => {
+    if (step === 'completed' && currentRide?.driver_id && !driverInfo) {
+      console.log('[RideBooking] Fetching missing driverInfo for completion screen');
+      fetchDriverInfo(currentRide.driver_id);
+    }
+  }, [step, currentRide?.driver_id, driverInfo]);
 
   // Subscribe to driver location updates
   useEffect(() => {
@@ -1349,12 +1375,14 @@ const RideBooking = () => {
       </div>;
   }
 
+
   // TRIP COMPLETION SCREEN
-  if (step === 'completed' && currentRide && driverInfo) {
+  if (step === 'completed' && currentRide) {
+    const fallbackDriverInfo = driverInfo || { first_name: language === 'fr' ? 'Chauffeur' : 'Driver', avatar_url: null, vehicle_make: '', vehicle_model: '', vehicle_color: '', license_plate: '' };
     return <div className="min-h-screen bg-background">
         <Navbar />
         <div className="pt-20 pb-12 container mx-auto px-4 max-w-md">
-          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={driverInfo} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={resetBooking} />
+          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={fallbackDriverInfo} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={resetBooking} />
         </div>
       </div>;
   }
