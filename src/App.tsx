@@ -36,6 +36,7 @@ const DriverLive = lazy(() => import("./pages/DriverLive"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Debug = lazy(() => import("./pages/Debug"));
 const DriverFloatingGPSButton = lazy(() => import("@/components/DriverFloatingGPSButton"));
+const RiderHome = lazy(() => import("./pages/RiderHome"));
 
 const queryClient = new QueryClient();
 

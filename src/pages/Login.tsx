@@ -50,11 +50,9 @@ const Login = () => {
         replace: true
       });else if (isDriver) navigate('/driver', {
         replace: true
-      });else if (isRider) navigate('/ride', {
+      });else navigate('/rider-home', {
         replace: true
-      });else navigate('/ride', {
-        replace: true
-      }); // Default for new users
+      }); // Riders & new users → rider home
       return;
     }
 
