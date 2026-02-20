@@ -9,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { calculateFare, formatCurrency, formatDistance, formatDuration, FareEstimate } from '@/lib/pricing';
 import Navbar from '@/components/Navbar';
-import MapComponent from '@/components/MapComponent';
+const MapComponent = React.lazy(() => import('@/components/MapComponent'));
 import LocationInput from '@/components/LocationInput';
 import PaymentForm from '@/components/PaymentForm';
 import { useToast } from '@/hooks/use-toast';
@@ -1217,7 +1217,9 @@ const RideBooking = () => {
   if (isActiveRidePhase) {
     return <div className="h-screen w-screen relative overflow-hidden">
         {/* Fullscreen Map */}
-        <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={effectiveDriverLocation} riderLocation={riderLiveLocation} routeMode={step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' : step === 'inProgress' ? 'driver-to-dropoff' : 'pickup-dropoff'} followDriver={step === 'arriving' || step === 'arrived' || step === 'inProgress'} />
+        <Suspense fallback={<div className="h-full w-full bg-background" />}>
+          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={effectiveDriverLocation} riderLocation={riderLiveLocation} routeMode={step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' : step === 'inProgress' ? 'driver-to-dropoff' : 'pickup-dropoff'} followDriver={step === 'arriving' || step === 'arrived' || step === 'inProgress'} />
+        </Suspense>
 
         {/* Debug Bar Overlay - ONLY visible if localStorage.DEBUG_RIDE === "1" */}
         {showDebug && <Suspense fallback={null}>
@@ -1306,13 +1308,6 @@ const RideBooking = () => {
         <div className="absolute inset-0 z-0" style={{
         background: 'linear-gradient(to bottom, rgba(10, 10, 25, 0.3) 0%, rgba(60, 30, 100, 0.4) 50%, rgba(10, 10, 25, 0.6) 100%)'
       }} />
-        
-        {/* Full-bleed Map - with transparency to show background */}
-        <div className="absolute inset-0 z-10" style={{
-        opacity: 0.85
-      }}>
-          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} />
-        </div>
             
         {/* Compact Frosted Top Bar */}
         <motion.div initial={{
@@ -1551,7 +1546,9 @@ const RideBooking = () => {
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
         {/* Map */}
         <div className="flex-1 relative">
-          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={driverLocation} routeMode="pickup-dropoff" />
+          <Suspense fallback={<div className="h-full w-full bg-background" />}>
+            <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={driverLocation} routeMode="pickup-dropoff" />
+          </Suspense>
         </div>
 
         {/* Booking Panel */}
