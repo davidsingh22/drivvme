@@ -144,12 +144,7 @@ const Login = () => {
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2">
-                <Checkbox id="rememberMe" checked={rememberMe} onCheckedChange={checked => setRememberMe(checked === true)} />
-                <Label htmlFor="rememberMe" className="text-sm font-normal text-muted-foreground cursor-pointer">
-                  Se souvenir de moi
-                </Label>
-              </div>
+              {/* Session is always persistent — no checkbox needed */}
 
               {error && <p className="text-destructive text-sm text-center">{error}</p>}
 
