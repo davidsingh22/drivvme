@@ -471,7 +471,17 @@ const RideBooking = () => {
     } catch { /* ignore */ }
   }, [mapboxToken, reverseGeocode]);
 
-  // Background GPS detection — fires once, stores coords immediately
+  // Haversine distance helper (km) — used to detect city changes
+  const haversineKm = useCallback((lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, []);
+
+  // Background GPS detection — fires once, but ALWAYS overrides cache if user moved >5 km (different city)
   useEffect(() => {
     if (hasAutoDetectedLocation.current) return;
     if (!navigator.geolocation) return;
@@ -481,6 +491,33 @@ const RideBooking = () => {
       async (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
+
+        // Check if cached pickup is far away (>5 km = different neighbourhood/city)
+        const cachedPickup = pickup;
+        if (cachedPickup && cachedPickup.lat && cachedPickup.lng) {
+          const distKm = haversineKm(cachedPickup.lat, cachedPickup.lng, lat, lng);
+          if (distKm > 5) {
+            console.log(`[RideBooking] User moved ${distKm.toFixed(1)} km from cached pickup — refreshing location`);
+            // Force update to current GPS location
+            await resolveAndCacheAddress(lat, lng);
+            return;
+          }
+        }
+
+        // Also check staleness: if cache is older than 2 hours, refresh regardless
+        try {
+          const cached = localStorage.getItem(PICKUP_CACHE_KEY);
+          if (cached) {
+            const { ts } = JSON.parse(cached);
+            if (ts && Date.now() - ts > 2 * 60 * 60 * 1000) {
+              console.log('[RideBooking] Cached pickup is >2 hours old — refreshing');
+              await resolveAndCacheAddress(lat, lng);
+              return;
+            }
+          }
+        } catch {}
+
+        // No cache or close enough — still update with fresh GPS
         await resolveAndCacheAddress(lat, lng);
       },
       (error) => {
@@ -488,7 +525,7 @@ const RideBooking = () => {
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
     );
-  }, [resolveAndCacheAddress]);
+  }, [resolveAndCacheAddress, pickup, haversineKm]);
 
   // When mapboxToken arrives and we have pending GPS coords, resolve the address
   useEffect(() => {
