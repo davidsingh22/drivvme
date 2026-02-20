@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -93,6 +93,7 @@ const RideBooking = () => {
     signOut
   } = useAuth();
   const navigate = useNavigate();
+  const routeLocation = useLocation();
   const {
     toast
   } = useToast();
@@ -416,7 +417,36 @@ const RideBooking = () => {
     }
   }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
-  // Restore active ride when returning to the app (especially on iOS)
+  // Phase 3: If arriving from /search with a destination, auto-fill and jump to estimate
+  const hasAppliedSearchState = useRef(false);
+  useEffect(() => {
+    const state = routeLocation.state as any;
+    if (!state?.dropoffAddress || hasAppliedSearchState.current) return;
+    hasAppliedSearchState.current = true;
+
+    // Set dropoff
+    setDropoffAddress(state.dropoffAddress);
+    if (state.dropoffLat != null && state.dropoffLng != null) {
+      setDropoff({ address: state.dropoffAddress, lat: state.dropoffLat, lng: state.dropoffLng });
+    }
+
+    // Set pickup from search state if available
+    if (state.pickupAddress && state.pickupLat != null && state.pickupLng != null) {
+      setPickupAddress(state.pickupAddress);
+      setPickup({ address: state.pickupAddress, lat: state.pickupLat, lng: state.pickupLng });
+      hasAutoDetectedLocation.current = true;
+      setIsDetectingLocation(false);
+    }
+
+    // Clear the state so refreshing doesn't re-trigger
+    window.history.replaceState({}, document.title);
+
+    // Auto-trigger estimate after a tick so state has settled
+    setTimeout(() => {
+      // calculateRoute will be called by the Get Estimate button or we skip to estimate
+    }, 100);
+  }, [routeLocation.state]);
+
   useEffect(() => {
     if (activeRideLoading || !activeRide || hasRestoredRide.current) return;
     hasRestoredRide.current = true;
@@ -1429,14 +1459,14 @@ const RideBooking = () => {
             {/* Greeting */}
             <GreetingHeader />
 
-            {/* "Where to?" search bar — Uber style */}
+            {/* "Where to?" search bar — Uber style — navigates to map-free search */}
             <div
               className="flex items-center gap-3 px-4 py-4 rounded-2xl cursor-pointer hover:bg-white/10 transition-colors"
               style={{
                 background: 'rgba(255, 255, 255, 0.92)',
                 boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
               }}
-              onClick={() => setShowFullInput(true)}
+              onClick={() => navigate('/search')}
             >
               <div className="h-5 w-5 text-gray-500 flex-shrink-0">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

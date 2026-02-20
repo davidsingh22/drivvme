@@ -1,11 +1,31 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Car } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 
 const RiderHome = () => {
   const navigate = useNavigate();
+  const gpsStarted = useRef(false);
+
+  // Phase 1: Background GPS warming — cache coords for instant pickup on /ride
+  useEffect(() => {
+    if (gpsStarted.current || !navigator.geolocation) return;
+    gpsStarted.current = true;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const data = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          ts: Date.now(),
+        };
+        localStorage.setItem('drivveme_gps_warm', JSON.stringify(data));
+      },
+      () => { /* silent fail */ },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }, []);
 
   return (
     <div className="min-h-screen w-full relative overflow-hidden flex flex-col items-center justify-between">
