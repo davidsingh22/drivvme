@@ -584,6 +584,7 @@ const RideBooking = () => {
           });
           clearRide(); // Clear from localStorage
           resetBooking();
+          navigate('/rider-home');
           break;
       }
     }).subscribe(status => {
@@ -1106,6 +1107,7 @@ const RideBooking = () => {
     // Optimistic UI update first — makes cancel feel instant
     const rideId = currentRide.id;
     resetBooking();
+    navigate('/rider-home');
     toast({
       title: 'Cancelling ride…'
     });
