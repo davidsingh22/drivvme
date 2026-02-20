@@ -1425,58 +1425,37 @@ const RideBooking = () => {
             
           </div>
           {/* Content layer */}
-          <div className="relative h-full p-5 pt-6 space-y-3 overflow-y-auto z-10">
+          <div className="relative h-full p-5 pt-6 flex flex-col gap-4 z-10">
             {/* Greeting */}
             <GreetingHeader />
-            
-            {/* Pickup Location Row */}
-            <div onClick={() => setShowFullInput(true)} className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" style={{
-            background: 'rgba(40, 20, 60, 0.7)',
-            border: '1.5px solid rgba(200, 50, 255, 0.6)',
-            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
-          }}>
-              <div className="h-9 w-9 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0">
-                <Navigation className="h-4 w-4 text-lime-400" />
+
+            {/* "Where to?" search bar — Uber style */}
+            <div
+              className="flex items-center gap-3 px-4 py-4 rounded-2xl cursor-pointer hover:bg-white/10 transition-colors"
+              style={{
+                background: 'rgba(255, 255, 255, 0.92)',
+                boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
+              }}
+              onClick={() => setShowFullInput(true)}
+            >
+              <div className="h-5 w-5 text-gray-500 flex-shrink-0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
               </div>
-              <span className="flex-1 text-white font-semibold truncate drop-shadow-sm">
-                {displayPickupAddress}
-              </span>
-              <span className="text-white font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/15">
-                {language === 'fr' ? 'Éditer' : 'Edit'}
+              <span className="text-gray-500 text-lg font-medium select-none">
+                {language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
               </span>
             </div>
-
-            {/* Destination Input - Where to? */}
-            <div className="rounded-xl" style={{
-            background: 'rgba(40, 20, 60, 0.7)',
-            border: '1.5px solid rgba(200, 50, 255, 0.6)',
-            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
-          }}>
-              <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => handleDropoffChange(addr, coords)} placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'} />
-            </div>
-
-            {/* Quick Destinations - Top 2 Most Visited */}
-            {!dropoffAddress && <QuickDestinations onSelectDestination={dest => {
-            handleDropoffChange(dest.address, {
-              lat: dest.lat,
-              lng: dest.lng
-            });
-          }} />}
 
             {/* Get Estimate Button - shows when destination is selected */}
-            {dropoffAddress && pickup && <motion.div initial={{
-            opacity: 0,
-            y: 10
-          }} animate={{
-            opacity: 1,
-            y: 0
-          }} transition={{
-            delay: 0.1
-          }}>
+            {dropoffAddress && pickup && (
+              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
                 <Button onClick={handleGetEstimate} className="w-full gradient-primary shadow-button py-5 text-lg font-semibold" disabled={!pickupAddress || !dropoffAddress}>
                   {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
                 </Button>
-              </motion.div>}
+              </motion.div>
+            )}
           </div>
         </motion.div>
 
