@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -93,7 +93,6 @@ const RideBooking = () => {
     signOut
   } = useAuth();
   const navigate = useNavigate();
-  const routerLocation = useLocation();
   const {
     toast
   } = useToast();
@@ -107,12 +106,6 @@ const RideBooking = () => {
   } = usePushNotifications();
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
-  // Read pre-filled destination + pickup passed from /where-to
-  const prefilledState = routerLocation.state as {
-    prefilledDropoff?: { address: string; lat: number; lng: number };
-    pickupLocation?: { address: string; lat: number; lng: number } | null;
-  } | null;
-
   // Active ride persistence hook
   const {
     activeRide,
@@ -122,18 +115,10 @@ const RideBooking = () => {
   } = useActiveRide(user?.id);
   const hasRestoredRide = useRef(false);
   const [step, setStep] = useState<RideStep>('input');
-  const [pickup, setPickup] = useState<Location | null>(
-    prefilledState?.pickupLocation ?? null
-  );
-  const [dropoff, setDropoff] = useState<Location | null>(
-    prefilledState?.prefilledDropoff ?? null
-  );
-  const [pickupAddress, setPickupAddress] = useState(
-    prefilledState?.pickupLocation?.address ?? ''
-  );
-  const [dropoffAddress, setDropoffAddress] = useState(
-    prefilledState?.prefilledDropoff?.address ?? ''
-  );
+  const [pickup, setPickup] = useState<Location | null>(null);
+  const [dropoff, setDropoff] = useState<Location | null>(null);
+  const [pickupAddress, setPickupAddress] = useState('');
+  const [dropoffAddress, setDropoffAddress] = useState('');
   const [fareEstimate, setFareEstimate] = useState<FareEstimate | null>(null);
   const [distanceKm, setDistanceKm] = useState(0);
   const [durationMinutes, setDurationMinutes] = useState(0);
@@ -155,9 +140,8 @@ const RideBooking = () => {
   const paymentGateCheckedRef = useRef<string | null>(null);
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
-  // If we came from /where-to with a pre-filled destination, skip GPS detection overlay
-  const hasAutoDetectedLocation = useRef(!!prefilledState?.pickupLocation);
-  const [isDetectingLocation, setIsDetectingLocation] = useState(!prefilledState?.pickupLocation);
+  const hasAutoDetectedLocation = useRef(false);
+  const [isDetectingLocation, setIsDetectingLocation] = useState(true);
   const [showFullInput, setShowFullInput] = useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = useState(false);
   const {
@@ -936,19 +920,6 @@ const RideBooking = () => {
     }
     await calculateRoute();
   };
-
-  // Auto-calculate estimate when arriving from /where-to with pre-filled destination
-  const prefilledTriggerRef = useRef(false);
-  useEffect(() => {
-    if (prefilledTriggerRef.current) return;
-    if (!prefilledState?.prefilledDropoff) return;
-    if (!pickup || !dropoff) return;
-    if (!mapboxToken) return;
-    prefilledTriggerRef.current = true;
-    // Small delay to let the component fully initialize
-    const t = setTimeout(() => { calculateRoute(); }, 300);
-    return () => clearTimeout(t);
-  }, [pickup, dropoff, mapboxToken, prefilledState, calculateRoute]);
   const handleProceedToPayment = async () => {
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
