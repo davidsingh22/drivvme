@@ -63,19 +63,37 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     if (!userId || !isMountedRef.current) return;
 
     try {
-      await supabase
+      // First try to just update is_online without overwriting coords
+      const { data: existing } = await supabase
         .from('rider_locations')
-        .upsert({
-          user_id: userId,
-          lat: 45.5017,
-          lng: -73.5673,
-          accuracy: 10000,
-          is_online: true,
-          last_seen_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id'
-        });
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (existing) {
+        // Row exists — only update online status, preserve real coordinates
+        await supabase
+          .from('rider_locations')
+          .update({
+            is_online: true,
+            last_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', userId);
+      } else {
+        // No row yet — insert with Montreal default (will be overwritten when GPS fires)
+        await supabase
+          .from('rider_locations')
+          .insert({
+            user_id: userId,
+            lat: 45.5017,
+            lng: -73.5673,
+            accuracy: 10000,
+            is_online: true,
+            last_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+      }
       
       if (isMountedRef.current) {
         setIsTracking(true);
