@@ -42,6 +42,7 @@ const RideSearch = () => {
   const retryCountRef = useRef(0);
   const pendingQueryRef = useRef<string | null>(null);
   const mountTimeRef = useRef(Date.now());
+  const pendingGeocodeRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const CACHE_KEY = 'drivveme_recent_destinations';
   const TOKEN_PERSIST_KEY = 'drivveme_mapbox_token';
@@ -84,6 +85,12 @@ const RideSearch = () => {
       mapboxTokenRef.current = mapboxToken;
       persistToken(mapboxToken); // Save for future cold starts
       setApiReady(true);
+      // If GPS fired before token was ready, resolve the address now
+      if (pendingGeocodeRef.current) {
+        const { lat, lng } = pendingGeocodeRef.current;
+        pendingGeocodeRef.current = null;
+        reverseGeocode(lat, lng);
+      }
       // If user typed while API was booting, auto-fire that search now
       if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
         const q = pendingQueryRef.current;
@@ -205,7 +212,11 @@ const RideSearch = () => {
   const reverseGeocode = useCallback(
     async (lat: number, lng: number) => {
       const token = mapboxTokenRef.current || mapboxToken || getPersistedToken();
-      if (!token) return;
+      if (!token) {
+        console.log('[RideSearch] No token for reverse geocode, queuing coords');
+        pendingGeocodeRef.current = { lat, lng };
+        return;
+      }
       try {
         const res = await fetch(
           `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?access_token=${token}&language=${language}&types=address,poi`
