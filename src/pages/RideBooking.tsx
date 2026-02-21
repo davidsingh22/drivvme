@@ -221,6 +221,23 @@ const RideBooking = () => {
   // Track rider location for admin visibility
   useRiderLocationTracking(true);
 
+  // ── Server Pre-Warming: ping edge functions every 3 min on the estimate page ──
+  const warmingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (step !== 'estimate') {
+      if (warmingIntervalRef.current) { clearInterval(warmingIntervalRef.current); warmingIntervalRef.current = null; }
+      return;
+    }
+    const ping = () => {
+      // Silent HEAD-style pings to warm containers — fire & forget
+      supabase.functions.invoke('create-payment-intent', { method: 'POST', body: {} }).catch(() => {});
+      supabase.functions.invoke('create-ride-and-notify-drivers', { method: 'POST', body: {} }).catch(() => {});
+    };
+    ping(); // immediate first ping
+    warmingIntervalRef.current = setInterval(ping, 3 * 60 * 1000);
+    return () => { if (warmingIntervalRef.current) clearInterval(warmingIntervalRef.current); };
+  }, [step]);
+
   // Tiered driver notification escalation
   const escalationOptions = currentRide && step === 'searching' && pickup && dropoff && fareEstimate ? {
     rideId: currentRide.id,
@@ -1067,9 +1084,9 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // Zombie process killer: 7s hard cap — never let button stay stuck
+    // 8s hard cap — never let button stay stuck
     const safetyTimeout = setTimeout(() => {
-      console.warn('[RideBooking] Payment zombie killer triggered at 7s');
+      console.warn('[RideBooking] Payment zombie killer triggered at 8s');
       setIsSubmitting(false);
       if (!currentRide?.id) {
         setStep('estimate');
@@ -1079,57 +1096,56 @@ const RideBooking = () => {
           variant: 'destructive'
         });
       }
-    }, 7000);
+    }, 8000);
 
-    // Create the ride in the background as fast as possible.
-    // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
+    // ── Ultra-fast ride creation with 400ms auto-retry ──
+    const createRideOnce = async (): Promise<any> => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('SESSION_EXPIRED');
+
+      const rideStatus = skipPayment ? 'searching' : 'pending_payment';
+      // Minimal payload — only essentials for smallest 5G packet
+      const { data: ride, error: rideErr } = await supabase.from('rides').insert({
+        rider_id: user.id,
+        pickup_address: pickup.address,
+        pickup_lat: pickup.lat,
+        pickup_lng: pickup.lng,
+        dropoff_address: dropoff.address,
+        dropoff_lat: dropoff.lat,
+        dropoff_lng: dropoff.lng,
+        distance_km: distanceKm,
+        estimated_duration_minutes: Math.round(durationMinutes),
+        estimated_fare: fareEstimate.total,
+        promo_discount: fareEstimate.promoDiscount,
+        subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+        gst_amount: fareEstimate.gstAmount,
+        qst_amount: fareEstimate.qstAmount,
+        platform_fee: fareEstimate.platformFee,
+        status: rideStatus
+      }).select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id').single();
+      if (rideErr || !ride?.id) throw new Error(rideErr?.message || 'Ride creation failed');
+      return ride;
+    };
+
     (async () => {
       try {
-        const {
-          data: {
-            session
+        let ride: any;
+        try {
+          ride = await createRideOnce();
+        } catch (firstErr: any) {
+          if (firstErr.message === 'SESSION_EXPIRED') {
+            toast({ title: 'Session expired', description: 'Please sign in again.', variant: 'destructive' });
+            setStep('estimate');
+            navigate('/login');
+            return;
           }
-        } = await supabase.auth.getSession();
-        if (!session) {
-          toast({
-            title: 'Session expired',
-            description: 'Please sign in again to continue.',
-            variant: 'destructive'
-          });
-          setStep('estimate');
-          navigate('/login');
-          return;
+          // 400ms auto-retry on first failure (bypasses 5G handshake glitch)
+          console.warn('[RideBooking] First attempt failed, retrying in 400ms…', firstErr.message);
+          await new Promise(r => setTimeout(r, 400));
+          ride = await createRideOnce();
         }
 
-        // Test accounts create ride directly with 'searching' status
-        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-        const {
-          data: ride,
-          error: rideErr
-        } = await supabase.from('rides').insert({
-          rider_id: user.id,
-          pickup_address: pickup.address,
-          pickup_lat: pickup.lat,
-          pickup_lng: pickup.lng,
-          dropoff_address: dropoff.address,
-          dropoff_lat: dropoff.lat,
-          dropoff_lng: dropoff.lng,
-          distance_km: distanceKm,
-          estimated_duration_minutes: Math.round(durationMinutes),
-          estimated_fare: fareEstimate.total,
-          promo_discount: fareEstimate.promoDiscount,
-          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-          gst_amount: fareEstimate.gstAmount,
-          qst_amount: fareEstimate.qstAmount,
-          platform_fee: fareEstimate.platformFee,
-          status: rideStatus
-        }).select('*').single();
-        if (rideErr || !ride?.id) {
-          console.error('Ride insert error:', rideErr);
-          throw new Error(rideErr?.message || 'Ride creation failed');
-        }
-
-        // Optional rider notification (non-blocking)
+        // Non-blocking notification
         void supabase.from('notifications').insert({
           user_id: user.id,
           ride_id: ride.id,
@@ -1140,12 +1156,8 @@ const RideBooking = () => {
         setCurrentRide(ride);
         updateRide(ride);
 
-        // Test accounts go directly to searching (escalation hook will handle notifications)
         if (skipPayment) {
-          // Increment free rides counter for limited test accounts
-          if (!isUnlimited && freeRidesLeft > 0 && user.email) {
-            incrementFreeRidesUsed(user.email);
-          }
+          if (!isUnlimited && freeRidesLeft > 0 && user.email) incrementFreeRidesUsed(user.email);
           setStep('searching');
           const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
           toast({
@@ -1155,11 +1167,7 @@ const RideBooking = () => {
         }
       } catch (err: any) {
         console.error('Error creating ride:', err);
-        toast({
-          title: 'Error booking ride',
-          description: err.message,
-          variant: 'destructive'
-        });
+        toast({ title: 'Error booking ride', description: err.message, variant: 'destructive' });
         setStep('estimate');
       } finally {
         clearTimeout(safetyTimeout);
@@ -1856,7 +1864,7 @@ const RideBooking = () => {
                     repeat: Infinity,
                     ease: 'linear'
                   }} className="w-5 h-5 mr-2 rounded-full border-2 border-primary-foreground border-t-transparent" />
-                        Preparing payment...
+                        {language === 'fr' ? 'Finalisation...' : 'Finalizing...'}
                       </> : <>
                         <CreditCard className="h-5 w-5 mr-2" />
                         {t('booking.confirm')} & Pay
