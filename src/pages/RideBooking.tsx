@@ -543,13 +543,25 @@ const RideBooking = () => {
     }
 
     // Set pickup from search state if available
-    if (state.pickupAddress && state.pickupLat != null && state.pickupLng != null) {
-      setPickupAddress(state.pickupAddress);
-      setPickup({ address: state.pickupAddress, lat: state.pickupLat, lng: state.pickupLng });
+    if (state.pickupLat != null && state.pickupLng != null) {
+      const addr = state.pickupAddress || '';
+      setPickupAddress(addr);
+      setPickup({ address: addr, lat: state.pickupLat, lng: state.pickupLng });
       hasAutoDetectedLocation.current = true;
       setIsDetectingLocation(false);
-    } else if (state.autoEstimate && user?.id) {
-      // Pickup coords missing — try DB fallback so auto-estimate can proceed
+
+      // If address is generic ("Current location" etc), resolve it
+      const generic = ['Current location', 'Position actuelle'];
+      if (generic.includes(addr) || !addr) {
+        reverseGeocode(state.pickupLat, state.pickupLng).then(resolved => {
+          if (resolved) {
+            setPickupAddress(resolved);
+            setPickup(prev => prev ? { ...prev, address: resolved } : null);
+          }
+        });
+      }
+    } else if (user?.id) {
+      // Pickup coords missing from search — try DB lookup
       hasAutoDetectedLocation.current = true;
       setIsDetectingLocation(true);
       (async () => {
@@ -568,6 +580,8 @@ const RideBooking = () => {
         } catch { /* ignore */ }
         setIsDetectingLocation(false);
       })();
+    } else {
+      setIsDetectingLocation(false);
     }
 
     if (state.autoEstimate) {
@@ -576,7 +590,7 @@ const RideBooking = () => {
 
     // Clear the state so refreshing doesn't re-trigger
     window.history.replaceState({}, document.title);
-  }, [routeLocation.state]);
+  }, [routeLocation.state, user?.id]);
 
 
   useEffect(() => {

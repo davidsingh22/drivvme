@@ -129,9 +129,9 @@ const RideSearch = () => {
   }, []);
 
   // ── Cold-start GPS wake-up with DB fallback running in parallel ──
+  const locationResolvedRef = useRef(false);
   useEffect(() => {
-    let gpsFired = false;
-    let dbFired = false;
+    if (locationResolvedRef.current) return;
 
     // Read cached GPS first for instant proximity
     try {
@@ -139,16 +139,17 @@ const RideSearch = () => {
       if (raw) {
         const data = JSON.parse(raw);
         if (Date.now() - data.ts < 600_000) {
+          locationResolvedRef.current = true;
           setPickupCoords({ lat: data.lat, lng: data.lng });
           reverseGeocode(data.lat, data.lng);
-          gpsFired = true;
+          return; // Cache hit — done
         }
       }
     } catch { /* ignore */ }
 
     // Fetch rider's stored location from DB in parallel (don't wait for GPS to fail)
     const fetchDbLocation = async () => {
-      if (gpsFired || !user?.id) return;
+      if (locationResolvedRef.current || !user?.id) return;
       try {
         const { data } = await supabase
           .from('rider_locations')
@@ -156,10 +157,9 @@ const RideSearch = () => {
           .eq('user_id', user.id)
           .maybeSingle();
         if (data && data.lat && data.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
-          // Only use DB location if GPS hasn't already resolved
-          if (!gpsFired) {
-            dbFired = true;
-            console.log('[RideSearch] Using DB-stored rider location');
+          if (!locationResolvedRef.current) {
+            locationResolvedRef.current = true;
+            console.log('[RideSearch] Using DB-stored rider location:', data.lat, data.lng);
             setPickupCoords({ lat: data.lat, lng: data.lng });
             reverseGeocode(data.lat, data.lng);
           }
@@ -167,16 +167,14 @@ const RideSearch = () => {
       } catch { /* ignore */ }
     };
 
-    // Start DB fetch immediately in parallel with GPS
-    if (!gpsFired) {
-      fetchDbLocation();
-    }
+    // Start DB fetch immediately (runs in parallel with GPS)
+    fetchDbLocation();
 
     // Also try GPS for fresh coordinates
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          gpsFired = true;
+          locationResolvedRef.current = true;
           const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setPickupCoords(coords);
           reverseGeocode(coords.lat, coords.lng);
@@ -184,14 +182,13 @@ const RideSearch = () => {
         },
         () => {
           console.log('[RideSearch] GPS failed, relying on DB location');
-          // DB fetch already started above — if it resolved, we're fine
-          // If not, try again
-          if (!dbFired) fetchDbLocation();
+          // GPS failed — try DB again if it hasn't resolved yet
+          if (!locationResolvedRef.current) fetchDbLocation();
         },
         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
     }
-  }, []);
+  }, [user?.id]); // Re-run when user becomes available after auth loads
 
   // Load past destinations from DB
   useEffect(() => {
@@ -433,30 +430,17 @@ const RideSearch = () => {
     }
   };
 
-  const selectDestination = async (dest: { name: string; address: string; lat: number; lng: number }) => {
-    let pLat = pickupCoords?.lat;
-    let pLng = pickupCoords?.lng;
-    let pAddr = pickupLabel;
+  const selectDestination = (dest: { name: string; address: string; lat: number; lng: number }) => {
+    // Grab whatever pickup we have right now — never block navigation with async
+    const pLat = pickupCoords?.lat ?? null;
+    const pLng = pickupCoords?.lng ?? null;
+    const pAddr = pickupLabel;
 
-    // If we still don't have pickup coords, try DB one more time before navigating
-    if ((pLat == null || pLng == null) && user?.id) {
-      try {
-        const { data } = await supabase
-          .from('rider_locations')
-          .select('lat, lng')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        if (data?.lat && data?.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
-          pLat = data.lat;
-          pLng = data.lng;
-          pAddr = `${data.lat.toFixed(4)}, ${data.lng.toFixed(4)}`;
-        }
-      } catch { /* ignore */ }
-    }
+    console.log('[RideSearch] selectDestination →', { dest: dest.name, pLat, pLng, pAddr });
 
     navigate('/ride', {
       state: {
-        dropoffAddress: dest.address,
+        dropoffAddress: dest.address || dest.name,
         dropoffLat: dest.lat,
         dropoffLng: dest.lng,
         pickupAddress: pAddr,
