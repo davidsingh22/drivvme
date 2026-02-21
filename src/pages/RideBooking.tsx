@@ -417,6 +417,60 @@ const RideBooking = () => {
     }
   }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
+  // Visibility listener: refresh auth session and warm GPS on app resume
+  useEffect(() => {
+    let lastHidden = 0;
+    const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        lastHidden = Date.now();
+        return;
+      }
+
+      // App just became visible
+      const idleMs = lastHidden ? Date.now() - lastHidden : 0;
+      if (idleMs < IDLE_THRESHOLD_MS) return; // short idle, skip
+
+      console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's — refreshing session & GPS');
+
+      // 1. Proactively refresh the auth session
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (!session) {
+          console.log('[RideBooking] Session expired on resume, redirecting to login');
+          navigate('/login', { replace: true });
+        }
+      });
+
+      // 2. Warm GPS so next action has a fresh position
+      if ('geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude: lat, longitude: lng } = pos.coords;
+            // Update pickup if we're still on the input step with stale coords
+            if (step === 'input' || step === 'estimate') {
+              setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
+              // Re-resolve address if token is available
+              if (mapboxToken) {
+                reverseGeocode(lat, lng).then(addr => {
+                  if (addr) {
+                    setPickupAddress(addr);
+                    setPickup(prev => prev ? { ...prev, address: addr } : null);
+                  }
+                });
+              }
+            }
+          },
+          () => { /* GPS warm failed silently, no-op */ },
+          { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+        );
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [step, mapboxToken, reverseGeocode, navigate]);
+
   // Phase 3: If arriving from /search with a destination, auto-fill and jump to estimate
   const hasAppliedSearchState = useRef(false);
   const shouldAutoEstimate = useRef(false);
@@ -974,6 +1028,19 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
+    // Safety timeout: if ride creation hangs >15s, reset so button isn't stuck forever
+    const safetyTimeout = setTimeout(() => {
+      setIsSubmitting(false);
+      if (!currentRide?.id) {
+        setStep('estimate');
+        toast({
+          title: 'Request timed out',
+          description: 'Please try again. Check your connection.',
+          variant: 'destructive'
+        });
+      }
+    }, 15000);
+
     // Create the ride in the background as fast as possible.
     // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
     (async () => {
@@ -1055,6 +1122,7 @@ const RideBooking = () => {
         });
         setStep('estimate');
       } finally {
+        clearTimeout(safetyTimeout);
         setIsSubmitting(false);
       }
     })();
