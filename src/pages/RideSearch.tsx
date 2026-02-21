@@ -41,17 +41,48 @@ const RideSearch = () => {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
   const pendingQueryRef = useRef<string | null>(null);
+  const mountTimeRef = useRef(Date.now());
 
   const CACHE_KEY = 'drivveme_recent_destinations';
+  const TOKEN_PERSIST_KEY = 'drivveme_mapbox_token';
 
-  // ── Fallback public Mapbox token if Edge Function token never arrives ──
-  const FALLBACK_MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN as string | undefined;
+  // ── Persistent fallback: last-known-good token from localStorage ──
+  const getPersistedToken = (): string | null => {
+    try {
+      const raw = localStorage.getItem(TOKEN_PERSIST_KEY);
+      if (raw) {
+        const { token, ts } = JSON.parse(raw);
+        // Use if less than 24 hours old
+        if (token && typeof token === 'string' && token.startsWith('pk.') && Date.now() - ts < 86_400_000) {
+          return token;
+        }
+      }
+    } catch { /* ignore */ }
+    return null;
+  };
+
+  const persistToken = (token: string) => {
+    try {
+      localStorage.setItem(TOKEN_PERSIST_KEY, JSON.stringify({ token, ts: Date.now() }));
+    } catch { /* ignore */ }
+  };
+
+  // On mount, immediately load persisted token as fallback
+  useEffect(() => {
+    const persisted = getPersistedToken();
+    if (persisted && !mapboxTokenRef.current) {
+      console.log('[RideSearch] Using persisted fallback token from localStorage');
+      mapboxTokenRef.current = persisted;
+      setApiReady(true);
+    }
+  }, []);
 
   // ── Init Guard: track when mapbox token is ready ──
   useEffect(() => {
     if (mapboxToken && !tokenLoading) {
       console.log('[RideSearch] API ready, token available');
       mapboxTokenRef.current = mapboxToken;
+      persistToken(mapboxToken); // Save for future cold starts
       setApiReady(true);
       // If user typed while API was booting, auto-fire that search now
       if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
@@ -67,13 +98,11 @@ const RideSearch = () => {
     const forceStartTimer = setTimeout(() => {
       if (!apiReady) {
         console.warn('[RideSearch] 2s Emergency Override — forcing search active');
-        // Use fallback token if main token never arrived
-        if (!mapboxTokenRef.current && FALLBACK_MAPBOX_TOKEN) {
-          console.log('[RideSearch] Using fallback public Mapbox token');
-          mapboxTokenRef.current = FALLBACK_MAPBOX_TOKEN;
+        const persisted = getPersistedToken();
+        if (!mapboxTokenRef.current && persisted) {
+          mapboxTokenRef.current = persisted;
         }
         setApiReady(true);
-        // Auto-fire any pending query
         if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
           const q = pendingQueryRef.current;
           pendingQueryRef.current = null;
@@ -82,19 +111,7 @@ const RideSearch = () => {
       }
     }, 2000);
     return () => clearTimeout(forceStartTimer);
-  }, []); // Run once on mount
-
-  // ── 2.5s Warming Timeout: clear "Warming up..." message ──
-  useEffect(() => {
-    if (apiReady) return; // Already ready, no need for timeout
-    const warmingTimeout = setTimeout(() => {
-      if (!apiReady) {
-        console.warn('[RideSearch] 2.5s warming timeout — clearing warming message');
-        setApiReady(true); // Force clear the warming message
-      }
-    }, 2500);
-    return () => clearTimeout(warmingTimeout);
-  }, [apiReady]);
+  }, []);
 
   // ── Load cached destinations IMMEDIATELY (local cache priority) ──
   useEffect(() => {
@@ -157,13 +174,24 @@ const RideSearch = () => {
   }, []);
 
   // 'Slap-Awake': re-init search API on visibility/focus
+  // CRITICAL: Skip during first 5s to avoid sabotaging cold start
   useEffect(() => {
     const wakeUp = () => {
+      const timeSinceMount = Date.now() - mountTimeRef.current;
+      if (timeSinceMount < 5000) {
+        console.log('[RideSearch] Skipping slap-awake — still in cold start window');
+        return;
+      }
       if (document.visibilityState === 'visible' || !document.hidden) {
         console.log('[RideSearch] Waking up search API');
         clearMapboxTokenCache();
         retryCountRef.current = 0;
-        setApiReady(false); // will re-set to true once token reloads
+        // Don't reset apiReady if we have a persisted token — just refresh in background
+        if (mapboxTokenRef.current) {
+          console.log('[RideSearch] Keeping existing token active during refresh');
+        } else {
+          setApiReady(false);
+        }
       }
     };
     document.addEventListener('visibilitychange', wakeUp);
@@ -176,7 +204,7 @@ const RideSearch = () => {
 
   const reverseGeocode = useCallback(
     async (lat: number, lng: number) => {
-      const token = mapboxTokenRef.current || mapboxToken || FALLBACK_MAPBOX_TOKEN;
+      const token = mapboxTokenRef.current || mapboxToken || getPersistedToken();
       if (!token) return;
       try {
         const res = await fetch(
@@ -205,8 +233,8 @@ const RideSearch = () => {
         return;
       }
 
-      // Use ref to always get the latest token, with fallback
-      const token = mapboxTokenRef.current || FALLBACK_MAPBOX_TOKEN;
+      // Use ref to always get the latest token, with persisted fallback
+      const token = mapboxTokenRef.current || getPersistedToken();
       if (!token) {
         console.log('[RideSearch] Token not ready, queuing query:', query);
         pendingQueryRef.current = query;
@@ -437,8 +465,9 @@ const RideSearch = () => {
                 retryCountRef.current = 0;
                 // Force active after 500ms regardless
                 setTimeout(() => {
-                  if (!mapboxTokenRef.current && FALLBACK_MAPBOX_TOKEN) {
-                    mapboxTokenRef.current = FALLBACK_MAPBOX_TOKEN;
+                  if (!mapboxTokenRef.current) {
+                    const persisted = getPersistedToken();
+                    if (persisted) mapboxTokenRef.current = persisted;
                   }
                   setApiReady(true);
                   if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
