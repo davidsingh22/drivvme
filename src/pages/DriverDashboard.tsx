@@ -372,6 +372,32 @@ const DriverDashboard = () => {
     restoreActiveRide();
   }, [session?.user?.id]);
 
+  // Safety guard: periodically validate that currentRide is still active in DB.
+  // Prevents stale ride state from persisting due to missed realtime events.
+  useEffect(() => {
+    if (!currentRide?.id || !session?.user?.id) return;
+
+    const validate = async () => {
+      const { data } = await supabase
+        .from('rides')
+        .select('status')
+        .eq('id', currentRide.id)
+        .maybeSingle();
+
+      if (!data || data.status === 'completed' || data.status === 'cancelled') {
+        console.log('[DriverDashboard] Safety guard: clearing stale currentRide', currentRide.id, data?.status);
+        setCurrentRide(null);
+        setRiderInfo(null);
+        setShowGPSNavigation(false);
+      }
+    };
+
+    // Validate immediately and then every 10 seconds
+    validate();
+    const interval = window.setInterval(validate, 10000);
+    return () => window.clearInterval(interval);
+  }, [currentRide?.id, session?.user?.id]);
+
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
@@ -1029,8 +1055,11 @@ const DriverDashboard = () => {
                 void refreshDriverProfile();
               }}
               onRideUpdated={(ride) => {
-                // Keep local state in sync
-                setCurrentRide(ride as RideRequest);
+                // Only sync if the ride is actually active — never restore completed/cancelled
+                const activeStatuses = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
+                if (ride && activeStatuses.includes((ride as any).status)) {
+                  setCurrentRide(ride as RideRequest);
+                }
               }}
             />
 
