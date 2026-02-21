@@ -1402,9 +1402,9 @@ const RideBooking = () => {
                       </span>}
                   </button>
                   <div className="h-px bg-white/10" />
-                  <button onClick={() => {
-                  signOut();
-                  navigate('/');
+                  <button onClick={async () => {
+                  await signOut();
+                  window.location.href = '/';
                 }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
                     <LogOut className="h-5 w-5 text-destructive" />
                     <span className="text-white font-medium">
