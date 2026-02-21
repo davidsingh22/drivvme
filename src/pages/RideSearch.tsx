@@ -23,6 +23,9 @@ const RideSearch = () => {
   const { language } = useLanguage();
   const { user } = useAuth();
   const { token: mapboxToken, loading: tokenLoading } = useMapboxToken();
+  const mapboxTokenRef = useRef<string | null>(null);
+  // Keep ref always in sync so callbacks never see stale token
+  useEffect(() => { mapboxTokenRef.current = mapboxToken ?? null; }, [mapboxToken]);
 
   const [pickupLabel, setPickupLabel] = useState(
     language === 'fr' ? 'Position actuelle' : 'Current location'
@@ -44,13 +47,14 @@ const RideSearch = () => {
   // ── Init Guard: track when mapbox token is ready ──
   useEffect(() => {
     if (mapboxToken && !tokenLoading) {
-      console.log('[RideSearch] API ready');
+      console.log('[RideSearch] API ready, token available');
       setApiReady(true);
       // If user typed while API was booting, auto-fire that search now
       if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
         const q = pendingQueryRef.current;
         pendingQueryRef.current = null;
-        searchMapbox(q);
+        // Use setTimeout(0) to ensure the ref is updated before searchMapbox reads it
+        setTimeout(() => searchMapbox(q), 0);
       }
     } else {
       setApiReady(false);
@@ -137,7 +141,7 @@ const RideSearch = () => {
 
   const reverseGeocode = useCallback(
     async (lat: number, lng: number) => {
-      const token = mapboxToken;
+      const token = mapboxTokenRef.current || mapboxToken;
       if (!token) return;
       try {
         const res = await fetch(
@@ -166,9 +170,10 @@ const RideSearch = () => {
         return;
       }
 
-      // If API not ready yet, queue the query for auto-fire when ready
-      if (!mapboxToken) {
-        console.log('[RideSearch] API not ready, queuing query:', query);
+      // Use ref to always get the latest token (avoids stale closure on cold start)
+      const token = mapboxTokenRef.current;
+      if (!token) {
+        console.log('[RideSearch] Token not ready, queuing query:', query);
         pendingQueryRef.current = query;
         return;
       }
@@ -188,7 +193,7 @@ const RideSearch = () => {
 
         const sessionToken = crypto.randomUUID();
         const params = new URLSearchParams({
-          access_token: mapboxToken,
+          access_token: token,
           session_token: sessionToken,
           q: query,
           country: 'CA',
@@ -210,7 +215,7 @@ const RideSearch = () => {
             data.suggestions.slice(0, 6).map(async (s: any) => {
               try {
                 const rParams = new URLSearchParams({
-                  access_token: mapboxToken,
+                  access_token: token,
                   session_token: sessionToken,
                 });
                 const rRes = await fetch(
@@ -263,7 +268,7 @@ const RideSearch = () => {
       try {
         console.log('[RideSearch] Using Geocoding fuzzy fallback for:', query);
         const geoRes = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&language=${language}&country=ca&limit=5&types=poi,address,place,locality,neighborhood&autocomplete=true&fuzzyMatch=true&proximity=${proximity}`
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${token}&language=${language}&country=ca&limit=5&types=poi,address,place,locality,neighborhood&autocomplete=true&fuzzyMatch=true&proximity=${proximity}`
         );
         const geoData = await geoRes.json();
         const geoResults = (geoData.features || []).map((f: any) => ({
@@ -299,7 +304,7 @@ const RideSearch = () => {
         setIsSearching(false);
       }
     },
-    [mapboxToken, language, pickupCoords]
+    [language, pickupCoords]
   );
 
   const handleQueryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
