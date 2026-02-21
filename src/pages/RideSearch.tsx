@@ -44,22 +44,57 @@ const RideSearch = () => {
 
   const CACHE_KEY = 'drivveme_recent_destinations';
 
+  // ── Fallback public Mapbox token if Edge Function token never arrives ──
+  const FALLBACK_MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN as string | undefined;
+
   // ── Init Guard: track when mapbox token is ready ──
   useEffect(() => {
     if (mapboxToken && !tokenLoading) {
       console.log('[RideSearch] API ready, token available');
+      mapboxTokenRef.current = mapboxToken;
       setApiReady(true);
       // If user typed while API was booting, auto-fire that search now
       if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
         const q = pendingQueryRef.current;
         pendingQueryRef.current = null;
-        // Use setTimeout(0) to ensure the ref is updated before searchMapbox reads it
         setTimeout(() => searchMapbox(q), 0);
       }
-    } else {
-      setApiReady(false);
     }
   }, [mapboxToken, tokenLoading]);
+
+  // ── Emergency Override: 2s force-start if token still not ready ──
+  useEffect(() => {
+    const forceStartTimer = setTimeout(() => {
+      if (!apiReady) {
+        console.warn('[RideSearch] 2s Emergency Override — forcing search active');
+        // Use fallback token if main token never arrived
+        if (!mapboxTokenRef.current && FALLBACK_MAPBOX_TOKEN) {
+          console.log('[RideSearch] Using fallback public Mapbox token');
+          mapboxTokenRef.current = FALLBACK_MAPBOX_TOKEN;
+        }
+        setApiReady(true);
+        // Auto-fire any pending query
+        if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
+          const q = pendingQueryRef.current;
+          pendingQueryRef.current = null;
+          setTimeout(() => searchMapbox(q), 0);
+        }
+      }
+    }, 2000);
+    return () => clearTimeout(forceStartTimer);
+  }, []); // Run once on mount
+
+  // ── 2.5s Warming Timeout: clear "Warming up..." message ──
+  useEffect(() => {
+    if (apiReady) return; // Already ready, no need for timeout
+    const warmingTimeout = setTimeout(() => {
+      if (!apiReady) {
+        console.warn('[RideSearch] 2.5s warming timeout — clearing warming message');
+        setApiReady(true); // Force clear the warming message
+      }
+    }, 2500);
+    return () => clearTimeout(warmingTimeout);
+  }, [apiReady]);
 
   // ── Load cached destinations IMMEDIATELY (local cache priority) ──
   useEffect(() => {
@@ -141,7 +176,7 @@ const RideSearch = () => {
 
   const reverseGeocode = useCallback(
     async (lat: number, lng: number) => {
-      const token = mapboxTokenRef.current || mapboxToken;
+      const token = mapboxTokenRef.current || mapboxToken || FALLBACK_MAPBOX_TOKEN;
       if (!token) return;
       try {
         const res = await fetch(
@@ -170,8 +205,8 @@ const RideSearch = () => {
         return;
       }
 
-      // Use ref to always get the latest token (avoids stale closure on cold start)
-      const token = mapboxTokenRef.current;
+      // Use ref to always get the latest token, with fallback
+      const token = mapboxTokenRef.current || FALLBACK_MAPBOX_TOKEN;
       if (!token) {
         console.log('[RideSearch] Token not ready, queuing query:', query);
         pendingQueryRef.current = query;
@@ -394,6 +429,26 @@ const RideSearch = () => {
             type="text"
             value={destinationQuery}
             onChange={handleQueryChange}
+            onFocus={() => {
+              // Manual Refresh Trigger: clicking search bar re-fetches token if stuck
+              if (!apiReady) {
+                console.log('[RideSearch] Search bar focused while not ready — forcing re-fetch');
+                clearMapboxTokenCache();
+                retryCountRef.current = 0;
+                // Force active after 500ms regardless
+                setTimeout(() => {
+                  if (!mapboxTokenRef.current && FALLBACK_MAPBOX_TOKEN) {
+                    mapboxTokenRef.current = FALLBACK_MAPBOX_TOKEN;
+                  }
+                  setApiReady(true);
+                  if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
+                    const q = pendingQueryRef.current;
+                    pendingQueryRef.current = null;
+                    searchMapbox(q);
+                  }
+                }, 500);
+              }
+            }}
             placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
             className="flex-1 bg-transparent text-white placeholder:text-white/40 text-sm outline-none"
             autoComplete="off"
