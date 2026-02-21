@@ -147,7 +147,7 @@ const RideSearch = () => {
       }
     } catch { /* ignore */ }
 
-    // Fetch rider's stored location from DB in parallel (don't wait for GPS to fail)
+    // Fetch rider's stored location from DB — PRIORITY on Android where GPS is slow
     const fetchDbLocation = async () => {
       if (locationResolvedRef.current || !user?.id) return;
       try {
@@ -174,8 +174,9 @@ const RideSearch = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          locationResolvedRef.current = true;
           const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          // GPS always wins — overwrite DB coords with fresh GPS
+          locationResolvedRef.current = true;
           setPickupCoords(coords);
           reverseGeocode(coords.lat, coords.lng);
           localStorage.setItem('drivveme_gps_warm', JSON.stringify({ ...coords, ts: Date.now() }));
@@ -185,9 +186,18 @@ const RideSearch = () => {
           // GPS failed — try DB again if it hasn't resolved yet
           if (!locationResolvedRef.current) fetchDbLocation();
         },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 60000 }
       );
     }
+
+    // Safety: if nothing resolved in 3s, force DB fetch again
+    const safetyTimer = setTimeout(() => {
+      if (!locationResolvedRef.current) {
+        console.log('[RideSearch] 3s safety — retrying DB location');
+        fetchDbLocation();
+      }
+    }, 3000);
+    return () => clearTimeout(safetyTimer);
   }, [user?.id]); // Re-run when user becomes available after auth loads
 
   // Load past destinations from DB
@@ -430,33 +440,17 @@ const RideSearch = () => {
     }
   };
 
-  const selectDestination = async (dest: { name: string; address: string; lat: number; lng: number }) => {
+  const selectDestination = (dest: { name: string; address: string; lat: number; lng: number }) => {
+    // Use whatever pickup coords we have RIGHT NOW — never block with async on Android
     let pLat = pickupCoords?.lat ?? null;
     let pLng = pickupCoords?.lng ?? null;
     let pAddr = pickupLabel;
 
-    // If GPS hasn't resolved yet, do a quick DB lookup before navigating
-    if ((pLat === null || pLng === null) && user?.id) {
-      console.log('[RideSearch] No GPS coords yet, fetching from DB before navigation');
-      try {
-        const { data } = await supabase
-          .from('rider_locations')
-          .select('lat, lng')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        if (data?.lat && data?.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
-          pLat = data.lat;
-          pLng = data.lng;
-          pAddr = pAddr || (language === 'fr' ? 'Position actuelle' : 'Current location');
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Last resort: use Montreal defaults so auto-estimate can still fire
+    // If no coords resolved yet, use Montreal defaults — RideBooking will resolve properly
     if (pLat === null || pLng === null) {
-      console.log('[RideSearch] Using Montreal defaults for pickup');
-      pLat = 45.5017;
-      pLng = -73.5673;
+      console.log('[RideSearch] No pickup coords yet, passing null — RideBooking will resolve');
+      pLat = null;
+      pLng = null;
       pAddr = pAddr || (language === 'fr' ? 'Position actuelle' : 'Current location');
     }
 
