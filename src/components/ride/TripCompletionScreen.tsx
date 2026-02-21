@@ -78,7 +78,7 @@ const TripCompletionScreen = ({
     setIsSubmitting(true);
 
     try {
-      // Submit rating
+      // Submit rating (ignore duplicate errors - rider may have already rated)
       const { error: ratingError } = await supabase.from('ratings').insert({
         ride_id: rideId,
         driver_id: driverId,
@@ -87,23 +87,29 @@ const TripCompletionScreen = ({
         comment: comment || null,
       });
 
-      if (ratingError) throw ratingError;
-
-      // Update driver's average rating
-      const { data: ratings } = await supabase
-        .from('ratings')
-        .select('rating')
-        .eq('driver_id', driverId);
-
-      if (ratings && ratings.length > 0) {
-        const avgRating = ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
-        await supabase
-          .from('driver_profiles')
-          .update({ average_rating: avgRating })
-          .eq('user_id', driverId);
+      if (ratingError && !ratingError.message?.includes('duplicate') && !ratingError.code?.includes('23505')) {
+        console.error('Rating insert error:', ratingError);
       }
 
-      // Save tip as pending (admin will charge it)
+      // Update driver's average rating (best-effort)
+      try {
+        const { data: ratings } = await supabase
+          .from('ratings')
+          .select('rating')
+          .eq('driver_id', driverId);
+
+        if (ratings && ratings.length > 0) {
+          const avgRating = ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
+          await supabase
+            .from('driver_profiles')
+            .update({ average_rating: avgRating })
+            .eq('user_id', driverId);
+        }
+      } catch (e) {
+        console.error('Avg rating update error:', e);
+      }
+
+      // Save tip as pending (admin will charge it) - best-effort
       if (selectedTip > 0) {
         console.log('[TIP] Saving tip:', { rideId, selectedTip, riderId });
         const { data: tipData, error: tipError } = await supabase
@@ -125,17 +131,13 @@ const TripCompletionScreen = ({
           ? 'Votre évaluation a été enregistrée' 
           : 'Your rating has been submitted',
       });
-
-      onComplete();
     } catch (error: any) {
       console.error('Submit error:', error);
-      toast({
-        title: language === 'fr' ? 'Erreur' : 'Error',
-        description: error.message,
-        variant: 'destructive',
-      });
+      // Don't block the user - still let them leave
     } finally {
       setIsSubmitting(false);
+      // ALWAYS navigate back to rider home, even on error
+      onComplete();
     }
   };
 
