@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MapPin, Navigation, Clock, Search } from 'lucide-react';
+import { ArrowLeft, MapPin, Navigation, Clock, Search, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { useMapboxToken } from '@/hooks/useMapboxToken';
+import { useMapboxToken, clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 interface SavedDestination {
   id: string;
@@ -22,7 +21,7 @@ interface SavedDestination {
 const RideSearch = () => {
   const navigate = useNavigate();
   const { language } = useLanguage();
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const { token: mapboxToken } = useMapboxToken();
 
   const [pickupLabel, setPickupLabel] = useState(
@@ -33,13 +32,14 @@ const RideSearch = () => {
   const [destinations, setDestinations] = useState<SavedDestination[]>([]);
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchTimedOut, setSearchTimedOut] = useState(false);
   const destRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCountRef = useRef(0);
 
-  // Cache recent destinations to localStorage for offline/slow network
   const CACHE_KEY = 'drivveme_recent_destinations';
 
-  // Phase 1 warm-up: read cached GPS immediately (no blocking)
+  // Phase 1 warm-up: read cached GPS immediately
   useEffect(() => {
     try {
       const raw = localStorage.getItem('drivveme_gps_warm');
@@ -58,10 +58,7 @@ const RideSearch = () => {
           const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setPickupCoords(coords);
           reverseGeocode(coords.lat, coords.lng);
-          localStorage.setItem(
-            'drivveme_gps_warm',
-            JSON.stringify({ ...coords, ts: Date.now() })
-          );
+          localStorage.setItem('drivveme_gps_warm', JSON.stringify({ ...coords, ts: Date.now() }));
         },
         () => {},
         { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
@@ -69,17 +66,15 @@ const RideSearch = () => {
     }
   }, []);
 
-  // Load cached destinations from localStorage immediately (instant UI)
+  // Load cached destinations immediately
   useEffect(() => {
     try {
       const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        setDestinations(JSON.parse(cached));
-      }
+      if (cached) setDestinations(JSON.parse(cached));
     } catch { /* ignore */ }
   }, []);
 
-  // Load past destinations from DB and cache to localStorage
+  // Load past destinations from DB
   useEffect(() => {
     if (!user?.id) return;
     supabase
@@ -102,9 +97,25 @@ const RideSearch = () => {
     return () => clearTimeout(t);
   }, []);
 
+  // 'Slap-Awake': re-init search API on visibility/focus
+  useEffect(() => {
+    const wakeUp = () => {
+      if (document.visibilityState === 'visible' || !document.hidden) {
+        console.log('[RideSearch] Waking up search API');
+        clearMapboxTokenCache();
+        retryCountRef.current = 0;
+      }
+    };
+    document.addEventListener('visibilitychange', wakeUp);
+    window.addEventListener('focus', wakeUp);
+    return () => {
+      document.removeEventListener('visibilitychange', wakeUp);
+      window.removeEventListener('focus', wakeUp);
+    };
+  }, []);
+
   const reverseGeocode = useCallback(
     async (lat: number, lng: number) => {
-      // Try with mapbox token if available
       const token = mapboxToken;
       if (!token) return;
       try {
@@ -125,16 +136,26 @@ const RideSearch = () => {
     [mapboxToken, language]
   );
 
-  // Mapbox Search Box API for typed queries (superior POI discovery)
+  // Core search with 2s timeout, fuzzy fallback, and auto-retry
   const searchMapbox = useCallback(
     async (query: string) => {
       if (!mapboxToken || query.length < 2) {
         setSearchResults([]);
+        setSearchTimedOut(false);
         return;
       }
       setIsSearching(true);
+      setSearchTimedOut(false);
+
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), 2000);
+
       try {
         const sessionToken = crypto.randomUUID();
+        const proximity = pickupCoords
+          ? `${pickupCoords.lng},${pickupCoords.lat}`
+          : '-73.5673,45.5017';
+
         const params = new URLSearchParams({
           access_token: mapboxToken,
           session_token: sessionToken,
@@ -143,14 +164,17 @@ const RideSearch = () => {
           language: language,
           limit: '8',
           types: 'poi,address,place,street,postcode,locality,neighborhood',
-          proximity: pickupCoords ? `${pickupCoords.lng},${pickupCoords.lat}` : '-73.5673,45.5017',
+          proximity,
         });
 
-        const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params}`);
+        const res = await fetch(
+          `https://api.mapbox.com/search/searchbox/v1/suggest?${params}`,
+          { signal: abortController.signal }
+        );
+        clearTimeout(timeoutId);
         const data = await res.json();
 
         if (data.suggestions && data.suggestions.length > 0) {
-          // Retrieve full details for top suggestions
           const detailed = await Promise.all(
             data.suggestions.slice(0, 6).map(async (s: any) => {
               try {
@@ -173,9 +197,7 @@ const RideSearch = () => {
                   if (props.place) locParts.push(props.place);
                   if (props.region) locParts.push(props.region);
                   if (props.postcode) locParts.push(props.postcode);
-                  const fullAddr = street
-                    ? `${street}, ${locParts.join(', ')}`
-                    : locParts.join(', ');
+                  const fullAddr = street ? `${street}, ${locParts.join(', ')}` : locParts.join(', ');
                   return {
                     id: s.mapbox_id,
                     name: s.name || props.name || query,
@@ -188,25 +210,58 @@ const RideSearch = () => {
               } catch { return null; }
             })
           );
-          setSearchResults(detailed.filter(Boolean));
-        } else {
-          // Fallback to geocoding API
-          const geoRes = await fetch(
-            `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&language=${language}&country=ca&limit=5&types=poi,address,place,locality,neighborhood&autocomplete=true&fuzzyMatch=true&proximity=${pickupCoords ? `${pickupCoords.lng},${pickupCoords.lat}` : '-73.5673,45.5017'}`
-          );
-          const geoData = await geoRes.json();
-          setSearchResults(
-            (geoData.features || []).map((f: any) => ({
-              id: f.id,
-              name: f.text || f.place_name?.split(',')[0],
-              address: f.place_name,
-              lat: f.center[1],
-              lng: f.center[0],
-            }))
-          );
+          const filtered = detailed.filter(Boolean);
+          if (filtered.length > 0) {
+            setSearchResults(filtered);
+            retryCountRef.current = 0;
+            return;
+          }
         }
-      } catch {
-        setSearchResults([]);
+
+        // Search Box returned 0 results → try Geocoding API with fuzzyMatch
+        console.log('[RideSearch] SearchBox returned 0, falling back to Geocoding with fuzzy');
+        const geoRes = await fetch(
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&language=${language}&country=ca&limit=5&types=poi,address,place,locality,neighborhood&autocomplete=true&fuzzyMatch=true&proximity=${proximity}`
+        );
+        const geoData = await geoRes.json();
+        const geoResults = (geoData.features || []).map((f: any) => ({
+          id: f.id,
+          name: f.text || f.place_name?.split(',')[0],
+          address: f.place_name,
+          lat: f.center[1],
+          lng: f.center[0],
+        }));
+
+        if (geoResults.length > 0) {
+          setSearchResults(geoResults);
+          retryCountRef.current = 0;
+        } else if (retryCountRef.current < 1) {
+          // Silent re-init: clear cache and retry once
+          console.log('[RideSearch] 0 results — re-initializing API and retrying');
+          retryCountRef.current++;
+          clearMapboxTokenCache();
+          // Small delay then retry
+          setTimeout(() => searchMapbox(query), 500);
+        } else {
+          setSearchResults([]);
+        }
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          // 2s timeout hit — show recent destinations as fallback
+          console.warn('[RideSearch] Search timed out after 2s, showing recents');
+          setSearchTimedOut(true);
+          setSearchResults([]);
+        } else {
+          console.error('[RideSearch] Search error:', err);
+          setSearchResults([]);
+          // Auto-retry once on network error
+          if (retryCountRef.current < 1) {
+            retryCountRef.current++;
+            clearMapboxTokenCache();
+            setTimeout(() => searchMapbox(query), 500);
+          }
+        }
       } finally {
         setIsSearching(false);
       }
@@ -221,8 +276,16 @@ const RideSearch = () => {
     debounceRef.current = setTimeout(() => searchMapbox(val), 300);
   };
 
+  const handleRetrySearch = () => {
+    retryCountRef.current = 0;
+    clearMapboxTokenCache();
+    setSearchTimedOut(false);
+    if (destinationQuery.length >= 2) {
+      searchMapbox(destinationQuery);
+    }
+  };
+
   const selectDestination = (dest: { name: string; address: string; lat: number; lng: number }) => {
-    // Navigate to /ride with destination in state so the map loads there
     navigate('/ride', {
       state: {
         dropoffAddress: dest.address,
@@ -236,7 +299,6 @@ const RideSearch = () => {
     });
   };
 
-  // Filter local destinations by query
   const filteredDestinations =
     destinationQuery.length > 0
       ? destinations.filter(
@@ -257,6 +319,9 @@ const RideSearch = () => {
     return null;
   };
 
+  // Show recents as fallback when search timed out or API is dead
+  const showRecentsFallback = searchTimedOut && destinations.length > 0;
+
   return (
     <div className="fixed inset-0 z-50 bg-[#1a1a2e] flex flex-col">
       {/* Header */}
@@ -276,14 +341,12 @@ const RideSearch = () => {
 
       {/* Pickup + Destination boxes */}
       <div className="px-4 py-4 space-y-3">
-        {/* Pickup row */}
         <div className="flex items-center gap-3 bg-white/8 rounded-xl px-4 py-3">
           <div className="h-3 w-3 rounded-full bg-lime-400 flex-shrink-0" />
           <span className="text-white/80 text-sm truncate flex-1">{pickupLabel}</span>
           <Navigation className="h-4 w-4 text-white/40 flex-shrink-0" />
         </div>
 
-        {/* Destination input */}
         <div className="flex items-center gap-3 bg-white/12 rounded-xl px-4 py-3">
           <div className="h-3 w-3 rounded-sm bg-purple-400 flex-shrink-0" />
           <input
@@ -303,7 +366,20 @@ const RideSearch = () => {
 
       {/* Results list */}
       <div className="flex-1 overflow-y-auto px-4 pb-[env(safe-area-inset-bottom,16px)]">
-        {/* Mapbox search results first */}
+        {/* Timeout fallback banner */}
+        {searchTimedOut && (
+          <div className="mb-3 p-3 rounded-xl bg-white/8 flex items-center justify-between">
+            <p className="text-white/60 text-xs">
+              {language === 'fr' ? 'La recherche a expiré. Vos destinations récentes:' : 'Search timed out. Your recent destinations:'}
+            </p>
+            <Button variant="ghost" size="sm" onClick={handleRetrySearch} className="text-white/80 hover:bg-white/10 gap-1">
+              <RotateCcw className="h-3 w-3" />
+              {language === 'fr' ? 'Réessayer' : 'Retry'}
+            </Button>
+          </div>
+        )}
+
+        {/* Mapbox search results */}
         {searchResults.length > 0 && (
           <div className="mb-4">
             {searchResults.map((r) => (
@@ -324,10 +400,10 @@ const RideSearch = () => {
           </div>
         )}
 
-        {/* Past destinations */}
-        {filteredDestinations.length > 0 && (
+        {/* Past destinations (always show when timeout or no query) */}
+        {(filteredDestinations.length > 0 && (searchResults.length === 0 || showRecentsFallback)) && (
           <>
-            {destinationQuery.length === 0 && (
+            {(destinationQuery.length === 0 || showRecentsFallback) && (
               <p className="text-white/40 text-xs uppercase tracking-wider mb-2 px-2">
                 {language === 'fr' ? 'Récents' : 'Recent'}
               </p>
@@ -359,14 +435,20 @@ const RideSearch = () => {
           </>
         )}
 
-        {/* Empty state */}
-        {filteredDestinations.length === 0 && searchResults.length === 0 && destinationQuery.length > 0 && !isSearching && (
-          <div className="text-center py-12 text-white/40 text-sm">
-            {language === 'fr' ? 'Aucun résultat trouvé' : 'No results found'}
+        {/* Empty state with retry */}
+        {filteredDestinations.length === 0 && searchResults.length === 0 && destinationQuery.length > 0 && !isSearching && !searchTimedOut && (
+          <div className="text-center py-12 space-y-3">
+            <p className="text-white/40 text-sm">
+              {language === 'fr' ? 'Aucun résultat trouvé' : 'No results found'}
+            </p>
+            <Button variant="ghost" size="sm" onClick={handleRetrySearch} className="text-white/60 hover:bg-white/10 gap-2">
+              <RotateCcw className="h-4 w-4" />
+              {language === 'fr' ? 'Réessayer' : 'Try Again'}
+            </Button>
           </div>
         )}
 
-        {filteredDestinations.length === 0 && searchResults.length === 0 && destinationQuery.length === 0 && (
+        {filteredDestinations.length === 0 && searchResults.length === 0 && destinationQuery.length === 0 && !searchTimedOut && (
           <div className="text-center py-12 text-white/30 text-sm">
             {language === 'fr' ? 'Commencez à taper pour rechercher' : 'Start typing to search'}
           </div>
