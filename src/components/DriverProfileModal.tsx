@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Camera, Loader2, User, Bug } from 'lucide-react';
 import ProfileDebugInfo from '@/components/ProfileDebugInfo';
+import { FixNotificationsButton } from '@/components/FixNotificationsButton';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -280,6 +281,12 @@ const DriverProfileModal = ({ open, onOpenChange }: DriverProfileModalProps) => 
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Notification Fix */}
+        <div className="flex items-center justify-between border-t pt-4">
+          <span className="text-sm text-muted-foreground">Push notifications not working?</span>
+          <FixNotificationsButton />
         </div>
 
         {/* OneSignal Debug Section */}
