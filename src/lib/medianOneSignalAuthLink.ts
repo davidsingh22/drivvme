@@ -23,63 +23,58 @@ export function initMedianOneSignalAuthLink() {
     console.log("[MedianBridge] setLogLevel failed (non-fatal):", e);
   }
 
-  // --- Diagnostic: show OneSignal info from bridge ---
-  const showBridgeDiagnostics = async (source: string) => {
-    try {
-      const median = (window as any).median;
-      if (!median?.onesignal?.info) {
-        console.log(`[MedianBridge] No median.onesignal.info available [${source}]`);
-        return;
-      }
-      const info = await median.onesignal.info();
-      console.log(`[MedianBridge] OneSignal info [${source}]:`, JSON.stringify(info));
-      const msg = [
-        `== OneSignal Bridge Diagnostics (${source}) ==`,
-        `App ID: ${info?.appId ?? info?.oneSignalAppId ?? "N/A"}`,
-        `Player ID: ${info?.oneSignalId ?? info?.playerId ?? info?.subscriptionId ?? "N/A"}`,
-        `Push Token: ${info?.pushToken ?? "N/A"}`,
-        `Sender ID / GCM: ${info?.googleProjectNumber ?? info?.senderId ?? info?.gcmSenderId ?? "NOT SET"}`,
-        `Subscribed: ${info?.subscribed ?? info?.isSubscribed ?? "N/A"}`,
-        `Full dump: ${JSON.stringify(info)}`,
-      ].join("\n");
-      alert(msg);
-    } catch (e) {
-      console.log(`[MedianBridge] info() error [${source}]:`, e);
-      alert(`[MedianBridge] info() failed: ${e}`);
+  // --- Floating status label ---
+  const updateStatusLabel = (text: string) => {
+    let el = document.getElementById("median-reg-status");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "median-reg-status";
+      el.style.cssText =
+        "position:fixed;bottom:8px;left:50%;transform:translateX(-50%);z-index:99999;" +
+        "background:rgba(0,0,0,0.85);color:#0f0;padding:6px 16px;border-radius:8px;" +
+        "font-size:12px;font-family:monospace;pointer-events:none;";
+      document.body.appendChild(el);
     }
+    el.textContent = text;
   };
 
-  // --- Native bridge registration (deferred until bridge is confirmed ready) ---
+  updateStatusLabel("Registering...");
+
+  // --- Native bridge registration with explicit googleProjectNumber ---
   const attemptNativeRegistration = (source: string) => {
     try {
       const median = (window as any).median;
       const gonative = (window as any).gonative;
       console.log(`[MedianBridge] attemptNativeRegistration (${source})`);
-      console.log("[MedianBridge] median:", typeof median, median ? Object.keys(median) : "N/A");
-      console.log("[MedianBridge] median.onesignal:", typeof median?.onesignal, median?.onesignal ? Object.keys(median.onesignal) : "N/A");
-      console.log("[MedianBridge] gonative:", typeof gonative);
 
-      // Show diagnostics alert BEFORE registration
-      showBridgeDiagnostics(source);
+      const regPayload = {
+        appId: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
+        googleProjectNumber: "640478051658",
+      };
 
       if (median?.onesignal?.register) {
-        median.onesignal.register();
-        console.log(`✅ [MedianBridge] Called median.onesignal.register() [${source}]`);
+        median.onesignal.register(regPayload);
+        console.log(`✅ [MedianBridge] Called median.onesignal.register(${JSON.stringify(regPayload)}) [${source}]`);
+        updateStatusLabel(`Registration Sent (${source})`);
+        return true;
+      } else if (gonative?.onesignal?.register) {
+        gonative.onesignal.register(regPayload);
+        console.log(`✅ [MedianBridge] Called gonative.onesignal.register() [${source}]`);
+        updateStatusLabel(`Registration Sent (${source})`);
         return true;
       } else if ((window as any).despia?.registerpush) {
         (window as any).despia.registerpush();
         console.log(`✅ [MedianBridge] Called despia.registerpush() [${source}]`);
-        return true;
-      } else if (gonative?.onesignal?.register) {
-        gonative.onesignal.register();
-        console.log(`✅ [MedianBridge] Called gonative.onesignal.register() [${source}]`);
+        updateStatusLabel(`Registration Sent (${source})`);
         return true;
       } else {
         console.log(`[MedianBridge] No native register method found [${source}]`);
+        updateStatusLabel(`No bridge found (${source})`);
         return false;
       }
     } catch (e) {
       console.log(`[MedianBridge] Registration error [${source}]:`, e);
+      updateStatusLabel(`Reg error: ${e}`);
       return false;
     }
   };
