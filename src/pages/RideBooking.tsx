@@ -78,6 +78,45 @@ const incrementFreeRidesUsed = (email: string): void => {
   const used = parseInt(localStorage.getItem(usedKey) || '0', 10);
   localStorage.setItem(usedKey, String(used + 1));
 };
+
+// Zombie Location Overlay — shows spinner for 7s then "Try Again" button
+const ZombieLocationOverlay = ({ language, onCancel }: { language: string; onCancel: () => void }) => {
+  const [showRetry, setShowRetry] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShowRetry(true), 7000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
+      <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
+        {!showRetry ? (
+          <>
+            <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            <p className="text-sm font-medium text-foreground">
+              {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-medium text-foreground">
+              {language === 'fr' ? 'La localisation prend trop de temps' : 'Location is taking too long'}
+            </p>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={onCancel}
+              className="gradient-primary"
+            >
+              {language === 'fr' ? 'Réessayer / Entrer manuellement' : 'Try Again / Enter Manually'}
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const RideBooking = () => {
   const {
     t,
@@ -1028,8 +1067,9 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // Safety timeout: if ride creation hangs >15s, reset so button isn't stuck forever
+    // Zombie process killer: 7s hard cap — never let button stay stuck
     const safetyTimeout = setTimeout(() => {
+      console.warn('[RideBooking] Payment zombie killer triggered at 7s');
       setIsSubmitting(false);
       if (!currentRide?.id) {
         setStep('estimate');
@@ -1039,7 +1079,7 @@ const RideBooking = () => {
           variant: 'destructive'
         });
       }
-    }, 15000);
+    }, 7000);
 
     // Create the ride in the background as fast as possible.
     // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
@@ -1487,15 +1527,11 @@ const RideBooking = () => {
           </div>
         </motion.div>
         
-        {/* GPS Detection Overlay */}
-        {isDetectingLocation && <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
-            <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
-              <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-              <p className="text-sm font-medium text-white">
-                {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-              </p>
-            </div>
-          </div>}
+        {/* GPS Detection Overlay — with 7s zombie killer */}
+        {isDetectingLocation && <ZombieLocationOverlay
+            language={language}
+            onCancel={() => setIsDetectingLocation(false)}
+          />}
           
         {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
         <motion.div initial={{

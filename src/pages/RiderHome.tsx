@@ -1,31 +1,89 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Car } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
+import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 const RiderHome = () => {
   const navigate = useNavigate();
   const gpsStarted = useRef(false);
 
-  // Phase 1: Background GPS warming — cache coords for instant pickup on /ride
+  // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
   useEffect(() => {
     if (gpsStarted.current || !navigator.geolocation) return;
     gpsStarted.current = true;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const data = {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-          ts: Date.now(),
-        };
-        localStorage.setItem('drivveme_gps_warm', JSON.stringify(data));
-      },
-      () => { /* silent fail */ },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+
+    try {
+      const timeoutId = setTimeout(() => {
+        // 3s hard cap — stop waiting, user can proceed regardless
+        console.log('[RiderHome] GPS warm timed out after 3s');
+      }, 3000);
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          clearTimeout(timeoutId);
+          const data = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            ts: Date.now(),
+          };
+          localStorage.setItem('drivveme_gps_warm', JSON.stringify(data));
+        },
+        () => {
+          clearTimeout(timeoutId);
+          /* silent fail — button still works */
+        },
+        { enableHighAccuracy: true, timeout: 3000, maximumAge: 60000 }
+      );
+    } catch {
+      /* GPS completely unavailable — no-op */
+    }
   }, []);
+
+  // 'Slap-Awake' Refresh: re-warm GPS + reset Mapbox cache on every app resume
+  const lastHidden = useRef(Date.now());
+
+  const handleVisibilityChange = useCallback(() => {
+    if (document.visibilityState === 'hidden') {
+      lastHidden.current = Date.now();
+      return;
+    }
+
+    // App resumed — refresh engine
+    const idleMs = Date.now() - lastHidden.current;
+    console.log(`[RiderHome] App resumed after ${Math.round(idleMs / 1000)}s`);
+
+    // Always reset Mapbox search API cache so it's fresh
+    clearMapboxTokenCache();
+
+    // Re-warm GPS (3s timeout, non-blocking)
+    if (navigator.geolocation) {
+      try {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            localStorage.setItem('drivveme_gps_warm', JSON.stringify({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              ts: Date.now(),
+            }));
+          },
+          () => {},
+          { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 }
+        );
+      } catch { /* no-op */ }
+    }
+  }, []);
+
+  useEffect(() => {
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
+  }, [handleVisibilityChange]);
 
   return (
     <div className="min-h-screen w-full relative overflow-hidden flex flex-col items-center justify-between">
@@ -68,7 +126,7 @@ const RiderHome = () => {
           <p className="text-white/70 text-base">Your ride is just one tap away</p>
         </div>
 
-        {/* Glowing Book a Ride button */}
+        {/* Glowing Book a Ride button — NEVER disabled, GPS is non-blocking */}
         <motion.button
           onClick={() => navigate('/ride')}
           className="relative group flex items-center gap-3 px-10 py-5 rounded-2xl font-display font-bold text-xl text-white overflow-hidden"
