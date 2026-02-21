@@ -633,6 +633,13 @@ const MapComponent = ({
   useEffect(() => {
     if (!mapRef.current || !mapLoaded || !token) return;
 
+    // No route mode = clear any existing route immediately
+    if (!routeMode) {
+      if (mapRef.current.getLayer('route')) mapRef.current.removeLayer('route');
+      if (mapRef.current.getSource('route')) mapRef.current.removeSource('route');
+      return;
+    }
+
     // Determine route start and end based on mode
     let routeStart: { lat: number; lng: number } | null = null;
     let routeEnd: { lat: number; lng: number } | null = null;
