@@ -12,6 +12,30 @@ export function initMedianOneSignalAuthLink() {
   // Queue: auth changes that arrive before the bridge is ready
   let pendingUid: string | null | undefined = undefined;
 
+  // --- Native bridge registration ---
+  try {
+    const median = (window as any).median;
+    const gonative = (window as any).gonative;
+    console.log("[MedianBridge] median object:", typeof median, median ? Object.keys(median) : "N/A");
+    console.log("[MedianBridge] median.onesignal:", typeof median?.onesignal);
+    console.log("[MedianBridge] gonative object:", typeof gonative);
+
+    if (median?.onesignal?.register) {
+      median.onesignal.register();
+      console.log("✅ [MedianBridge] Called median.onesignal.register()");
+    } else if ((window as any).despia?.registerpush) {
+      (window as any).despia.registerpush();
+      console.log("✅ [MedianBridge] Called despia.registerpush()");
+    } else if (gonative?.onesignal?.register) {
+      gonative.onesignal.register();
+      console.log("✅ [MedianBridge] Called gonative.onesignal.register()");
+    } else {
+      console.log("[MedianBridge] No native register method found (web browser?)");
+    }
+  } catch (e) {
+    console.log("[MedianBridge] Registration attempt error (non-fatal):", e);
+  }
+
   const applyExternalId = (uid: string | null) => {
     try {
       const median = (window as any).median;
@@ -46,7 +70,21 @@ export function initMedianOneSignalAuthLink() {
 
   // Register the Median library-ready callback
   (window as any).median_library_ready = () => {
-    console.log("✅ Median library ready");
+    console.log("✅ [MedianBridge] median_library_ready fired");
+    const median = (window as any).median;
+    console.log("[MedianBridge] Bridge keys at ready:", median ? Object.keys(median) : "N/A");
+    console.log("[MedianBridge] onesignal keys:", median?.onesignal ? Object.keys(median.onesignal) : "N/A");
+
+    // Attempt registration again now that bridge is ready
+    try {
+      if (median?.onesignal?.register) {
+        median.onesignal.register();
+        console.log("✅ [MedianBridge] Called register() on library_ready");
+      }
+    } catch (e) {
+      console.log("[MedianBridge] register() on ready failed:", e);
+    }
+
     if (pendingUid !== undefined) {
       applyExternalId(pendingUid);
       pendingUid = undefined;
