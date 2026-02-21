@@ -12,12 +12,12 @@ export function initMedianOneSignalAuthLink() {
   // Queue: auth changes that arrive before the bridge is ready
   let pendingUid: string | null | undefined = undefined;
 
-  // --- Enable verbose OneSignal native debug logging ---
+  // --- FIRST LINE: Enable verbose OneSignal native debug logging ---
   try {
     const median = (window as any).median;
     if (median?.onesignal?.setLogLevel) {
-      median.onesignal.setLogLevel({ logLevel: 6, visualLevel: 0 });
-      console.log("✅ [MedianBridge] OneSignal debug log level set to 6 (VERBOSE)");
+      median.onesignal.setLogLevel({ logLevel: 6 });
+      console.log("✅ [MedianBridge] OneSignal debug log level set to 6 (VERBOSE) — FIRST LINE");
     }
   } catch (e) {
     console.log("[MedianBridge] setLogLevel failed (non-fatal):", e);
@@ -79,8 +79,8 @@ export function initMedianOneSignalAuthLink() {
     }
   };
 
-  // Try immediately in case bridge is already loaded
-  attemptNativeRegistration("immediate");
+  // Skip immediate attempt — wait for median_library_ready + delay instead
+  updateStatusLabel("Waiting for bridge...");
 
   const applyExternalId = (uid: string | null) => {
     try {
@@ -122,13 +122,16 @@ export function initMedianOneSignalAuthLink() {
     try {
       const m = (window as any).median;
       if (m?.onesignal?.setLogLevel) {
-        m.onesignal.setLogLevel({ logLevel: 6, visualLevel: 0 });
+        m.onesignal.setLogLevel({ logLevel: 6 });
         console.log("✅ [MedianBridge] Debug log level set to 6 on library_ready");
       }
     } catch (e) { /* ignore */ }
 
-    // Register now that bridge is guaranteed ready
-    attemptNativeRegistration("median_library_ready");
+    // Wait 5 seconds after bridge ready before registering
+    updateStatusLabel("Bridge ready — waiting 5s...");
+    setTimeout(() => {
+      attemptNativeRegistration("median_library_ready+5s");
+    }, 5000);
 
     if (pendingUid !== undefined) {
       applyExternalId(pendingUid);
