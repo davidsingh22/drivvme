@@ -1018,6 +1018,7 @@ const DriverDashboard = () => {
               onRideCompleted={() => {
                 setCurrentRide(null);
                 setRiderInfo(null);
+                setShowGPSNavigation(false);
                 void refreshDriverProfile();
               }}
               onRideUpdated={(ride) => {
