@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff } from 'lucide-react';
@@ -30,6 +30,7 @@ const Login = () => {
   const [rememberMe] = useState(true); // Always stay signed in
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const justSignedIn = useRef(false);
 
   // If auth completes (even before routing), stop the button spinner
   useEffect(() => {
@@ -39,28 +40,25 @@ const Login = () => {
     if (user) setIsSubmitting(false);
   }, [isSubmitting, user]);
 
-  // After auth completes, route user based on roles
+  // After a fresh login (isSubmitting was true), route user based on roles
   useEffect(() => {
-    if (!user) return;
+    // Only redirect after the user has just signed in via this form
+    if (!user || !justSignedIn.current) return;
 
-    // If roles are already loaded, route immediately
+    const routeByRole = () => {
+      justSignedIn.current = false;
+      if (isAdmin) navigate('/admin', { replace: true });
+      else if (isDriver) navigate('/driver', { replace: true });
+      else navigate('/rider-home', { replace: true });
+    };
+
     if (roles.length > 0) {
-      if (isAdmin) navigate('/admin', {
-        replace: true
-      });else if (isDriver) navigate('/driver', {
-        replace: true
-      });else navigate('/rider-home', {
-        replace: true
-      }); // Riders & new users → rider home
+      routeByRole();
       return;
     }
 
     // Give roles a moment to load, then route with whatever we have
-    const timeout = setTimeout(() => {
-      if (isAdmin) navigate('/admin', { replace: true });
-      else if (isDriver) navigate('/driver', { replace: true });
-      else navigate('/rider-home', { replace: true });
-    }, 2000);
+    const timeout = setTimeout(routeByRole, 2000);
     return () => clearTimeout(timeout);
   }, [user, roles.length, isAdmin, isDriver, isRider, navigate]);
   const handleSubmit = async (e: React.FormEvent) => {
@@ -68,6 +66,7 @@ const Login = () => {
     setError('');
     setIsSubmitting(true);
     try {
+      justSignedIn.current = true;
       await signIn(email, password, rememberMe);
       // Navigation is handled by the effect above once roles are loaded
     } catch (err: any) {
