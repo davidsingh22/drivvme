@@ -7,6 +7,9 @@ interface TokenState {
   error: string | null;
 }
 
+// Publishable fallback token — safe to embed client-side (pk.* keys are public)
+const FALLBACK_MAPBOX_TOKEN = 'pk.eyJ1IjoiZHJpdnZtZSIsImEiOiJjbWtsOXBqbmMwMnJsM2dwcnVpMzl5YWx2In0.b_tJnq0xuZ-2YaA-YJg5cA';
+
 // Cache token in memory for instant reuse
 let cachedToken: string | null = null;
 let tokenFetchPromise: Promise<string | null> | null = null;
@@ -147,28 +150,25 @@ export const prefetchMapboxToken = async () => {
 
 export const useMapboxToken = (): TokenState => {
   const [state, setState] = useState<TokenState>(() => {
-    // Check memory cache first, then session cache
-    const token = cachedToken || getSessionCache();
-    if (token) {
-      cachedToken = token;
-      return { token, loading: false, error: null };
-    }
-    return { token: null, loading: true, error: null };
+    // Check memory cache first, then session cache, then hardcoded fallback
+    const token = cachedToken || getSessionCache() || FALLBACK_MAPBOX_TOKEN;
+    cachedToken = token;
+    return { token, loading: false, error: null };
   });
 
   useEffect(() => {
-    // Already have token from cache
-    if (state.token) return;
+    // Already have a real (non-fallback) cached token
+    if (state.token && cachedToken && cachedToken !== FALLBACK_MAPBOX_TOKEN) return;
 
     let mounted = true;
 
     const fetchToken = async () => {
-      // Wait for auth state to be determined
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
-        if (mounted) {
-          setState({ token: null, loading: false, error: 'Not authenticated' });
+        // No auth — keep fallback token active so search still works
+        if (mounted && !state.token) {
+          setState({ token: FALLBACK_MAPBOX_TOKEN, loading: false, error: null });
         }
         return;
       }
@@ -179,7 +179,8 @@ export const useMapboxToken = (): TokenState => {
         if (token) {
           setState({ token, loading: false, error: null });
         } else {
-          setState({ token: null, loading: false, error: 'Failed to load map token' });
+          // Edge function failed — use fallback instead of error state
+          setState({ token: FALLBACK_MAPBOX_TOKEN, loading: false, error: null });
         }
       }
     };
