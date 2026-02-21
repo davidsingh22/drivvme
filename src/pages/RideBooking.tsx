@@ -548,6 +548,26 @@ const RideBooking = () => {
       setPickup({ address: state.pickupAddress, lat: state.pickupLat, lng: state.pickupLng });
       hasAutoDetectedLocation.current = true;
       setIsDetectingLocation(false);
+    } else if (state.autoEstimate && user?.id) {
+      // Pickup coords missing — try DB fallback so auto-estimate can proceed
+      hasAutoDetectedLocation.current = true;
+      setIsDetectingLocation(true);
+      (async () => {
+        try {
+          const { data } = await supabase
+            .from('rider_locations')
+            .select('lat, lng')
+            .eq('user_id', user.id)
+            .maybeSingle();
+          if (data?.lat && data?.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
+            const addr = await reverseGeocode(data.lat, data.lng);
+            const pickupAddr = addr || `${data.lat.toFixed(4)}, ${data.lng.toFixed(4)}`;
+            setPickupAddress(pickupAddr);
+            setPickup({ address: pickupAddr, lat: data.lat, lng: data.lng });
+          }
+        } catch { /* ignore */ }
+        setIsDetectingLocation(false);
+      })();
     }
 
     if (state.autoEstimate) {

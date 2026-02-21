@@ -128,9 +128,10 @@ const RideSearch = () => {
     } catch { /* ignore */ }
   }, []);
 
-  // ── Cold-start GPS wake-up with 5s high-priority timeout + DB fallback ──
+  // ── Cold-start GPS wake-up with DB fallback running in parallel ──
   useEffect(() => {
     let gpsFired = false;
+    let dbFired = false;
 
     // Read cached GPS first for instant proximity
     try {
@@ -145,7 +146,7 @@ const RideSearch = () => {
       }
     } catch { /* ignore */ }
 
-    // Fallback: fetch rider's stored location from DB if GPS doesn't fire
+    // Fetch rider's stored location from DB in parallel (don't wait for GPS to fail)
     const fetchDbLocation = async () => {
       if (gpsFired || !user?.id) return;
       try {
@@ -155,14 +156,23 @@ const RideSearch = () => {
           .eq('user_id', user.id)
           .maybeSingle();
         if (data && data.lat && data.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
-          console.log('[RideSearch] Using DB-stored rider location as fallback');
-          setPickupCoords({ lat: data.lat, lng: data.lng });
-          reverseGeocode(data.lat, data.lng);
+          // Only use DB location if GPS hasn't already resolved
+          if (!gpsFired) {
+            dbFired = true;
+            console.log('[RideSearch] Using DB-stored rider location');
+            setPickupCoords({ lat: data.lat, lng: data.lng });
+            reverseGeocode(data.lat, data.lng);
+          }
         }
       } catch { /* ignore */ }
     };
 
-    // Then force a high-priority fresh GPS lock
+    // Start DB fetch immediately in parallel with GPS
+    if (!gpsFired) {
+      fetchDbLocation();
+    }
+
+    // Also try GPS for fresh coordinates
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -173,14 +183,13 @@ const RideSearch = () => {
           localStorage.setItem('drivveme_gps_warm', JSON.stringify({ ...coords, ts: Date.now() }));
         },
         () => {
-          // GPS denied/failed — fall back to DB location
-          console.log('[RideSearch] GPS failed, trying DB location fallback');
-          fetchDbLocation();
+          console.log('[RideSearch] GPS failed, relying on DB location');
+          // DB fetch already started above — if it resolved, we're fine
+          // If not, try again
+          if (!dbFired) fetchDbLocation();
         },
         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
-    } else {
-      fetchDbLocation();
     }
   }, []);
 
@@ -424,15 +433,35 @@ const RideSearch = () => {
     }
   };
 
-  const selectDestination = (dest: { name: string; address: string; lat: number; lng: number }) => {
+  const selectDestination = async (dest: { name: string; address: string; lat: number; lng: number }) => {
+    let pLat = pickupCoords?.lat;
+    let pLng = pickupCoords?.lng;
+    let pAddr = pickupLabel;
+
+    // If we still don't have pickup coords, try DB one more time before navigating
+    if ((pLat == null || pLng == null) && user?.id) {
+      try {
+        const { data } = await supabase
+          .from('rider_locations')
+          .select('lat, lng')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (data?.lat && data?.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
+          pLat = data.lat;
+          pLng = data.lng;
+          pAddr = `${data.lat.toFixed(4)}, ${data.lng.toFixed(4)}`;
+        }
+      } catch { /* ignore */ }
+    }
+
     navigate('/ride', {
       state: {
         dropoffAddress: dest.address,
         dropoffLat: dest.lat,
         dropoffLng: dest.lng,
-        pickupAddress: pickupLabel,
-        pickupLat: pickupCoords?.lat,
-        pickupLng: pickupCoords?.lng,
+        pickupAddress: pAddr,
+        pickupLat: pLat,
+        pickupLng: pLng,
         autoEstimate: true,
       },
     });
