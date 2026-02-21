@@ -75,68 +75,67 @@ const TripCompletionScreen = ({
   const [showBillModal, setShowBillModal] = useState(false);
 
   const handleSubmit = async () => {
+    if (isSubmitting) return; // prevent double-tap
     setIsSubmitting(true);
 
+    // Hard safety timeout — no matter what, navigate away after 8s
+    const safetyTimer = setTimeout(() => {
+      console.warn('[TripCompletion] Safety timeout — forcing navigation');
+      setIsSubmitting(false);
+      onComplete();
+    }, 8000);
+
     try {
-      // Submit rating (ignore duplicate errors - rider may have already rated)
-      const { error: ratingError } = await supabase.from('ratings').insert({
-        ride_id: rideId,
-        driver_id: driverId,
-        rider_id: riderId,
-        rating,
-        comment: comment || null,
-      });
+      // Fire all DB operations in parallel, each with individual timeouts
+      const withTimeout = <T,>(p: Promise<T>, ms = 5000): Promise<T | null> =>
+        Promise.race([p, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
 
-      if (ratingError && !ratingError.message?.includes('duplicate') && !ratingError.code?.includes('23505')) {
-        console.error('Rating insert error:', ratingError);
-      }
+      await Promise.allSettled([
+        // 1. Submit rating
+        withTimeout(
+          Promise.resolve(supabase.from('ratings').insert({
+            ride_id: rideId,
+            driver_id: driverId,
+            rider_id: riderId,
+            rating,
+            comment: comment || null,
+          })).then(({ error }) => {
+            if (error && !error.message?.includes('duplicate') && !error.code?.includes('23505')) {
+              console.error('Rating insert error:', error);
+            }
+          })
+        ),
 
-      // Update driver's average rating (best-effort)
-      try {
-        const { data: ratings } = await supabase
-          .from('ratings')
-          .select('rating')
-          .eq('driver_id', driverId);
+        // 2. Update driver avg rating (best-effort)
+        withTimeout(
+          Promise.resolve(supabase.from('ratings').select('rating').eq('driver_id', driverId)).then(({ data: ratings }) => {
+            if (ratings && ratings.length > 0) {
+              const avgRating = ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
+              return Promise.resolve(supabase.from('driver_profiles').update({ average_rating: avgRating }).eq('user_id', driverId));
+            }
+          })
+        ),
 
-        if (ratings && ratings.length > 0) {
-          const avgRating = ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
-          await supabase
-            .from('driver_profiles')
-            .update({ average_rating: avgRating })
-            .eq('user_id', driverId);
-        }
-      } catch (e) {
-        console.error('Avg rating update error:', e);
-      }
-
-      // Save tip as pending (admin will charge it) - best-effort
-      if (selectedTip > 0) {
-        console.log('[TIP] Saving tip:', { rideId, selectedTip, riderId });
-        const { data: tipData, error: tipError } = await supabase
-          .from('rides')
-          .update({ tip_amount: selectedTip, tip_status: 'pending' })
-          .eq('id', rideId)
-          .select('id, tip_amount, tip_status');
-
-        if (tipError) {
-          console.error('[TIP] Save failed:', tipError);
-        } else {
-          console.log('[TIP] Save succeeded:', tipData);
-        }
-      }
+        // 3. Save tip as pending
+        selectedTip > 0
+          ? withTimeout(
+              Promise.resolve(supabase.from('rides').update({ tip_amount: selectedTip, tip_status: 'pending' }).eq('id', rideId))
+                .then(({ error }) => { if (error) console.error('[TIP] Save failed:', error); })
+            )
+          : Promise.resolve(),
+      ]);
 
       toast({
         title: language === 'fr' ? 'Merci!' : 'Thank you!',
-        description: language === 'fr' 
-          ? 'Votre évaluation a été enregistrée' 
+        description: language === 'fr'
+          ? 'Votre évaluation a été enregistrée'
           : 'Your rating has been submitted',
       });
     } catch (error: any) {
       console.error('Submit error:', error);
-      // Don't block the user - still let them leave
     } finally {
+      clearTimeout(safetyTimer);
       setIsSubmitting(false);
-      // ALWAYS navigate back to rider home, even on error
       onComplete();
     }
   };
