@@ -12,29 +12,51 @@ export function initMedianOneSignalAuthLink() {
   // Queue: auth changes that arrive before the bridge is ready
   let pendingUid: string | null | undefined = undefined;
 
-  // --- Native bridge registration ---
+  // --- Enable verbose OneSignal native debug logging ---
   try {
     const median = (window as any).median;
-    const gonative = (window as any).gonative;
-    console.log("[MedianBridge] median object:", typeof median, median ? Object.keys(median) : "N/A");
-    console.log("[MedianBridge] median.onesignal:", typeof median?.onesignal);
-    console.log("[MedianBridge] gonative object:", typeof gonative);
-
-    if (median?.onesignal?.register) {
-      median.onesignal.register();
-      console.log("✅ [MedianBridge] Called median.onesignal.register()");
-    } else if ((window as any).despia?.registerpush) {
-      (window as any).despia.registerpush();
-      console.log("✅ [MedianBridge] Called despia.registerpush()");
-    } else if (gonative?.onesignal?.register) {
-      gonative.onesignal.register();
-      console.log("✅ [MedianBridge] Called gonative.onesignal.register()");
-    } else {
-      console.log("[MedianBridge] No native register method found (web browser?)");
+    if (median?.onesignal?.setLogLevel) {
+      median.onesignal.setLogLevel({ logLevel: 6, visualLevel: 0 });
+      console.log("✅ [MedianBridge] OneSignal debug log level set to 6 (VERBOSE)");
     }
   } catch (e) {
-    console.log("[MedianBridge] Registration attempt error (non-fatal):", e);
+    console.log("[MedianBridge] setLogLevel failed (non-fatal):", e);
   }
+
+  // --- Native bridge registration (deferred until bridge is confirmed ready) ---
+  const attemptNativeRegistration = (source: string) => {
+    try {
+      const median = (window as any).median;
+      const gonative = (window as any).gonative;
+      console.log(`[MedianBridge] attemptNativeRegistration (${source})`);
+      console.log("[MedianBridge] median:", typeof median, median ? Object.keys(median) : "N/A");
+      console.log("[MedianBridge] median.onesignal:", typeof median?.onesignal, median?.onesignal ? Object.keys(median.onesignal) : "N/A");
+      console.log("[MedianBridge] gonative:", typeof gonative);
+
+      if (median?.onesignal?.register) {
+        median.onesignal.register();
+        console.log(`✅ [MedianBridge] Called median.onesignal.register() [${source}]`);
+        return true;
+      } else if ((window as any).despia?.registerpush) {
+        (window as any).despia.registerpush();
+        console.log(`✅ [MedianBridge] Called despia.registerpush() [${source}]`);
+        return true;
+      } else if (gonative?.onesignal?.register) {
+        gonative.onesignal.register();
+        console.log(`✅ [MedianBridge] Called gonative.onesignal.register() [${source}]`);
+        return true;
+      } else {
+        console.log(`[MedianBridge] No native register method found [${source}]`);
+        return false;
+      }
+    } catch (e) {
+      console.log(`[MedianBridge] Registration error [${source}]:`, e);
+      return false;
+    }
+  };
+
+  // Try immediately in case bridge is already loaded
+  attemptNativeRegistration("immediate");
 
   const applyExternalId = (uid: string | null) => {
     try {
@@ -70,20 +92,19 @@ export function initMedianOneSignalAuthLink() {
 
   // Register the Median library-ready callback
   (window as any).median_library_ready = () => {
-    console.log("✅ [MedianBridge] median_library_ready fired");
-    const median = (window as any).median;
-    console.log("[MedianBridge] Bridge keys at ready:", median ? Object.keys(median) : "N/A");
-    console.log("[MedianBridge] onesignal keys:", median?.onesignal ? Object.keys(median.onesignal) : "N/A");
+    console.log("✅ [MedianBridge] median_library_ready fired — bridge is now available");
 
-    // Attempt registration again now that bridge is ready
+    // Set debug log level now that bridge is ready
     try {
-      if (median?.onesignal?.register) {
-        median.onesignal.register();
-        console.log("✅ [MedianBridge] Called register() on library_ready");
+      const m = (window as any).median;
+      if (m?.onesignal?.setLogLevel) {
+        m.onesignal.setLogLevel({ logLevel: 6, visualLevel: 0 });
+        console.log("✅ [MedianBridge] Debug log level set to 6 on library_ready");
       }
-    } catch (e) {
-      console.log("[MedianBridge] register() on ready failed:", e);
-    }
+    } catch (e) { /* ignore */ }
+
+    // Register now that bridge is guaranteed ready
+    attemptNativeRegistration("median_library_ready");
 
     if (pendingUid !== undefined) {
       applyExternalId(pendingUid);
