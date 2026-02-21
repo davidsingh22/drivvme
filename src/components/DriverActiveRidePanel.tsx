@@ -109,6 +109,14 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           setActiveRide(null);
           return;
         }
+
+        // Never set completed/cancelled rides as active
+        if (data.status === 'completed' || data.status === 'cancelled') {
+          setActiveRide(null);
+          setRiderInfo(null);
+          setDriverMismatch(null);
+          return;
+        }
         
         setDriverMismatch(null);
         setActiveRide(data);
