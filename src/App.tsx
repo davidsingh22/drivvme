@@ -242,7 +242,13 @@ const RouteRestorer = () => {
       // If the driver last used /driver, restore them there immediately on iOS reload.
       if (roles.length === 0 || roles.includes('driver')) {
         navigate('/driver', { replace: true });
+        return;
       }
+    }
+
+    // For riders, always go to rider-home on cold start / reopen
+    if (roles.includes('rider') || (!roles.includes('driver') && !roles.includes('admin'))) {
+      navigate('/rider-home', { replace: true });
     }
   }, [authLoading, session, roles, location.pathname, navigate]);
 
