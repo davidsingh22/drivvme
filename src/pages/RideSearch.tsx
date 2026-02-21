@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MapPin, Navigation, Clock, Search, RotateCcw } from 'lucide-react';
+import { ArrowLeft, MapPin, Navigation, Clock, Search, RotateCcw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -22,7 +22,7 @@ const RideSearch = () => {
   const navigate = useNavigate();
   const { language } = useLanguage();
   const { user } = useAuth();
-  const { token: mapboxToken } = useMapboxToken();
+  const { token: mapboxToken, loading: tokenLoading } = useMapboxToken();
 
   const [pickupLabel, setPickupLabel] = useState(
     language === 'fr' ? 'Position actuelle' : 'Current location'
@@ -33,14 +33,41 @@ const RideSearch = () => {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchTimedOut, setSearchTimedOut] = useState(false);
+  const [apiReady, setApiReady] = useState(false);
   const destRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
+  const pendingQueryRef = useRef<string | null>(null);
 
   const CACHE_KEY = 'drivveme_recent_destinations';
 
-  // Phase 1 warm-up: read cached GPS immediately
+  // ── Init Guard: track when mapbox token is ready ──
   useEffect(() => {
+    if (mapboxToken && !tokenLoading) {
+      console.log('[RideSearch] API ready');
+      setApiReady(true);
+      // If user typed while API was booting, auto-fire that search now
+      if (pendingQueryRef.current && pendingQueryRef.current.length >= 2) {
+        const q = pendingQueryRef.current;
+        pendingQueryRef.current = null;
+        searchMapbox(q);
+      }
+    } else {
+      setApiReady(false);
+    }
+  }, [mapboxToken, tokenLoading]);
+
+  // ── Load cached destinations IMMEDIATELY (local cache priority) ──
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) setDestinations(JSON.parse(cached));
+    } catch { /* ignore */ }
+  }, []);
+
+  // ── Cold-start GPS wake-up with 5s high-priority timeout ──
+  useEffect(() => {
+    // Read cached GPS first for instant proximity
     try {
       const raw = localStorage.getItem('drivveme_gps_warm');
       if (raw) {
@@ -52,6 +79,7 @@ const RideSearch = () => {
       }
     } catch { /* ignore */ }
 
+    // Then force a high-priority fresh GPS lock
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -61,17 +89,9 @@ const RideSearch = () => {
           localStorage.setItem('drivveme_gps_warm', JSON.stringify({ ...coords, ts: Date.now() }));
         },
         () => {},
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
     }
-  }, []);
-
-  // Load cached destinations immediately
-  useEffect(() => {
-    try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) setDestinations(JSON.parse(cached));
-    } catch { /* ignore */ }
   }, []);
 
   // Load past destinations from DB
@@ -104,6 +124,7 @@ const RideSearch = () => {
         console.log('[RideSearch] Waking up search API');
         clearMapboxTokenCache();
         retryCountRef.current = 0;
+        setApiReady(false); // will re-set to true once token reloads
       }
     };
     document.addEventListener('visibilitychange', wakeUp);
@@ -136,26 +157,36 @@ const RideSearch = () => {
     [mapboxToken, language]
   );
 
-  // Core search with 2s timeout, fuzzy fallback, and auto-retry
+  // ── Core search: 1.5s SearchBox timeout → instant Geocoding fuzzy fallback ──
   const searchMapbox = useCallback(
     async (query: string) => {
-      if (!mapboxToken || query.length < 2) {
+      if (query.length < 2) {
         setSearchResults([]);
         setSearchTimedOut(false);
         return;
       }
+
+      // If API not ready yet, queue the query for auto-fire when ready
+      if (!mapboxToken) {
+        console.log('[RideSearch] API not ready, queuing query:', query);
+        pendingQueryRef.current = query;
+        return;
+      }
+
       setIsSearching(true);
       setSearchTimedOut(false);
 
-      const abortController = new AbortController();
-      const timeoutId = setTimeout(() => abortController.abort(), 2000);
+      const proximity = pickupCoords
+        ? `${pickupCoords.lng},${pickupCoords.lat}`
+        : '-73.5673,45.5017';
 
+      // Try SearchBox with 1.5s hard timeout, fallback to Geocoding immediately
+      let searchBoxResults: any[] = [];
       try {
-        const sessionToken = crypto.randomUUID();
-        const proximity = pickupCoords
-          ? `${pickupCoords.lng},${pickupCoords.lat}`
-          : '-73.5673,45.5017';
+        const abortController = new AbortController();
+        const timeoutId = setTimeout(() => abortController.abort(), 1500);
 
+        const sessionToken = crypto.randomUUID();
         const params = new URLSearchParams({
           access_token: mapboxToken,
           session_token: sessionToken,
@@ -210,16 +241,27 @@ const RideSearch = () => {
               } catch { return null; }
             })
           );
-          const filtered = detailed.filter(Boolean);
-          if (filtered.length > 0) {
-            setSearchResults(filtered);
-            retryCountRef.current = 0;
-            return;
-          }
+          searchBoxResults = detailed.filter(Boolean);
         }
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.warn('[RideSearch] SearchBox timed out at 1.5s, falling through to Geocoding');
+        } else {
+          console.warn('[RideSearch] SearchBox error, falling through to Geocoding:', err.message);
+        }
+      }
 
-        // Search Box returned 0 results → try Geocoding API with fuzzyMatch
-        console.log('[RideSearch] SearchBox returned 0, falling back to Geocoding with fuzzy');
+      // If SearchBox got results, use them
+      if (searchBoxResults.length > 0) {
+        setSearchResults(searchBoxResults);
+        retryCountRef.current = 0;
+        setIsSearching(false);
+        return;
+      }
+
+      // ── Fuzzy Geocoding fallback (always fires on cold start / 0 results) ──
+      try {
+        console.log('[RideSearch] Using Geocoding fuzzy fallback for:', query);
         const geoRes = await fetch(
           `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${mapboxToken}&language=${language}&country=ca&limit=5&types=poi,address,place,locality,neighborhood&autocomplete=true&fuzzyMatch=true&proximity=${proximity}`
         );
@@ -236,31 +278,22 @@ const RideSearch = () => {
           setSearchResults(geoResults);
           retryCountRef.current = 0;
         } else if (retryCountRef.current < 1) {
-          // Silent re-init: clear cache and retry once
+          // Silent re-init and retry once
           console.log('[RideSearch] 0 results — re-initializing API and retrying');
           retryCountRef.current++;
           clearMapboxTokenCache();
-          // Small delay then retry
           setTimeout(() => searchMapbox(query), 500);
         } else {
           setSearchResults([]);
+          setSearchTimedOut(true); // Show recents as fallback
         }
-      } catch (err: any) {
-        clearTimeout(timeoutId);
-        if (err.name === 'AbortError') {
-          // 2s timeout hit — show recent destinations as fallback
-          console.warn('[RideSearch] Search timed out after 2s, showing recents');
-          setSearchTimedOut(true);
-          setSearchResults([]);
-        } else {
-          console.error('[RideSearch] Search error:', err);
-          setSearchResults([]);
-          // Auto-retry once on network error
-          if (retryCountRef.current < 1) {
-            retryCountRef.current++;
-            clearMapboxTokenCache();
-            setTimeout(() => searchMapbox(query), 500);
-          }
+      } catch {
+        setSearchResults([]);
+        setSearchTimedOut(true);
+        if (retryCountRef.current < 1) {
+          retryCountRef.current++;
+          clearMapboxTokenCache();
+          setTimeout(() => searchMapbox(query), 500);
         }
       } finally {
         setIsSearching(false);
@@ -321,6 +354,8 @@ const RideSearch = () => {
 
   // Show recents as fallback when search timed out or API is dead
   const showRecentsFallback = searchTimedOut && destinations.length > 0;
+  // Show init spinner when API not ready and user is typing
+  const showInitSpinner = !apiReady && destinationQuery.length >= 2;
 
   return (
     <div className="fixed inset-0 z-50 bg-[#1a1a2e] flex flex-col">
@@ -358,14 +393,23 @@ const RideSearch = () => {
             className="flex-1 bg-transparent text-white placeholder:text-white/40 text-sm outline-none"
             autoComplete="off"
           />
-          {isSearching && (
-            <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin flex-shrink-0" />
+          {(isSearching || showInitSpinner) && (
+            <Loader2 className="h-4 w-4 text-white/50 animate-spin flex-shrink-0" />
           )}
         </div>
       </div>
 
       {/* Results list */}
       <div className="flex-1 overflow-y-auto px-4 pb-[env(safe-area-inset-bottom,16px)]">
+        {/* Init guard: show "warming up" instead of "no results" */}
+        {showInitSpinner && searchResults.length === 0 && (
+          <div className="text-center py-6">
+            <p className="text-white/40 text-xs">
+              {language === 'fr' ? 'Initialisation de la recherche…' : 'Warming up search…'}
+            </p>
+          </div>
+        )}
+
         {/* Timeout fallback banner */}
         {searchTimedOut && (
           <div className="mb-3 p-3 rounded-xl bg-white/8 flex items-center justify-between">
@@ -400,10 +444,10 @@ const RideSearch = () => {
           </div>
         )}
 
-        {/* Past destinations (always show when timeout or no query) */}
+        {/* Past destinations (always show when timeout, init loading, or no query) */}
         {(filteredDestinations.length > 0 && (searchResults.length === 0 || showRecentsFallback)) && (
           <>
-            {(destinationQuery.length === 0 || showRecentsFallback) && (
+            {(destinationQuery.length === 0 || showRecentsFallback || showInitSpinner) && (
               <p className="text-white/40 text-xs uppercase tracking-wider mb-2 px-2">
                 {language === 'fr' ? 'Récents' : 'Recent'}
               </p>
@@ -435,8 +479,8 @@ const RideSearch = () => {
           </>
         )}
 
-        {/* Empty state with retry */}
-        {filteredDestinations.length === 0 && searchResults.length === 0 && destinationQuery.length > 0 && !isSearching && !searchTimedOut && (
+        {/* Empty state with retry — only when API IS ready and still no results */}
+        {filteredDestinations.length === 0 && searchResults.length === 0 && destinationQuery.length > 0 && !isSearching && !searchTimedOut && apiReady && !showInitSpinner && (
           <div className="text-center py-12 space-y-3">
             <p className="text-white/40 text-sm">
               {language === 'fr' ? 'Aucun résultat trouvé' : 'No results found'}
