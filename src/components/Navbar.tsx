@@ -66,10 +66,9 @@ const Navbar = () => {
       supabase.removeChannel(channel);
     };
   }, [user?.id, isDriver]);
-  const handleSignOut = () => {
-    // Navigate immediately for instant feedback, signOut runs in background
-    navigate('/');
-    signOut();
+  const handleSignOut = async () => {
+    await signOut();
+    window.location.href = '/';
   };
   const getInitials = () => {
     if (profile?.first_name && profile?.last_name) {
