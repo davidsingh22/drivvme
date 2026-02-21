@@ -50,11 +50,12 @@ interface Location {
   lng: number;
 }
 
-// Test accounts that bypass payment
-const TEST_ACCOUNTS = ['alsenesa@hotmail.com'];
+// Test accounts that bypass payment (unlimited)
+const TEST_ACCOUNTS: string[] = [];
 
 // Limited test accounts - bypass payment for a limited number of rides
 const LIMITED_TEST_ACCOUNTS: Record<string, number> = {
+  'alsenesa@hotmail.com': 500,
   'sean.mcturk@outlook.com': 3,
   'patsy@hotmail.com': 999,
   'rymcturk@gmail.com': 3,
