@@ -23,6 +23,32 @@ export function initMedianOneSignalAuthLink() {
     console.log("[MedianBridge] setLogLevel failed (non-fatal):", e);
   }
 
+  // --- Diagnostic: show OneSignal info from bridge ---
+  const showBridgeDiagnostics = async (source: string) => {
+    try {
+      const median = (window as any).median;
+      if (!median?.onesignal?.info) {
+        console.log(`[MedianBridge] No median.onesignal.info available [${source}]`);
+        return;
+      }
+      const info = await median.onesignal.info();
+      console.log(`[MedianBridge] OneSignal info [${source}]:`, JSON.stringify(info));
+      const msg = [
+        `== OneSignal Bridge Diagnostics (${source}) ==`,
+        `App ID: ${info?.appId ?? info?.oneSignalAppId ?? "N/A"}`,
+        `Player ID: ${info?.oneSignalId ?? info?.playerId ?? info?.subscriptionId ?? "N/A"}`,
+        `Push Token: ${info?.pushToken ?? "N/A"}`,
+        `Sender ID / GCM: ${info?.googleProjectNumber ?? info?.senderId ?? info?.gcmSenderId ?? "NOT SET"}`,
+        `Subscribed: ${info?.subscribed ?? info?.isSubscribed ?? "N/A"}`,
+        `Full dump: ${JSON.stringify(info)}`,
+      ].join("\n");
+      alert(msg);
+    } catch (e) {
+      console.log(`[MedianBridge] info() error [${source}]:`, e);
+      alert(`[MedianBridge] info() failed: ${e}`);
+    }
+  };
+
   // --- Native bridge registration (deferred until bridge is confirmed ready) ---
   const attemptNativeRegistration = (source: string) => {
     try {
@@ -32,6 +58,9 @@ export function initMedianOneSignalAuthLink() {
       console.log("[MedianBridge] median:", typeof median, median ? Object.keys(median) : "N/A");
       console.log("[MedianBridge] median.onesignal:", typeof median?.onesignal, median?.onesignal ? Object.keys(median.onesignal) : "N/A");
       console.log("[MedianBridge] gonative:", typeof gonative);
+
+      // Show diagnostics alert BEFORE registration
+      showBridgeDiagnostics(source);
 
       if (median?.onesignal?.register) {
         median.onesignal.register();
