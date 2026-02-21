@@ -929,6 +929,7 @@ const DriverDashboard = () => {
         {/* Map - takes 65% on mobile, flex-[2] on desktop */}
         <div className="flex-[2] min-h-[60vh] lg:min-h-0 relative">
           <MapComponent
+            key={currentRide?.id ?? 'idle'}
             pickup={currentRide ? { lat: currentRide.pickup_lat, lng: currentRide.pickup_lng } : null}
             dropoff={currentRide ? { lat: currentRide.dropoff_lat, lng: currentRide.dropoff_lng } : null}
             driverLocation={driverLocation}
