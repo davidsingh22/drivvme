@@ -451,17 +451,23 @@ const DriverDashboard = () => {
         },
         (payload) => {
           const updatedRide = payload.new as RideRequest;
-          setCurrentRide(updatedRide);
           
-          if (updatedRide.status === 'cancelled') {
-            toast({
-              title: 'Ride cancelled',
-              description: 'The rider cancelled this ride',
-              variant: 'destructive',
-            });
+          // Don't restore completed/cancelled rides — they're finished
+          if (updatedRide.status === 'completed' || updatedRide.status === 'cancelled') {
             setCurrentRide(null);
             setRiderInfo(null);
+            setShowGPSNavigation(false);
+            if (updatedRide.status === 'cancelled') {
+              toast({
+                title: 'Ride cancelled',
+                description: 'The rider cancelled this ride',
+                variant: 'destructive',
+              });
+            }
+            return;
           }
+          
+          setCurrentRide(updatedRide);
         }
       )
       .subscribe();
