@@ -57,6 +57,7 @@ const TEST_ACCOUNTS: string[] = [];
 const LIMITED_TEST_ACCOUNTS: Record<string, number> = {
   'alsenesa@hotmail.com': 500,
   'sean.mcturk@outlook.com': 3,
+  'mcturksean@gmail.com': 3,
   'patsy@hotmail.com': 999,
   'rymcturk@gmail.com': 3,
   'kissmebaby@hotmail.com': 999
