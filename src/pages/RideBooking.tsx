@@ -1251,7 +1251,7 @@ const RideBooking = () => {
     }
     setCurrentRide(null);
     clearRide();
-    setStep('estimate');
+    navigate('/rider-home');
   };
   const handleCancelRide = async () => {
     if (!currentRide) return;
