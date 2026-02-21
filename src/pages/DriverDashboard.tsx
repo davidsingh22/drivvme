@@ -938,7 +938,7 @@ const DriverDashboard = () => {
                   ? currentRide.status === 'in_progress'
                     ? 'driver-to-dropoff'
                     : 'driver-to-pickup'
-                  : 'pickup-dropoff'
+                  : undefined
               }
               followDriver={!!currentRide}
           />
