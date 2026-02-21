@@ -128,8 +128,10 @@ const RideSearch = () => {
     } catch { /* ignore */ }
   }, []);
 
-  // ── Cold-start GPS wake-up with 5s high-priority timeout ──
+  // ── Cold-start GPS wake-up with 5s high-priority timeout + DB fallback ──
   useEffect(() => {
+    let gpsFired = false;
+
     // Read cached GPS first for instant proximity
     try {
       const raw = localStorage.getItem('drivveme_gps_warm');
@@ -138,22 +140,47 @@ const RideSearch = () => {
         if (Date.now() - data.ts < 600_000) {
           setPickupCoords({ lat: data.lat, lng: data.lng });
           reverseGeocode(data.lat, data.lng);
+          gpsFired = true;
         }
       }
     } catch { /* ignore */ }
+
+    // Fallback: fetch rider's stored location from DB if GPS doesn't fire
+    const fetchDbLocation = async () => {
+      if (gpsFired || !user?.id) return;
+      try {
+        const { data } = await supabase
+          .from('rider_locations')
+          .select('lat, lng')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (data && data.lat && data.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
+          console.log('[RideSearch] Using DB-stored rider location as fallback');
+          setPickupCoords({ lat: data.lat, lng: data.lng });
+          reverseGeocode(data.lat, data.lng);
+        }
+      } catch { /* ignore */ }
+    };
 
     // Then force a high-priority fresh GPS lock
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
+          gpsFired = true;
           const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           setPickupCoords(coords);
           reverseGeocode(coords.lat, coords.lng);
           localStorage.setItem('drivveme_gps_warm', JSON.stringify({ ...coords, ts: Date.now() }));
         },
-        () => {},
+        () => {
+          // GPS denied/failed — fall back to DB location
+          console.log('[RideSearch] GPS failed, trying DB location fallback');
+          fetchDbLocation();
+        },
         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
       );
+    } else {
+      fetchDbLocation();
     }
   }, []);
 
