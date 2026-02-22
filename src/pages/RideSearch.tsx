@@ -430,35 +430,11 @@ const RideSearch = () => {
     }
   };
 
-  const selectDestination = async (dest: { name: string; address: string; lat: number; lng: number }) => {
-    let pLat = pickupCoords?.lat ?? null;
-    let pLng = pickupCoords?.lng ?? null;
-    let pAddr = pickupLabel;
-
-    // If GPS hasn't resolved yet, do a quick DB lookup before navigating
-    if ((pLat === null || pLng === null) && user?.id) {
-      console.log('[RideSearch] No GPS coords yet, fetching from DB before navigation');
-      try {
-        const { data } = await supabase
-          .from('rider_locations')
-          .select('lat, lng')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        if (data?.lat && data?.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
-          pLat = data.lat;
-          pLng = data.lng;
-          pAddr = pAddr || (language === 'fr' ? 'Position actuelle' : 'Current location');
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Last resort: use Montreal defaults so auto-estimate can still fire
-    if (pLat === null || pLng === null) {
-      console.log('[RideSearch] Using Montreal defaults for pickup');
-      pLat = 45.5017;
-      pLng = -73.5673;
-      pAddr = pAddr || (language === 'fr' ? 'Position actuelle' : 'Current location');
-    }
+  const selectDestination = (dest: { name: string; address: string; lat: number; lng: number }) => {
+    // Grab whatever pickup we have right now — never block navigation with async
+    const pLat = pickupCoords?.lat ?? null;
+    const pLng = pickupCoords?.lng ?? null;
+    const pAddr = pickupLabel;
 
     console.log('[RideSearch] selectDestination →', { dest: dest.name, pLat, pLng, pAddr });
 

@@ -562,11 +562,10 @@ const RideBooking = () => {
         });
       }
     } else if (user?.id) {
-      // Pickup coords missing from search — try DB lookup, then GPS
+      // Pickup coords missing from search — try DB lookup
       hasAutoDetectedLocation.current = true;
       setIsDetectingLocation(true);
       (async () => {
-        let resolved = false;
         try {
           const { data } = await supabase
             .from('rider_locations')
@@ -578,35 +577,8 @@ const RideBooking = () => {
             const pickupAddr = addr || `${data.lat.toFixed(4)}, ${data.lng.toFixed(4)}`;
             setPickupAddress(pickupAddr);
             setPickup({ address: pickupAddr, lat: data.lat, lng: data.lng });
-            resolved = true;
           }
         } catch { /* ignore */ }
-
-        // Also try GPS as a parallel/fallback
-        if (!resolved && navigator.geolocation) {
-          try {
-            const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-              navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: true, timeout: 6000, maximumAge: 60000
-              });
-            });
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            const addr = await reverseGeocode(lat, lng);
-            const pickupAddr = addr || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-            setPickupAddress(pickupAddr);
-            setPickup({ address: pickupAddr, lat, lng });
-            resolved = true;
-          } catch { /* GPS failed */ }
-        }
-
-        // Last resort: use Montreal defaults so auto-estimate can proceed
-        if (!resolved) {
-          const defaultAddr = language === 'fr' ? 'Position actuelle' : 'Current location';
-          setPickupAddress(defaultAddr);
-          setPickup({ address: defaultAddr, lat: 45.5017, lng: -73.5673 });
-        }
-
         setIsDetectingLocation(false);
       })();
     } else {
