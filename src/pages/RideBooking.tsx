@@ -532,6 +532,10 @@ const RideBooking = () => {
   // Phase 3: If arriving from /search with a destination, auto-fill and jump to estimate
   const hasAppliedSearchState = useRef(false);
   const shouldAutoEstimate = useRef(false);
+  // If arriving from search with autoEstimate, show a loading screen instead of flashing input
+  const [isAutoEstimating, setIsAutoEstimating] = useState(
+    !!(routeLocation.state as any)?.autoEstimate
+  );
   useEffect(() => {
     const state = routeLocation.state as any;
     if (!state?.dropoffAddress || hasAppliedSearchState.current) return;
@@ -543,30 +547,59 @@ const RideBooking = () => {
       setDropoff({ address: state.dropoffAddress, lat: state.dropoffLat, lng: state.dropoffLng });
     }
 
-    // Set pickup from search state if available
-    if (state.pickupLat != null && state.pickupLng != null) {
-      const addr = state.pickupAddress || '';
+    // ALWAYS prefer fresh GPS for the most accurate pickup — run GPS and DB in parallel
+    hasAutoDetectedLocation.current = true;
+    setIsDetectingLocation(true);
+
+    // If search passed coords, use them as an immediate fallback while GPS resolves
+    const hasSearchCoords = state.pickupLat != null && state.pickupLng != null;
+    if (hasSearchCoords) {
+      const addr = state.pickupAddress || (language === 'fr' ? 'Détection...' : 'Detecting...');
       setPickupAddress(addr);
       setPickup({ address: addr, lat: state.pickupLat, lng: state.pickupLng });
-      hasAutoDetectedLocation.current = true;
-      setIsDetectingLocation(false);
+    }
 
-      // If address is generic ("Current location" etc), resolve it
-      const generic = ['Current location', 'Position actuelle'];
-      if (generic.includes(addr) || !addr) {
-        reverseGeocode(state.pickupLat, state.pickupLng).then(resolved => {
-          if (resolved) {
-            setPickupAddress(resolved);
-            setPickup(prev => prev ? { ...prev, address: resolved } : null);
-          }
-        });
+    // Resolve best pickup location: GPS (highest priority), then search coords, then DB, then defaults
+    (async () => {
+      let resolved = false;
+
+      // Try fresh GPS first — this gives the most accurate current address
+      if (navigator.geolocation) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true, timeout: 5000, maximumAge: 30000
+            });
+          });
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          // Store warm GPS for next time
+          localStorage.setItem('drivveme_gps_warm', JSON.stringify({ lat, lng, ts: Date.now() }));
+          const addr = await reverseGeocode(lat, lng);
+          const pickupAddr = addr || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+          setPickupAddress(pickupAddr);
+          setPickup({ address: pickupAddr, lat, lng });
+          resolved = true;
+        } catch {
+          console.log('[RideBooking] Fresh GPS failed, using fallbacks');
+        }
       }
-    } else if (user?.id) {
-      // Pickup coords missing from search — try DB lookup, then GPS
-      hasAutoDetectedLocation.current = true;
-      setIsDetectingLocation(true);
-      (async () => {
-        let resolved = false;
+
+      // If GPS failed but we have search coords, resolve their address properly
+      if (!resolved && hasSearchCoords) {
+        const generic = ['Current location', 'Position actuelle', 'Detecting...', 'Détection...', ''];
+        if (generic.includes(state.pickupAddress || '')) {
+          const addr = await reverseGeocode(state.pickupLat, state.pickupLng);
+          if (addr) {
+            setPickupAddress(addr);
+            setPickup(prev => prev ? { ...prev, address: addr } : null);
+          }
+        }
+        resolved = true; // search coords are already set above
+      }
+
+      // DB fallback if neither GPS nor search coords worked
+      if (!resolved && user?.id) {
         try {
           const { data } = await supabase
             .from('rider_locations')
@@ -581,37 +614,17 @@ const RideBooking = () => {
             resolved = true;
           }
         } catch { /* ignore */ }
+      }
 
-        // Also try GPS as a parallel/fallback
-        if (!resolved && navigator.geolocation) {
-          try {
-            const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-              navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: true, timeout: 6000, maximumAge: 60000
-              });
-            });
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
-            const addr = await reverseGeocode(lat, lng);
-            const pickupAddr = addr || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-            setPickupAddress(pickupAddr);
-            setPickup({ address: pickupAddr, lat, lng });
-            resolved = true;
-          } catch { /* GPS failed */ }
-        }
+      // Last resort: Montreal defaults
+      if (!resolved) {
+        const defaultAddr = language === 'fr' ? 'Position actuelle' : 'Current location';
+        setPickupAddress(defaultAddr);
+        setPickup({ address: defaultAddr, lat: 45.5017, lng: -73.5673 });
+      }
 
-        // Last resort: use Montreal defaults so auto-estimate can proceed
-        if (!resolved) {
-          const defaultAddr = language === 'fr' ? 'Position actuelle' : 'Current location';
-          setPickupAddress(defaultAddr);
-          setPickup({ address: defaultAddr, lat: 45.5017, lng: -73.5673 });
-        }
-
-        setIsDetectingLocation(false);
-      })();
-    } else {
       setIsDetectingLocation(false);
-    }
+    })();
 
     if (state.autoEstimate) {
       shouldAutoEstimate.current = true;
@@ -1107,7 +1120,9 @@ const RideBooking = () => {
       const estimate = calculateFare(estimatedDistance, estimatedDuration);
       setFareEstimate(estimate);
       setStep('estimate');
+      setIsAutoEstimating(false);
     } catch (error) {
+      setIsAutoEstimating(false);
       toast({
         title: 'Route error',
         description: 'Unable to calculate route',
@@ -1122,6 +1137,16 @@ const RideBooking = () => {
     shouldAutoEstimate.current = false;
     calculateRoute();
   }, [pickup, dropoff, calculateRoute]);
+
+  // Safety: clear auto-estimating state after 8s to prevent stuck loading screen
+  useEffect(() => {
+    if (!isAutoEstimating) return;
+    const timer = setTimeout(() => {
+      console.warn('[RideBooking] Auto-estimate safety timeout — clearing loading screen');
+      setIsAutoEstimating(false);
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [isAutoEstimating]);
 
   const handleGetEstimate = async () => {
     if (!pickup || !dropoff) {
@@ -1482,6 +1507,20 @@ const RideBooking = () => {
           <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={driverInfo} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={() => { resetBooking(); window.location.href = '/rider-home'; }} />
         </div>
       </div>;
+  }
+
+  // Show loading screen while auto-estimating from search → estimate transition
+  if (step === 'input' && isAutoEstimating) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p className="text-sm text-muted-foreground">
+            {language === 'fr' ? 'Calcul de votre trajet...' : 'Calculating your ride...'}
+          </p>
+        </div>
+      </div>
+    );
   }
 
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
