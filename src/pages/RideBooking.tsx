@@ -1148,19 +1148,19 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // 8s hard cap — never let button stay stuck
+    // 20s hard cap — generous for slow mobile LTE networks
     const safetyTimeout = setTimeout(() => {
-      console.warn('[RideBooking] Payment zombie killer triggered at 8s');
+      console.warn('[RideBooking] Payment zombie killer triggered at 20s');
       setIsSubmitting(false);
       if (!currentRide?.id) {
         setStep('estimate');
         toast({
-          title: 'Request timed out',
-          description: 'Please try again. Check your connection.',
+          title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
+          description: language === 'fr' ? 'Veuillez réessayer.' : 'Please try again. Check your connection.',
           variant: 'destructive'
         });
       }
-    }, 8000);
+    }, 20000);
 
     // ── Ultra-fast ride creation with 400ms auto-retry ──
     const createRideOnce = async (): Promise<any> => {
