@@ -12,76 +12,6 @@ export function initMedianOneSignalAuthLink() {
   // Queue: auth changes that arrive before the bridge is ready
   let pendingUid: string | null | undefined = undefined;
 
-  // --- FIRST LINE: Enable verbose OneSignal native debug logging ---
-  try {
-    const median = (window as any).median;
-    if (median?.onesignal?.setLogLevel) {
-      median.onesignal.setLogLevel({ logLevel: 6 });
-      console.log("✅ [MedianBridge] OneSignal debug log level set to 6 (VERBOSE) — FIRST LINE");
-    }
-  } catch (e) {
-    console.log("[MedianBridge] setLogLevel failed (non-fatal):", e);
-  }
-
-  // --- Floating status label ---
-  const updateStatusLabel = (text: string) => {
-    let el = document.getElementById("median-reg-status");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "median-reg-status";
-      el.style.cssText =
-        "position:fixed;bottom:8px;left:50%;transform:translateX(-50%);z-index:99999;" +
-        "background:rgba(0,0,0,0.85);color:#0f0;padding:6px 16px;border-radius:8px;" +
-        "font-size:12px;font-family:monospace;pointer-events:none;";
-      document.body.appendChild(el);
-    }
-    el.textContent = text;
-  };
-
-  updateStatusLabel("Registering...");
-
-  // --- Native bridge registration with explicit googleProjectNumber ---
-  const attemptNativeRegistration = (source: string) => {
-    try {
-      const median = (window as any).median;
-      const gonative = (window as any).gonative;
-      console.log(`[MedianBridge] attemptNativeRegistration (${source})`);
-
-      const regPayload = {
-        appId: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
-        googleProjectNumber: "640478051658",
-      };
-
-      if (median?.onesignal?.register) {
-        median.onesignal.register(regPayload);
-        console.log(`✅ [MedianBridge] Called median.onesignal.register(${JSON.stringify(regPayload)}) [${source}]`);
-        updateStatusLabel(`Registration Sent (${source})`);
-        return true;
-      } else if (gonative?.onesignal?.register) {
-        gonative.onesignal.register(regPayload);
-        console.log(`✅ [MedianBridge] Called gonative.onesignal.register() [${source}]`);
-        updateStatusLabel(`Registration Sent (${source})`);
-        return true;
-      } else if ((window as any).despia?.registerpush) {
-        (window as any).despia.registerpush();
-        console.log(`✅ [MedianBridge] Called despia.registerpush() [${source}]`);
-        updateStatusLabel(`Registration Sent (${source})`);
-        return true;
-      } else {
-        console.log(`[MedianBridge] No native register method found [${source}]`);
-        updateStatusLabel(`No bridge found (${source})`);
-        return false;
-      }
-    } catch (e) {
-      console.log(`[MedianBridge] Registration error [${source}]:`, e);
-      updateStatusLabel(`Reg error: ${e}`);
-      return false;
-    }
-  };
-
-  // Skip immediate attempt — wait for median_library_ready + delay instead
-  updateStatusLabel("Waiting for bridge...");
-
   const applyExternalId = (uid: string | null) => {
     try {
       const median = (window as any).median;
@@ -116,23 +46,7 @@ export function initMedianOneSignalAuthLink() {
 
   // Register the Median library-ready callback
   (window as any).median_library_ready = () => {
-    console.log("✅ [MedianBridge] median_library_ready fired — bridge is now available");
-
-    // Set debug log level now that bridge is ready
-    try {
-      const m = (window as any).median;
-      if (m?.onesignal?.setLogLevel) {
-        m.onesignal.setLogLevel({ logLevel: 6 });
-        console.log("✅ [MedianBridge] Debug log level set to 6 on library_ready");
-      }
-    } catch (e) { /* ignore */ }
-
-    // Wait 5 seconds after bridge ready before registering
-    updateStatusLabel("Bridge ready — waiting 5s...");
-    setTimeout(() => {
-      attemptNativeRegistration("median_library_ready+5s");
-    }, 5000);
-
+    console.log("✅ Median library ready");
     if (pendingUid !== undefined) {
       applyExternalId(pendingUid);
       pendingUid = undefined;
