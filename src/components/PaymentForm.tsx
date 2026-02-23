@@ -371,6 +371,18 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
 
     const initialize = async () => {
       try {
+        // ── POINT 1: Refresh session before payment intent ──
+        console.log('[PaymentForm] STEP_3_REFRESHING_SESSION');
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          console.warn('[PaymentForm] No session, refreshing…');
+          const { error: refreshErr } = await supabase.auth.refreshSession();
+          if (refreshErr) {
+            throw new Error('Session expired. Please sign in again.');
+          }
+        }
+        console.log('[PaymentForm] STEP_3_SESSION_OK');
+
         // Get cached stripe promise (doesn't await - just gets the promise)
         const stripePromiseToUse = getStripePromise();
         setStripePromise(stripePromiseToUse);
@@ -381,14 +393,17 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
           | { data: any; error: any }
           | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
-          console.log(`[PaymentForm] create-payment-intent attempt ${attempt + 1}`, { rideId, amount });
+          console.log(`[PaymentForm] STEP_3_PAYMENT_INTENT attempt ${attempt + 1}`, { rideId, amount });
           paymentResult = await supabase.functions.invoke('create-payment-intent', {
             body: { rideId, amount },
           });
-          console.log(`[PaymentForm] attempt ${attempt + 1} result:`, paymentResult?.data ? 'has data' : 'no data', paymentResult?.error?.message);
+
+          // ── POINT 3: Surface real error from edge function ──
+          const fnError = paymentResult?.data?.error || paymentResult?.error?.message;
+          console.log(`[PaymentForm] attempt ${attempt + 1} result:`, paymentResult?.data ? 'has data' : 'no data', fnError || 'OK');
 
           if (!paymentResult?.error && paymentResult?.data?.clientSecret) break;
-          lastErr = paymentResult?.error ?? new Error('No client secret returned');
+          lastErr = paymentResult?.error ?? new Error(fnError || 'No client secret returned');
           await sleep(300 * Math.pow(2, attempt));
         }
 
@@ -402,14 +417,16 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
           throw (lastErr instanceof Error ? lastErr : new Error('Failed to create payment'));
         }
 
+        console.log('[PaymentForm] STEP_3_PAYMENT_INTENT_CREATED');
         setClientSecret(paymentResult.data.clientSecret);
       } catch (err: any) {
         if (!isMounted) return;
-        console.error('Error initializing payment:', err);
+        // ── POINT 3: Full error surfacing ──
+        console.error('PAYMENT_FLOW_ERROR', err);
         setError(err.message);
         toast({
-          title: 'Error',
-          description: 'Failed to initialize payment. Please try again.',
+          title: 'Payment error',
+          description: err.message || 'Failed to initialize payment. Please try again.',
           variant: 'destructive',
         });
       } finally {
