@@ -180,6 +180,7 @@ const RideBooking = () => {
   const [minutesAway, setMinutesAway] = useState<number | null>(null);
   const [followDriver, setFollowDriver] = useState(true);
   const paymentGateCheckedRef = useRef<string | null>(null);
+  const rideCreatedRef = useRef(false);
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
@@ -1173,11 +1174,14 @@ const RideBooking = () => {
     }
     setIsSubmitting(true);
 
-    // 20s hard cap — generous for slow mobile LTE networks
+    rideCreatedRef.current = false;
+
+    // 30s hard cap — generous for slow mobile LTE networks
     const safetyTimeout = setTimeout(() => {
-      console.warn('[RideBooking] Payment zombie killer triggered at 20s');
+      console.warn('[RideBooking] Payment zombie killer triggered at 30s');
       setIsSubmitting(false);
-      if (!currentRide?.id) {
+      // Only reset if ride was NOT created (use ref to avoid stale closure)
+      if (!rideCreatedRef.current) {
         setStep('estimate');
         toast({
           title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
@@ -1185,7 +1189,7 @@ const RideBooking = () => {
           variant: 'destructive'
         });
       }
-    }, 20000);
+    }, 30000);
 
     // ── Ultra-fast ride creation with 400ms auto-retry ──
     const createRideOnce = async (): Promise<any> => {
@@ -1242,6 +1246,7 @@ const RideBooking = () => {
           title: skipPayment ? 'Test ride created' : 'Payment required',
           message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
         });
+        rideCreatedRef.current = true;
         setCurrentRide(ride);
         updateRide(ride);
 
