@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { withTimeout } from '@/lib/withTimeout';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft } from 'lucide-react';
@@ -1193,12 +1194,13 @@ const RideBooking = () => {
 
     // ── Ultra-fast ride creation with 400ms auto-retry ──
     const createRideOnce = async (): Promise<any> => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session } } = await withTimeout(
+        supabase.auth.getSession(), 8000, 'Session check'
+      );
       if (!session) throw new Error('SESSION_EXPIRED');
 
       const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-      // Minimal payload — only essentials for smallest 5G packet
-      const { data: ride, error: rideErr } = await supabase.from('rides').insert({
+      const insertPromise = supabase.from('rides').insert({
         rider_id: user.id,
         pickup_address: pickup.address,
         pickup_lat: pickup.lat,
@@ -1216,6 +1218,8 @@ const RideBooking = () => {
         platform_fee: fareEstimate.platformFee,
         status: rideStatus
       }).select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id').single();
+
+      const { data: ride, error: rideErr } = await withTimeout(insertPromise, 12000, 'Ride creation');
       if (rideErr || !ride?.id) throw new Error(rideErr?.message || 'Ride creation failed');
       return ride;
     };
