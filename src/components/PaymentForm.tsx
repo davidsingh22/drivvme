@@ -1,5 +1,4 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { withTimeout } from '@/lib/withTimeout';
 import { loadStripe, PaymentRequest, Stripe } from '@stripe/stripe-js';
 import {
   Elements,
@@ -382,19 +381,11 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
           | { data: any; error: any }
           | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            paymentResult = await withTimeout(
-              supabase.functions.invoke('create-payment-intent', {
-                body: { rideId, amount },
-              }),
-              15000,
-              'Payment intent'
-            );
-          } catch (timeoutErr) {
-            lastErr = timeoutErr;
-            await sleep(300 * Math.pow(2, attempt));
-            continue;
-          }
+          console.log(`[PaymentForm] create-payment-intent attempt ${attempt + 1}`, { rideId, amount });
+          paymentResult = await supabase.functions.invoke('create-payment-intent', {
+            body: { rideId, amount },
+          });
+          console.log(`[PaymentForm] attempt ${attempt + 1} result:`, paymentResult?.data ? 'has data' : 'no data', paymentResult?.error?.message);
 
           if (!paymentResult?.error && paymentResult?.data?.clientSecret) break;
           lastErr = paymentResult?.error ?? new Error('No client secret returned');
