@@ -1161,95 +1161,133 @@ const RideBooking = () => {
     await calculateRoute();
   };
   const handleProceedToPayment = async () => {
+    // ── POINT 2: One-click lock — prevent double-submit ──
+    if (isSubmitting) return;
     if (!user || !pickup || !dropoff || !fareEstimate) return;
+
+    const ts = () => `[${new Date().toISOString()}]`;
 
     // Test accounts skip payment entirely (unlimited or with remaining free rides)
     const isUnlimited = user.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
     const freeRidesLeft = user.email ? getRemainingFreeRides(user.email) : 0;
     const skipPayment = isUnlimited || freeRidesLeft > 0;
 
-    // Show payment UI immediately (no perceived delay) — unless test account
-    if (!skipPayment) {
-      setStep('payment');
-    }
+    // Lock button immediately
     setIsSubmitting(true);
-
     rideCreatedRef.current = false;
 
-    // 30s hard cap — generous for slow mobile LTE networks
-    const safetyTimeout = setTimeout(() => {
-      console.warn('[RideBooking] Payment zombie killer triggered at 30s');
-      setIsSubmitting(false);
-      // Only reset if ride was NOT created (use ref to avoid stale closure)
-      if (!rideCreatedRef.current) {
-        setStep('estimate');
-        toast({
-          title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
-          description: language === 'fr' ? 'Veuillez réessayer.' : 'Please try again. Check your connection.',
-          variant: 'destructive'
-        });
-      }
-    }, 30000);
-
-    // ── Ultra-fast ride creation with 400ms auto-retry ──
-    const createRideOnce = async (): Promise<any> => {
+    try {
+      // ── POINT 1: Always refresh auth session before payment ──
+      console.log(ts(), 'STEP_1_SESSION_CHECK');
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('SESSION_EXPIRED');
-
-      const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-      console.log('[RideBooking] Creating ride with status:', rideStatus);
-      const { data: ride, error: rideErr } = await supabase.from('rides').insert({
-        rider_id: user.id,
-        pickup_address: pickup.address,
-        pickup_lat: pickup.lat,
-        pickup_lng: pickup.lng,
-        dropoff_address: dropoff.address,
-        dropoff_lat: dropoff.lat,
-        dropoff_lng: dropoff.lng,
-        distance_km: distanceKm,
-        estimated_duration_minutes: Math.round(durationMinutes),
-        estimated_fare: fareEstimate.total,
-        promo_discount: fareEstimate.promoDiscount,
-        subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-        gst_amount: fareEstimate.gstAmount,
-        qst_amount: fareEstimate.qstAmount,
-        platform_fee: fareEstimate.platformFee,
-        status: rideStatus
-      }).select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id').single();
-      console.log('[RideBooking] Ride created:', ride?.id, 'error:', rideErr?.message);
-      if (rideErr || !ride?.id) throw new Error(rideErr?.message || 'Ride creation failed');
-      return ride;
-    };
-
-    (async () => {
-      try {
-        let ride: any;
-        try {
-          ride = await createRideOnce();
-        } catch (firstErr: any) {
-          if (firstErr.message === 'SESSION_EXPIRED') {
-            toast({ title: 'Session expired', description: 'Please sign in again.', variant: 'destructive' });
-            setStep('estimate');
-            navigate('/login');
-            return;
-          }
-          // 400ms auto-retry on first failure (bypasses 5G handshake glitch)
-          console.warn('[RideBooking] First attempt failed, retrying in 400ms…', firstErr.message);
-          await new Promise(r => setTimeout(r, 400));
-          ride = await createRideOnce();
+      if (!session) {
+        console.warn(ts(), 'STEP_1_NO_SESSION — attempting refresh');
+        const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr || !refreshData?.session) {
+          console.error(ts(), 'STEP_1_REFRESH_FAILED', refreshErr?.message);
+          toast({
+            title: language === 'fr' ? 'Session expirée' : 'Session expired',
+            description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+            variant: 'destructive'
+          });
+          navigate('/login');
+          return;
         }
+        console.log(ts(), 'STEP_1_SESSION_REFRESHED');
+      } else {
+        console.log(ts(), 'STEP_1_SESSION_OK');
+      }
 
-        // Non-blocking notification
-        void supabase.from('notifications').insert({
-          user_id: user.id,
-          ride_id: ride.id,
-          type: 'ride_booked',
-          title: skipPayment ? 'Test ride created' : 'Payment required',
-          message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
-        });
-        rideCreatedRef.current = true;
-        setCurrentRide(ride);
-        updateRide(ride);
+      // Show payment UI (unless test account)
+      if (!skipPayment) {
+        setStep('payment');
+      }
+
+      // ── POINT 4: Watchdog timeout — 25s ──
+      const watchdogTimeout = setTimeout(() => {
+        console.warn(ts(), 'WATCHDOG_25S_TRIGGERED');
+        setIsSubmitting(false);
+        if (!rideCreatedRef.current) {
+          setStep('estimate');
+          toast({
+            title: language === 'fr' ? 'Délai dépassé' : 'Payment timed out',
+            description: language === 'fr' ? 'Veuillez réessayer.' : 'Please retry.',
+            variant: 'destructive'
+          });
+        }
+        // POINT 4: Do NOT cancel ride if it was already created
+      }, 25000);
+
+      try {
+        // ── POINT 5: Log every step ──
+        console.log(ts(), 'STEP_2_CREATING_RIDE');
+        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
+
+        const { data: ride, error: rideErr } = await supabase.from('rides').insert({
+          rider_id: user.id,
+          pickup_address: pickup.address,
+          pickup_lat: pickup.lat,
+          pickup_lng: pickup.lng,
+          dropoff_address: dropoff.address,
+          dropoff_lat: dropoff.lat,
+          dropoff_lng: dropoff.lng,
+          distance_km: distanceKm,
+          estimated_duration_minutes: Math.round(durationMinutes),
+          estimated_fare: fareEstimate.total,
+          promo_discount: fareEstimate.promoDiscount,
+          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+          gst_amount: fareEstimate.gstAmount,
+          qst_amount: fareEstimate.qstAmount,
+          platform_fee: fareEstimate.platformFee,
+          status: rideStatus
+        }).select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id').single();
+
+        if (rideErr || !ride?.id) {
+          // One auto-retry after 400ms
+          console.warn(ts(), 'STEP_2_FIRST_ATTEMPT_FAILED', rideErr?.message);
+          await new Promise(r => setTimeout(r, 400));
+          const { data: ride2, error: rideErr2 } = await supabase.from('rides').insert({
+            rider_id: user.id,
+            pickup_address: pickup.address,
+            pickup_lat: pickup.lat,
+            pickup_lng: pickup.lng,
+            dropoff_address: dropoff.address,
+            dropoff_lat: dropoff.lat,
+            dropoff_lng: dropoff.lng,
+            distance_km: distanceKm,
+            estimated_duration_minutes: Math.round(durationMinutes),
+            estimated_fare: fareEstimate.total,
+            promo_discount: fareEstimate.promoDiscount,
+            subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+            gst_amount: fareEstimate.gstAmount,
+            qst_amount: fareEstimate.qstAmount,
+            platform_fee: fareEstimate.platformFee,
+            status: rideStatus
+          }).select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id').single();
+          if (rideErr2 || !ride2?.id) throw new Error(rideErr2?.message || 'Ride creation failed');
+          console.log(ts(), 'STEP_2_RIDE_CREATED rideId=' + ride2.id);
+          rideCreatedRef.current = true;
+          setCurrentRide(ride2 as any);
+          updateRide(ride2 as any);
+
+          // Non-blocking notification
+          void supabase.from('notifications').insert({
+            user_id: user.id, ride_id: ride2.id, type: 'ride_booked',
+            title: skipPayment ? 'Test ride created' : 'Payment required',
+            message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
+          });
+        } else {
+          console.log(ts(), 'STEP_2_RIDE_CREATED rideId=' + ride.id);
+          rideCreatedRef.current = true;
+          setCurrentRide(ride as any);
+          updateRide(ride as any);
+
+          void supabase.from('notifications').insert({
+            user_id: user.id, ride_id: ride.id, type: 'ride_booked',
+            title: skipPayment ? 'Test ride created' : 'Payment required',
+            message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
+          });
+        }
 
         if (skipPayment) {
           if (!isUnlimited && freeRidesLeft > 0 && user.email) incrementFreeRidesUsed(user.email);
@@ -1260,15 +1298,23 @@ const RideBooking = () => {
             description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
           });
         }
-      } catch (err: any) {
-        console.error('Error creating ride:', err);
-        toast({ title: 'Error booking ride', description: err.message, variant: 'destructive' });
-        setStep('estimate');
+
+        console.log(ts(), 'STEP_2_COMPLETE');
       } finally {
-        clearTimeout(safetyTimeout);
+        clearTimeout(watchdogTimeout);
         setIsSubmitting(false);
       }
-    })();
+    } catch (err: any) {
+      // ── POINT 3: Full error surfacing — never silent ──
+      console.error('PAYMENT_FLOW_ERROR', err);
+      toast({
+        title: language === 'fr' ? 'Erreur de paiement' : 'Payment failed',
+        description: err.message || 'An unexpected error occurred.',
+        variant: 'destructive'
+      });
+      setStep('estimate');
+      setIsSubmitting(false);
+    }
   };
   const handlePaymentSuccess = async () => {
     // Payment succeeded – transition ride status to searching so drivers can see it
