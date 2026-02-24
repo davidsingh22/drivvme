@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Car } from 'lucide-react';
 import { useEffect, useRef, useCallback } from 'react';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
@@ -54,6 +55,11 @@ const RiderHome = () => {
     // App resumed — refresh engine
     const idleMs = Date.now() - lastHidden.current;
     console.log(`[RiderHome] App resumed after ${Math.round(idleMs / 1000)}s`);
+
+    // Proactively refresh token if idle > 5 min (non-blocking, fire-and-forget)
+    if (idleMs > 5 * 60 * 1000) {
+      getValidAccessToken().catch(() => {});
+    }
 
     // Always reset Mapbox search API cache so it's fresh
     clearMapboxTokenCache();
