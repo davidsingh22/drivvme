@@ -1204,22 +1204,56 @@ const RideBooking = () => {
     }, 15000);
 
     try {
-      // ── SESSION: Quick validation — don't pre-refresh (that hangs on WebViews).
-      // Instead, just verify we have a cached session. The Supabase client will
-      // auto-refresh internally when making the API call. If the call fails, we
-      // catch it and handle it. ──
+      // ── SESSION: Explicit token expiry check + forced refresh ──
+      // getSession() returns CACHED data — it never returns null on mobile WebViews
+      // even when the JWT is expired. We must check expires_at ourselves.
       console.log(ts(), 'STEP_1_SESSION_CHECK');
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        // No session at all — must login
+      const { data: { session: cachedSession } } = await supabase.auth.getSession();
+      
+      const nowEpoch = Math.floor(Date.now() / 1000);
+      const expiresAt = cachedSession?.expires_at ?? 0;
+      const isExpiredOrExpiringSoon = !cachedSession || expiresAt < nowEpoch + 120; // expired or within 2 min
+      
+      console.log(ts(), 'STEP_1_TOKEN_STATUS', { 
+        hasSession: !!cachedSession, 
+        expiresAt: new Date(expiresAt * 1000).toISOString(),
+        isExpiredOrExpiringSoon
+      });
+
+      let activeSession = cachedSession;
+
+      if (isExpiredOrExpiringSoon) {
+        // Token is stale — MUST refresh before any API call or rides.insert() will hang
+        console.log(ts(), 'STEP_1_REFRESHING_STALE_TOKEN');
+        try {
+          const refreshResult = await Promise.race([
+            supabase.auth.refreshSession(),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('refresh_timeout')), 5000))
+          ]) as { data: { session: any }; error: any };
+          
+          if (refreshResult.error || !refreshResult.data?.session) {
+            throw new Error(refreshResult.error?.message || 'No session after refresh');
+          }
+          activeSession = refreshResult.data.session;
+          console.log(ts(), 'STEP_1_TOKEN_REFRESHED, new expiry:', new Date((activeSession.expires_at || 0) * 1000).toISOString());
+        } catch (refreshErr: any) {
+          console.error(ts(), 'STEP_1_REFRESH_FAILED:', refreshErr.message);
+          clearTimeout(watchdogTimeout);
+          setIsSubmitting(false);
+          toast({
+            title: language === 'fr' ? 'Session expirée' : 'Session expired',
+            description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+            variant: 'destructive'
+          });
+          navigate('/login');
+          return;
+        }
+      }
+
+      if (!activeSession) {
         console.error(ts(), 'STEP_1_NO_SESSION');
         clearTimeout(watchdogTimeout);
         setIsSubmitting(false);
-        toast({
-          title: language === 'fr' ? 'Session expirée' : 'Session expired',
-          description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
-          variant: 'destructive'
-        });
         navigate('/login');
         return;
       }
@@ -1256,10 +1290,12 @@ const RideBooking = () => {
       let ride: any = null;
       let rideErr: any = null;
 
-      // First attempt
-      const result1 = await supabase.from('rides').insert([ridePayload])
+      // First attempt — with 10s timeout to prevent internal auto-refresh hangs
+      const insertPromise = supabase.from('rides').insert([ridePayload])
         .select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id')
         .single();
+      const insertTimeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Ride creation timed out')), 10000));
+      const result1 = await Promise.race([insertPromise, insertTimeout]) as any;
       ride = result1.data;
       rideErr = result1.error;
 
