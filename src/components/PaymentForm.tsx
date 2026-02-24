@@ -371,17 +371,15 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
 
     const initialize = async () => {
       try {
-        // ── POINT 1: Refresh session before payment intent ──
-        console.log('[PaymentForm] STEP_3_REFRESHING_SESSION');
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) {
-          console.warn('[PaymentForm] No session, refreshing…');
-          const { error: refreshErr } = await supabase.auth.refreshSession();
-          if (refreshErr) {
-            throw new Error('Session expired. Please sign in again.');
-          }
+        // ── POINT 1: Force-refresh session before payment intent ──
+        // getSession() returns a CACHED token — it looks valid but may be expired.
+        // Always call refreshSession() to guarantee a fresh JWT.
+        console.log('[PaymentForm] STEP_3_FORCE_REFRESH_SESSION');
+        const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+        if (refreshErr || !refreshData?.session) {
+          throw new Error('Session expired. Please sign in again.');
         }
-        console.log('[PaymentForm] STEP_3_SESSION_OK');
+        console.log('[PaymentForm] STEP_3_SESSION_FRESH, expires:', new Date((refreshData.session.expires_at || 0) * 1000).toISOString());
 
         // Get cached stripe promise (doesn't await - just gets the promise)
         const stripePromiseToUse = getStripePromise();
