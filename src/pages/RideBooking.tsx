@@ -1177,26 +1177,22 @@ const RideBooking = () => {
     rideCreatedRef.current = false;
 
     try {
-      // ── POINT 1: Always refresh auth session before payment ──
-      console.log(ts(), 'STEP_1_SESSION_CHECK');
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        console.warn(ts(), 'STEP_1_NO_SESSION — attempting refresh');
-        const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-        if (refreshErr || !refreshData?.session) {
-          console.error(ts(), 'STEP_1_REFRESH_FAILED', refreshErr?.message);
-          toast({
-            title: language === 'fr' ? 'Session expirée' : 'Session expired',
-            description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
-            variant: 'destructive'
-          });
-          navigate('/login');
-          return;
-        }
-        console.log(ts(), 'STEP_1_SESSION_REFRESHED');
-      } else {
-        console.log(ts(), 'STEP_1_SESSION_OK');
+      // ── POINT 1: Always force-refresh auth session before payment ──
+      // getSession() returns a CACHED token that may be expired on mobile WebViews.
+      // We MUST call refreshSession() every time to get a fresh JWT.
+      console.log(ts(), 'STEP_1_FORCE_REFRESH_SESSION');
+      const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+      if (refreshErr || !refreshData?.session) {
+        console.error(ts(), 'STEP_1_REFRESH_FAILED', refreshErr?.message);
+        toast({
+          title: language === 'fr' ? 'Session expirée' : 'Session expired',
+          description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+          variant: 'destructive'
+        });
+        navigate('/login');
+        return;
       }
+      console.log(ts(), 'STEP_1_SESSION_FRESH, expires:', new Date((refreshData.session.expires_at || 0) * 1000).toISOString());
 
       // Show payment UI (unless test account)
       if (!skipPayment) {
