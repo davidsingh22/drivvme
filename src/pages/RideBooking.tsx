@@ -1204,40 +1204,60 @@ const RideBooking = () => {
     }, 15000);
 
     try {
-      // ── SESSION: Explicit token expiry check + forced refresh ──
-      // getSession() returns CACHED data — it never returns null on mobile WebViews
-      // even when the JWT is expired. We must check expires_at ourselves.
+      // ── SESSION: ALWAYS force-refresh to reset internal GoTrue client state ──
+      // On mobile WebViews, backgrounding the app corrupts the Supabase client's
+      // internal auto-refresh timer. Even if the JWT hasn't expired (10 min < 1hr),
+      // the client's internal state can be stuck, causing rides.insert() to hang
+      // waiting for an internal refresh that never resolves.
+      // FIX: Always call refreshSession() to reset internal state, with setSession()
+      // fallback if refresh hangs.
       console.log(ts(), 'STEP_1_SESSION_CHECK');
       const { data: { session: cachedSession } } = await supabase.auth.getSession();
       
-      const nowEpoch = Math.floor(Date.now() / 1000);
-      const expiresAt = cachedSession?.expires_at ?? 0;
-      const isExpiredOrExpiringSoon = !cachedSession || expiresAt < nowEpoch + 120; // expired or within 2 min
-      
-      console.log(ts(), 'STEP_1_TOKEN_STATUS', { 
-        hasSession: !!cachedSession, 
-        expiresAt: new Date(expiresAt * 1000).toISOString(),
-        isExpiredOrExpiringSoon
-      });
+      if (!cachedSession) {
+        console.error(ts(), 'STEP_1_NO_SESSION');
+        clearTimeout(watchdogTimeout);
+        setIsSubmitting(false);
+        navigate('/login');
+        return;
+      }
 
+      console.log(ts(), 'STEP_1_FORCE_REFRESH — resetting client state');
       let activeSession = cachedSession;
-
-      if (isExpiredOrExpiringSoon) {
-        // Token is stale — MUST refresh before any API call or rides.insert() will hang
-        console.log(ts(), 'STEP_1_REFRESHING_STALE_TOKEN');
-        try {
-          const refreshResult = await Promise.race([
-            supabase.auth.refreshSession(),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('refresh_timeout')), 5000))
-          ]) as { data: { session: any }; error: any };
-          
-          if (refreshResult.error || !refreshResult.data?.session) {
-            throw new Error(refreshResult.error?.message || 'No session after refresh');
-          }
+      try {
+        const refreshResult = await Promise.race([
+          supabase.auth.refreshSession(),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('refresh_timeout')), 4000))
+        ]) as { data: { session: any }; error: any };
+        
+        if (!refreshResult.error && refreshResult.data?.session) {
           activeSession = refreshResult.data.session;
-          console.log(ts(), 'STEP_1_TOKEN_REFRESHED, new expiry:', new Date((activeSession.expires_at || 0) * 1000).toISOString());
-        } catch (refreshErr: any) {
-          console.error(ts(), 'STEP_1_REFRESH_FAILED:', refreshErr.message);
+          console.log(ts(), 'STEP_1_REFRESHED_OK, expiry:', new Date((activeSession.expires_at || 0) * 1000).toISOString());
+        } else {
+          // Refresh returned error but we have cached tokens — force-set them
+          // to reset the internal GoTrue client state
+          console.warn(ts(), 'STEP_1_REFRESH_SOFT_FAIL, forcing setSession with cached tokens');
+          await supabase.auth.setSession({
+            access_token: cachedSession.access_token,
+            refresh_token: cachedSession.refresh_token
+          });
+        }
+      } catch (refreshErr: any) {
+        // Refresh timed out — the internal client is stuck.
+        // Force-set the cached session to unstick it.
+        console.warn(ts(), 'STEP_1_REFRESH_TIMEOUT, forcing setSession:', refreshErr.message);
+        try {
+          await Promise.race([
+            supabase.auth.setSession({
+              access_token: cachedSession.access_token,
+              refresh_token: cachedSession.refresh_token
+            }),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('setSession_timeout')), 3000))
+          ]);
+          console.log(ts(), 'STEP_1_SET_SESSION_OK');
+        } catch (setErr: any) {
+          // Even setSession hung — auth is truly broken, redirect to login
+          console.error(ts(), 'STEP_1_SET_SESSION_FAILED:', setErr.message);
           clearTimeout(watchdogTimeout);
           setIsSubmitting(false);
           toast({
@@ -1248,14 +1268,6 @@ const RideBooking = () => {
           navigate('/login');
           return;
         }
-      }
-
-      if (!activeSession) {
-        console.error(ts(), 'STEP_1_NO_SESSION');
-        clearTimeout(watchdogTimeout);
-        setIsSubmitting(false);
-        navigate('/login');
-        return;
       }
       console.log(ts(), 'STEP_1_SESSION_OK');
 
@@ -1316,11 +1328,13 @@ const RideBooking = () => {
           console.warn(ts(), 'STEP_2_REFRESH_TIMEOUT', e.message);
         }
 
-        // Retry
+        // Retry — also with 10s timeout
         await new Promise(r => setTimeout(r, 300));
-        const result2 = await supabase.from('rides').insert([ridePayload])
+        const retryPromise = supabase.from('rides').insert([ridePayload])
           .select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id')
           .single();
+        const retryTimeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Retry timed out')), 10000));
+        const result2 = await Promise.race([retryPromise, retryTimeout]) as any;
         ride = result2.data;
         rideErr = result2.error;
 
