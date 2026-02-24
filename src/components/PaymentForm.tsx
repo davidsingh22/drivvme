@@ -20,48 +20,70 @@ import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecove
 
 // Global cache for Stripe instance to avoid re-fetching
 let cachedStripePromise: Promise<Stripe | null> | null = null;
+let stripePromiseInFlight = false;
 
-// Get or create Stripe promise (cached)
-const getStripePromise = (): Promise<Stripe | null> => {
+// Get or create Stripe promise (cached) — NEVER caches rejected promises
+const getStripePromise = async (): Promise<Stripe | null> => {
+  // Fast path: already resolved successfully
   if (cachedStripePromise) return cachedStripePromise;
-  
-  // Check sessionStorage first
+
+  // Check sessionStorage first (survives across calls but not browser restarts)
   const cached = sessionStorage.getItem('stripe_pk');
   if (cached) {
     cachedStripePromise = loadStripe(cached);
     return cachedStripePromise;
   }
-  
-  // Fetch from edge function and cache the promise
-  cachedStripePromise = (async () => {
-    // Use session recovery to get a valid token (auto-refreshes if expired)
+
+  // Prevent parallel fetches
+  if (stripePromiseInFlight) {
+    // Wait a bit and retry
+    await new Promise(r => setTimeout(r, 500));
+    return getStripePromise();
+  }
+
+  stripePromiseInFlight = true;
+
+  try {
     const accessToken = await getValidAccessToken();
-    const supabaseUrl = SUPABASE_URL;
-    const anonKey = ANON_KEY;
-    
-    const res = await fetch(`${supabaseUrl}/functions/v1/get-stripe-config`, {
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/get-stripe-config`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': anonKey,
-        'Authorization': `Bearer ${accessToken || anonKey}`,
+        'apikey': ANON_KEY,
+        'Authorization': `Bearer ${accessToken}`,
       },
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
+
+    const contentType = res.headers.get('content-type');
+    if (!contentType?.includes('application/json')) {
+      const text = await res.text().catch(() => '');
+      console.error('[PaymentForm] Non-JSON response from get-stripe-config:', text.substring(0, 200));
+      throw new Error('Stripe config returned unexpected response');
+    }
+
     const data = await res.json();
     if (!data?.publishableKey) {
-      cachedStripePromise = null;
-      throw new Error('Failed to get Stripe config');
+      throw new Error(data?.error || 'Failed to get Stripe config');
     }
-    
+
     sessionStorage.setItem('stripe_pk', data.publishableKey);
-    return loadStripe(data.publishableKey);
-  })().then(stripe => stripe);
-  
-  return cachedStripePromise;
+    cachedStripePromise = loadStripe(data.publishableKey);
+    return cachedStripePromise;
+  } catch (err) {
+    // CRITICAL: Do NOT cache the failure — next call should retry
+    cachedStripePromise = null;
+    throw err;
+  } finally {
+    stripePromiseInFlight = false;
+  }
 };
 
-// Start prefetching immediately when this module loads
-getStripePromise().catch(console.error);
+// Do NOT prefetch at module load — session may not exist yet
 
 interface PaymentFormInnerProps {
   onSuccess: (paymentMethodId?: string) => void;
@@ -387,7 +409,7 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
       try {
         console.log('[PaymentForm] STEP_3_INIT_START');
 
-        // Get cached stripe promise (doesn't await - just gets the promise)
+        // Get stripe promise — retries on failure, never caches rejections
         const stripePromiseToUse = getStripePromise();
         setStripePromise(stripePromiseToUse);
         

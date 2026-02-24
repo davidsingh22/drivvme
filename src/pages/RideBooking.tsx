@@ -226,6 +226,7 @@ const RideBooking = () => {
   useRiderLocationTracking(true);
 
   // ── Server Pre-Warming: ping edge functions every 3 min on the estimate page ──
+  // Uses raw fetch to bypass frozen Supabase JS client after backgrounding
   const warmingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   useEffect(() => {
     if (step !== 'estimate') {
@@ -233,9 +234,12 @@ const RideBooking = () => {
       return;
     }
     const ping = () => {
-      // Silent HEAD-style pings to warm containers — fire & forget
-      supabase.functions.invoke('create-payment-intent', { method: 'POST', body: {} }).catch(() => {});
-      supabase.functions.invoke('create-ride-and-notify-drivers', { method: 'POST', body: {} }).catch(() => {});
+      // Silent HEAD-style pings to warm containers — fire & forget via raw fetch
+      getValidAccessToken().then(token => {
+        const headers = { 'Content-Type': 'application/json', 'apikey': ANON_KEY, 'Authorization': `Bearer ${token}` };
+        fetch(`${SUPABASE_URL}/functions/v1/create-payment-intent`, { method: 'POST', headers, body: '{}' }).catch(() => {});
+        fetch(`${SUPABASE_URL}/functions/v1/create-ride-and-notify-drivers`, { method: 'POST', headers, body: '{}' }).catch(() => {});
+      }).catch(() => {});
     };
     ping(); // immediate first ping
     warmingIntervalRef.current = setInterval(ping, 3 * 60 * 1000);
@@ -1369,20 +1373,37 @@ const RideBooking = () => {
     });
   };
   const handlePaymentCancel = async () => {
-    // Cancel the ride if payment is cancelled
+    // Cancel the ride if payment is cancelled — use raw fetch to avoid Supabase client hangs
     if (currentRide) {
-      const {
-        error
-      } = await supabase.from('rides').update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        cancelled_by: user?.id,
-        cancellation_reason: 'Payment cancelled'
-      }).eq('id', currentRide.id);
-      if (error) {
+      try {
+        const token = await getValidAccessToken();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/rides?id=eq.${currentRide.id}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': ANON_KEY,
+              'Authorization': `Bearer ${token}`,
+              'Prefer': 'return=minimal',
+            },
+            body: JSON.stringify({
+              status: 'cancelled',
+              cancelled_at: new Date().toISOString(),
+              cancelled_by: user?.id,
+              cancellation_reason: 'Payment cancelled',
+            }),
+            signal: controller.signal,
+          }
+        );
+        clearTimeout(timeout);
+      } catch (err: any) {
+        console.error('[RideBooking] Cancel ride error:', err.message);
         toast({
           title: 'Cancel failed',
-          description: error.message,
+          description: err.message,
           variant: 'destructive'
         });
       }
