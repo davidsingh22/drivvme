@@ -1177,22 +1177,51 @@ const RideBooking = () => {
     rideCreatedRef.current = false;
 
     try {
-      // ── POINT 1: Always force-refresh auth session before payment ──
-      // getSession() returns a CACHED token that may be expired on mobile WebViews.
-      // We MUST call refreshSession() every time to get a fresh JWT.
-      console.log(ts(), 'STEP_1_FORCE_REFRESH_SESSION');
-      const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-      if (refreshErr || !refreshData?.session) {
-        console.error(ts(), 'STEP_1_REFRESH_FAILED', refreshErr?.message);
-        toast({
-          title: language === 'fr' ? 'Session expirée' : 'Session expired',
-          description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
-          variant: 'destructive'
-        });
-        navigate('/login');
-        return;
+      // ── POINT 1: Ensure valid auth session before payment ──
+      // Try getSession first (instant), then refreshSession with a 5s timeout.
+      // refreshSession() can HANG on mobile WebViews with corrupt refresh tokens.
+      console.log(ts(), 'STEP_1_SESSION_CHECK');
+      let session: any = null;
+      try {
+        const { data: cached } = await supabase.auth.getSession();
+        if (cached?.session) {
+          // Check if token expires in less than 2 minutes
+          const expiresAt = (cached.session.expires_at || 0) * 1000;
+          const twoMinFromNow = Date.now() + 120_000;
+          if (expiresAt > twoMinFromNow) {
+            session = cached.session;
+            console.log(ts(), 'STEP_1_CACHED_SESSION_VALID, expires:', new Date(expiresAt).toISOString());
+          } else {
+            console.log(ts(), 'STEP_1_CACHED_SESSION_EXPIRING_SOON, refreshing...');
+          }
+        }
+      } catch (e: any) {
+        console.warn(ts(), 'STEP_1_GET_SESSION_ERROR', e.message);
       }
-      console.log(ts(), 'STEP_1_SESSION_FRESH, expires:', new Date((refreshData.session.expires_at || 0) * 1000).toISOString());
+
+      // Only refresh if cached session is missing or expiring soon
+      if (!session) {
+        try {
+          const refreshPromise = supabase.auth.refreshSession();
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Session refresh timed out')), 5000));
+          const { data: refreshData, error: refreshErr } = await Promise.race([refreshPromise, timeoutPromise]) as any;
+          if (refreshErr || !refreshData?.session) {
+            throw new Error(refreshErr?.message || 'No session after refresh');
+          }
+          session = refreshData.session;
+          console.log(ts(), 'STEP_1_SESSION_REFRESHED, expires:', new Date((session.expires_at || 0) * 1000).toISOString());
+        } catch (refreshError: any) {
+          console.error(ts(), 'STEP_1_REFRESH_FAILED', refreshError.message);
+          toast({
+            title: language === 'fr' ? 'Session expirée' : 'Session expired',
+            description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+            variant: 'destructive'
+          });
+          setIsSubmitting(false);
+          navigate('/login');
+          return;
+        }
+      }
 
       // Show payment UI (unless test account)
       if (!skipPayment) {

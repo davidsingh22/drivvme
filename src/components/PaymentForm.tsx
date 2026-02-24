@@ -371,15 +371,34 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
 
     const initialize = async () => {
       try {
-        // ── POINT 1: Force-refresh session before payment intent ──
-        // getSession() returns a CACHED token — it looks valid but may be expired.
-        // Always call refreshSession() to guarantee a fresh JWT.
-        console.log('[PaymentForm] STEP_3_FORCE_REFRESH_SESSION');
-        const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-        if (refreshErr || !refreshData?.session) {
-          throw new Error('Session expired. Please sign in again.');
+        // ── POINT 1: Validate session before payment intent ──
+        // Use getSession() first (instant), only refresh if expiring soon.
+        // refreshSession() can HANG on mobile WebViews with corrupt tokens.
+        console.log('[PaymentForm] STEP_3_SESSION_CHECK');
+        let hasValidSession = false;
+        try {
+          const { data: cached } = await supabase.auth.getSession();
+          if (cached?.session) {
+            const expiresAt = (cached.session.expires_at || 0) * 1000;
+            if (expiresAt > Date.now() + 120_000) {
+              hasValidSession = true;
+              console.log('[PaymentForm] STEP_3_CACHED_SESSION_VALID');
+            }
+          }
+        } catch {}
+
+        if (!hasValidSession) {
+          try {
+            const refreshPromise = supabase.auth.refreshSession();
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+            const { data: rData, error: rErr } = await Promise.race([refreshPromise, timeoutPromise]) as any;
+            if (rErr || !rData?.session) throw new Error(rErr?.message || 'No session');
+            console.log('[PaymentForm] STEP_3_SESSION_REFRESHED');
+          } catch (e: any) {
+            console.error('[PaymentForm] STEP_3_REFRESH_FAILED', e.message);
+            throw new Error('Session expired. Please sign in again.');
+          }
         }
-        console.log('[PaymentForm] STEP_3_SESSION_FRESH, expires:', new Date((refreshData.session.expires_at || 0) * 1000).toISOString());
 
         // Get cached stripe promise (doesn't await - just gets the promise)
         const stripePromiseToUse = getStripePromise();
