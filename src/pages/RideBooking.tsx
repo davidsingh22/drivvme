@@ -476,13 +476,10 @@ const RideBooking = () => {
     }
   }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
-  // Visibility listener: PROACTIVELY refresh auth session on app resume
-  // This is the #1 fix for "works then breaks after 10 min" on mobile WebViews.
-  // getSession() only returns CACHED data and is useless here.
-  // We must call refreshSession() to get a fresh JWT from the server.
+  // Visibility listener: warm GPS on app resume (session refresh moved to payment handler)
   useEffect(() => {
     let lastHidden = 0;
-    const IDLE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes — aggressive to catch stale tokens early
+    const IDLE_THRESHOLD_MS = 2 * 60 * 1000;
 
     const handleVisibility = async () => {
       if (document.visibilityState === 'hidden') {
@@ -490,50 +487,27 @@ const RideBooking = () => {
         return;
       }
 
-      // App just became visible
       const idleMs = lastHidden ? Date.now() - lastHidden : 0;
-      if (idleMs < IDLE_THRESHOLD_MS) return; // short idle, skip
+      if (idleMs < IDLE_THRESHOLD_MS) return;
 
-      console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's — force-refreshing session');
+      console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's');
 
-      // 1. FORCE refresh the auth session (not getSession which is cached!)
-      try {
-        const refreshPromise = supabase.auth.refreshSession();
-        const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Session refresh timed out on resume')), 6000)
-        );
-        const { data, error } = await Promise.race([refreshPromise, timeoutPromise]) as any;
-        if (error || !data?.session) {
-          console.error('[RideBooking] Session refresh failed on resume, signing out');
-          await supabase.auth.signOut();
-          navigate('/login', { replace: true });
-          return;
-        }
-        console.log('[RideBooking] Session refreshed on resume, expires:', new Date((data.session.expires_at || 0) * 1000).toISOString());
-      } catch (e: any) {
-        console.error('[RideBooking] Session refresh timed out on resume:', e.message);
-        // Don't sign out on timeout — the token might still work.
-        // Just log it so we can debug.
-      }
-
-      // 2. Warm GPS so next action has a fresh position
-      if ('geolocation' in navigator) {
+      // Warm GPS so next action has a fresh position
+      if ('geolocation' in navigator && (step === 'input' || step === 'estimate')) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             const { latitude: lat, longitude: lng } = pos.coords;
-            if (step === 'input' || step === 'estimate') {
-              setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
-              if (mapboxToken) {
-                reverseGeocode(lat, lng).then(addr => {
-                  if (addr) {
-                    setPickupAddress(addr);
-                    setPickup(prev => prev ? { ...prev, address: addr } : null);
-                  }
-                });
-              }
+            setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
+            if (mapboxToken) {
+              reverseGeocode(lat, lng).then(addr => {
+                if (addr) {
+                  setPickupAddress(addr);
+                  setPickup(prev => prev ? { ...prev, address: addr } : null);
+                }
+              });
             }
           },
-          () => { /* GPS warm failed silently, no-op */ },
+          () => {},
           { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
         );
       }
@@ -541,7 +515,7 @@ const RideBooking = () => {
 
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [step, mapboxToken, reverseGeocode, navigate]);
+  }, [step, mapboxToken, reverseGeocode]);
 
   // Phase 3: If arriving from /search with a destination, auto-fill and jump to estimate
   const hasAppliedSearchState = useRef(false);
@@ -1173,14 +1147,60 @@ const RideBooking = () => {
     }
     await calculateRoute();
   };
+  // ── RAW FETCH ride insert: bypasses Supabase JS client internals entirely ──
+  // This is the #1 fix for "Finalizing..." hang on Median WebViews.
+  // The Supabase client's PostgREST layer waits for any pending GoTrue refresh
+  // before sending requests. On mobile WebViews the auto-refresh timer gets
+  // corrupted after backgrounding, causing .insert() to hang forever.
+  // Direct fetch() with AbortController gives us a REAL cancellable timeout.
+  const rawInsertRide = async (payload: Record<string, any>, accessToken: string): Promise<any> => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000); // hard 8s timeout
+
+    try {
+      const res = await fetch(
+        `${supabaseUrl}/rest/v1/rides?select=id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': anonKey,
+            'Authorization': `Bearer ${accessToken}`,
+            'Prefer': 'return=representation',
+          },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`Ride insert failed (${res.status}): ${body}`);
+      }
+
+      const rows = await res.json();
+      // REST API returns an array; we want the first row
+      return Array.isArray(rows) ? rows[0] : rows;
+    } catch (err: any) {
+      clearTimeout(timeout);
+      if (err.name === 'AbortError') {
+        throw new Error('Ride creation timed out (8s). Please try again.');
+      }
+      throw err;
+    }
+  };
+
   const handleProceedToPayment = async () => {
-    // ── POINT 2: One-click lock — prevent double-submit ──
+    // ── One-click lock — prevent double-submit ──
     if (isSubmitting) return;
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
     const ts = () => `[${new Date().toISOString()}]`;
 
-    // Test accounts skip payment entirely (unlimited or with remaining free rides)
+    // Test accounts skip payment entirely
     const isUnlimited = user.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
     const freeRidesLeft = user.email ? getRemainingFreeRides(user.email) : 0;
     const skipPayment = isUnlimited || freeRidesLeft > 0;
@@ -1189,9 +1209,9 @@ const RideBooking = () => {
     setIsSubmitting(true);
     rideCreatedRef.current = false;
 
-    // ── WATCHDOG: 15s timeout to reset UI if everything hangs ──
+    // ── WATCHDOG: 12s timeout to reset UI if everything hangs ──
     const watchdogTimeout = setTimeout(() => {
-      console.warn(ts(), 'WATCHDOG_15S_TRIGGERED');
+      console.warn(ts(), 'WATCHDOG_12S_TRIGGERED');
       setIsSubmitting(false);
       if (!rideCreatedRef.current) {
         setStep('estimate');
@@ -1201,84 +1221,33 @@ const RideBooking = () => {
           variant: 'destructive'
         });
       }
-    }, 15000);
+    }, 12000);
 
     try {
-      // ── SESSION: ALWAYS force-refresh to reset internal GoTrue client state ──
-      // On mobile WebViews, backgrounding the app corrupts the Supabase client's
-      // internal auto-refresh timer. Even if the JWT hasn't expired (10 min < 1hr),
-      // the client's internal state can be stuck, causing rides.insert() to hang
-      // waiting for an internal refresh that never resolves.
-      // FIX: Always call refreshSession() to reset internal state, with setSession()
-      // fallback if refresh hangs.
-      console.log(ts(), 'STEP_1_SESSION_CHECK');
-      const { data: { session: cachedSession } } = await supabase.auth.getSession();
+      // ── SESSION: Read cached token (fast, no network) ──
+      // Do NOT call refreshSession() here — it can hang on mobile WebViews.
+      // We just need the access_token to pass to our raw fetch().
+      // If the token is expired, the REST API returns 401 and we handle it.
+      console.log(ts(), 'STEP_1_GET_TOKEN');
+      const { data: { session } } = await supabase.auth.getSession();
       
-      if (!cachedSession) {
+      if (!session?.access_token) {
         console.error(ts(), 'STEP_1_NO_SESSION');
         clearTimeout(watchdogTimeout);
         setIsSubmitting(false);
         navigate('/login');
         return;
       }
+      console.log(ts(), 'STEP_1_TOKEN_OK');
 
-      console.log(ts(), 'STEP_1_FORCE_REFRESH — resetting client state');
-      let activeSession = cachedSession;
-      try {
-        const refreshResult = await Promise.race([
-          supabase.auth.refreshSession(),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('refresh_timeout')), 4000))
-        ]) as { data: { session: any }; error: any };
-        
-        if (!refreshResult.error && refreshResult.data?.session) {
-          activeSession = refreshResult.data.session;
-          console.log(ts(), 'STEP_1_REFRESHED_OK, expiry:', new Date((activeSession.expires_at || 0) * 1000).toISOString());
-        } else {
-          // Refresh returned error but we have cached tokens — force-set them
-          // to reset the internal GoTrue client state
-          console.warn(ts(), 'STEP_1_REFRESH_SOFT_FAIL, forcing setSession with cached tokens');
-          await supabase.auth.setSession({
-            access_token: cachedSession.access_token,
-            refresh_token: cachedSession.refresh_token
-          });
-        }
-      } catch (refreshErr: any) {
-        // Refresh timed out — the internal client is stuck.
-        // Force-set the cached session to unstick it.
-        console.warn(ts(), 'STEP_1_REFRESH_TIMEOUT, forcing setSession:', refreshErr.message);
-        try {
-          await Promise.race([
-            supabase.auth.setSession({
-              access_token: cachedSession.access_token,
-              refresh_token: cachedSession.refresh_token
-            }),
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('setSession_timeout')), 3000))
-          ]);
-          console.log(ts(), 'STEP_1_SET_SESSION_OK');
-        } catch (setErr: any) {
-          // Even setSession hung — auth is truly broken, redirect to login
-          console.error(ts(), 'STEP_1_SET_SESSION_FAILED:', setErr.message);
-          clearTimeout(watchdogTimeout);
-          setIsSubmitting(false);
-          toast({
-            title: language === 'fr' ? 'Session expirée' : 'Session expired',
-            description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
-            variant: 'destructive'
-          });
-          navigate('/login');
-          return;
-        }
-      }
-      console.log(ts(), 'STEP_1_SESSION_OK');
-
-      // Show payment UI (unless test account)
+      // Show payment UI immediately (unless test account)
       if (!skipPayment) {
         setStep('payment');
       }
 
-      // ── RIDE CREATION ──
+      // ── RIDE CREATION via raw fetch (bypasses Supabase client internals) ──
       console.log(ts(), 'STEP_2_CREATING_RIDE');
-      const rideStatus = (skipPayment ? 'searching' : 'pending_payment') as 'searching' | 'pending_payment';
+      const rideStatus = skipPayment ? 'searching' : 'pending_payment';
 
       const ridePayload = {
         rider_id: user.id,
@@ -1296,50 +1265,44 @@ const RideBooking = () => {
         gst_amount: fareEstimate.gstAmount,
         qst_amount: fareEstimate.qstAmount,
         platform_fee: fareEstimate.platformFee,
-        status: rideStatus
+        status: rideStatus,
       };
 
       let ride: any = null;
-      let rideErr: any = null;
 
-      // First attempt — with 10s timeout to prevent internal auto-refresh hangs
-      const insertPromise = supabase.from('rides').insert([ridePayload])
-        .select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id')
-        .single();
-      const insertTimeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Ride creation timed out')), 10000));
-      const result1 = await Promise.race([insertPromise, insertTimeout]) as any;
-      ride = result1.data;
-      rideErr = result1.error;
+      try {
+        ride = await rawInsertRide(ridePayload, session.access_token);
+      } catch (firstErr: any) {
+        console.warn(ts(), 'STEP_2_FIRST_ATTEMPT_FAILED:', firstErr.message);
 
-      // If first attempt failed, check if it's an auth error and try to refresh
-      if (rideErr) {
-        console.warn(ts(), 'STEP_2_FIRST_ATTEMPT_FAILED', rideErr.message, rideErr.code);
-
-        // Try a quick session refresh before retry (max 4s)
-        try {
-          const refreshPromise = supabase.auth.refreshSession();
-          const { error: refreshErr } = await Promise.race([
-            refreshPromise,
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('refresh timeout')), 4000))
-          ]) as any;
-          if (refreshErr) console.warn(ts(), 'STEP_2_REFRESH_FAILED', refreshErr.message);
-          else console.log(ts(), 'STEP_2_SESSION_REFRESHED_FOR_RETRY');
-        } catch (e: any) {
-          console.warn(ts(), 'STEP_2_REFRESH_TIMEOUT', e.message);
-        }
-
-        // Retry — also with 10s timeout
-        await new Promise(r => setTimeout(r, 300));
-        const retryPromise = supabase.from('rides').insert([ridePayload])
-          .select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id')
-          .single();
-        const retryTimeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Retry timed out')), 10000));
-        const result2 = await Promise.race([retryPromise, retryTimeout]) as any;
-        ride = result2.data;
-        rideErr = result2.error;
-
-        if (rideErr || !ride?.id) {
-          throw new Error(rideErr?.message || 'Ride creation failed after retry');
+        // If it was a 401 (expired token), try ONE refresh then retry
+        if (firstErr.message.includes('401') || firstErr.message.includes('JWT')) {
+          console.log(ts(), 'STEP_2_TOKEN_EXPIRED — refreshing');
+          try {
+            const { data: refreshData } = await Promise.race([
+              supabase.auth.refreshSession(),
+              new Promise<never>((_, rej) => setTimeout(() => rej(new Error('refresh_timeout')), 4000)),
+            ]) as any;
+            if (refreshData?.session?.access_token) {
+              ride = await rawInsertRide(ridePayload, refreshData.session.access_token);
+            } else {
+              throw new Error('Session refresh failed');
+            }
+          } catch (refreshErr: any) {
+            console.error(ts(), 'STEP_2_REFRESH_AND_RETRY_FAILED:', refreshErr.message);
+            clearTimeout(watchdogTimeout);
+            setIsSubmitting(false);
+            toast({
+              title: language === 'fr' ? 'Session expirée' : 'Session expired',
+              description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+              variant: 'destructive',
+            });
+            navigate('/login');
+            return;
+          }
+        } else {
+          // Non-auth error (timeout, network) — show error, go back to estimate
+          throw firstErr;
         }
       }
 
@@ -1369,7 +1332,6 @@ const RideBooking = () => {
 
       console.log(ts(), 'STEP_2_COMPLETE');
     } catch (err: any) {
-      // ── POINT 3: Full error surfacing — never silent ──
       console.error('PAYMENT_FLOW_ERROR', err);
       toast({
         title: language === 'fr' ? 'Erreur' : 'Error',
