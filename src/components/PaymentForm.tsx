@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+
 import { Loader2, CreditCard, Shield, Smartphone } from 'lucide-react';
 import { SavedCardsSelector, SaveCardPrompt } from '@/components/SavedCardsSelector';
 import { Checkbox as CheckboxUI } from '@/components/ui/checkbox';
@@ -33,9 +33,24 @@ const getStripePromise = (): Promise<Stripe | null> => {
   
   // Fetch from edge function and cache the promise
   cachedStripePromise = (async () => {
-    const { data, error } = await supabase.functions.invoke('get-stripe-config');
-    if (error || !data?.publishableKey) {
-      cachedStripePromise = null; // Reset on error so we can retry
+    // Use raw fetch to avoid Supabase client GoTrue hangs on mobile
+    const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
+    const raw = localStorage.getItem(storageKey);
+    const accessToken = raw ? JSON.parse(raw)?.access_token : null;
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+    
+    const res = await fetch(`${supabaseUrl}/functions/v1/get-stripe-config`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': anonKey,
+        'Authorization': `Bearer ${accessToken || anonKey}`,
+      },
+    });
+    const data = await res.json();
+    if (!data?.publishableKey) {
+      cachedStripePromise = null;
       throw new Error('Failed to get Stripe config');
     }
     
@@ -371,47 +386,64 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
 
     const initialize = async () => {
       try {
-        // Session was already validated by RideBooking before mounting PaymentForm.
-        // Don't re-check or call refreshSession() here — it can HANG on mobile WebViews.
-        // The Supabase client will auto-refresh internally when making the edge function call.
         console.log('[PaymentForm] STEP_3_INIT_START');
 
         // Get cached stripe promise (doesn't await - just gets the promise)
         const stripePromiseToUse = getStripePromise();
         setStripePromise(stripePromiseToUse);
         
-        // Create payment intent (retry a few times to handle transient backend latency)
+        // Read token directly from localStorage to avoid GoTrue hangs on mobile
+        const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
+        const raw = localStorage.getItem(storageKey);
+        const accessToken = raw ? JSON.parse(raw)?.access_token : null;
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+        const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+
+        if (!accessToken) {
+          throw new Error('No session found. Please sign in again.');
+        }
+
+        // Create payment intent via raw fetch (retry a few times)
         let lastErr: unknown = null;
-        let paymentResult:
-          | { data: any; error: any }
-          | null = null;
+        let clientSecretResult: string | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
           console.log(`[PaymentForm] STEP_3_PAYMENT_INTENT attempt ${attempt + 1}`, { rideId, amount });
-          paymentResult = await supabase.functions.invoke('create-payment-intent', {
-            body: { rideId, amount },
-          });
-
-          // ── POINT 3: Surface real error from edge function ──
-          const fnError = paymentResult?.data?.error || paymentResult?.error?.message;
-          console.log(`[PaymentForm] attempt ${attempt + 1} result:`, paymentResult?.data ? 'has data' : 'no data', fnError || 'OK');
-
-          if (!paymentResult?.error && paymentResult?.data?.clientSecret) break;
-          lastErr = paymentResult?.error ?? new Error(fnError || 'No client secret returned');
+          try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 10000);
+            const res = await fetch(`${supabaseUrl}/functions/v1/create-payment-intent`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': anonKey,
+                'Authorization': `Bearer ${accessToken}`,
+              },
+              body: JSON.stringify({ rideId, amount }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeout);
+            const data = await res.json();
+            console.log(`[PaymentForm] attempt ${attempt + 1} result:`, data?.clientSecret ? 'has secret' : 'no secret', data?.error || 'OK');
+            if (data?.clientSecret) {
+              clientSecretResult = data.clientSecret;
+              break;
+            }
+            lastErr = new Error(data?.error || 'No client secret returned');
+          } catch (e: any) {
+            lastErr = e;
+            console.warn(`[PaymentForm] attempt ${attempt + 1} failed:`, e.message);
+          }
           await sleep(300 * Math.pow(2, attempt));
         }
 
         if (!isMounted) return;
 
-        if (paymentResult?.error) {
-          throw new Error(paymentResult.error.message || 'Failed to create payment');
-        }
-
-        if (!paymentResult?.data?.clientSecret) {
+        if (!clientSecretResult) {
           throw (lastErr instanceof Error ? lastErr : new Error('Failed to create payment'));
         }
 
         console.log('[PaymentForm] STEP_3_PAYMENT_INTENT_CREATED');
-        setClientSecret(paymentResult.data.clientSecret);
+        setClientSecret(clientSecretResult);
       } catch (err: any) {
         if (!isMounted) return;
         // ── POINT 3: Full error surfacing ──
@@ -441,14 +473,29 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     
     setIsPayingWithSaved(true);
     try {
-      const { data, error } = await supabase.functions.invoke('manage-saved-cards', {
-        body: { 
+      // Use raw fetch to avoid Supabase client hangs on mobile
+      const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
+      const raw = localStorage.getItem(storageKey);
+      const accessToken = raw ? JSON.parse(raw)?.access_token : null;
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+      
+      const res = await fetch(`${supabaseUrl}/functions/v1/manage-saved-cards`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': anonKey,
+          'Authorization': `Bearer ${accessToken || anonKey}`,
+        },
+        body: JSON.stringify({
           action: 'pay_with_saved',
           cardId: selectedCardId,
           rideId,
           amount,
-        },
+        }),
       });
+      const data = await res.json();
+      const error = !res.ok ? new Error(data?.error || 'Payment failed') : null;
 
       if (error) throw error;
       
