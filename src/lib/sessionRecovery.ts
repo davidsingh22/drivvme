@@ -78,7 +78,7 @@ function writeStoredSession(session: StoredSession): void {
  */
 async function rawRefreshToken(refreshToken: string): Promise<StoredSession> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6000); // 6s hard timeout
+  const timeout = setTimeout(() => controller.abort(), 8000); // 8s hard timeout
 
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
@@ -94,7 +94,20 @@ async function rawRefreshToken(refreshToken: string): Promise<StoredSession> {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
+      // If the refresh token itself is expired/invalid, clear session
+      if (res.status === 400 || res.status === 401) {
+        console.error('[sessionRecovery] Refresh token expired/invalid — clearing session');
+        try { localStorage.removeItem(STORAGE_KEY); } catch {}
+        throw new Error('SESSION_EXPIRED');
+      }
       throw new Error(`Token refresh failed (${res.status}): ${body}`);
+    }
+
+    const contentType = res.headers.get('content-type');
+    if (!contentType?.includes('application/json')) {
+      const text = await res.text().catch(() => '');
+      console.error('[sessionRecovery] Non-JSON refresh response:', text.substring(0, 200));
+      throw new Error('Token refresh returned unexpected response');
     }
 
     const data = await res.json();
@@ -105,7 +118,7 @@ async function rawRefreshToken(refreshToken: string): Promise<StoredSession> {
   } catch (err: any) {
     clearTimeout(timeout);
     if (err.name === 'AbortError') {
-      throw new Error('Token refresh timed out (6s)');
+      throw new Error('Token refresh timed out (8s)');
     }
     throw err;
   }
