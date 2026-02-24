@@ -476,12 +476,15 @@ const RideBooking = () => {
     }
   }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
-  // Visibility listener: refresh auth session and warm GPS on app resume
+  // Visibility listener: PROACTIVELY refresh auth session on app resume
+  // This is the #1 fix for "works then breaks after 10 min" on mobile WebViews.
+  // getSession() only returns CACHED data and is useless here.
+  // We must call refreshSession() to get a fresh JWT from the server.
   useEffect(() => {
     let lastHidden = 0;
-    const IDLE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+    const IDLE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes — aggressive to catch stale tokens early
 
-    const handleVisibility = () => {
+    const handleVisibility = async () => {
       if (document.visibilityState === 'hidden') {
         lastHidden = Date.now();
         return;
@@ -491,25 +494,35 @@ const RideBooking = () => {
       const idleMs = lastHidden ? Date.now() - lastHidden : 0;
       if (idleMs < IDLE_THRESHOLD_MS) return; // short idle, skip
 
-      console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's — refreshing session & GPS');
+      console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's — force-refreshing session');
 
-      // 1. Proactively refresh the auth session
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (!session) {
-          console.log('[RideBooking] Session expired on resume, redirecting to login');
+      // 1. FORCE refresh the auth session (not getSession which is cached!)
+      try {
+        const refreshPromise = supabase.auth.refreshSession();
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Session refresh timed out on resume')), 6000)
+        );
+        const { data, error } = await Promise.race([refreshPromise, timeoutPromise]) as any;
+        if (error || !data?.session) {
+          console.error('[RideBooking] Session refresh failed on resume, signing out');
+          await supabase.auth.signOut();
           navigate('/login', { replace: true });
+          return;
         }
-      });
+        console.log('[RideBooking] Session refreshed on resume, expires:', new Date((data.session.expires_at || 0) * 1000).toISOString());
+      } catch (e: any) {
+        console.error('[RideBooking] Session refresh timed out on resume:', e.message);
+        // Don't sign out on timeout — the token might still work.
+        // Just log it so we can debug.
+      }
 
       // 2. Warm GPS so next action has a fresh position
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
             const { latitude: lat, longitude: lng } = pos.coords;
-            // Update pickup if we're still on the input step with stale coords
             if (step === 'input' || step === 'estimate') {
               setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
-              // Re-resolve address if token is available
               if (mapboxToken) {
                 reverseGeocode(lat, lng).then(addr => {
                   if (addr) {
@@ -1176,168 +1189,146 @@ const RideBooking = () => {
     setIsSubmitting(true);
     rideCreatedRef.current = false;
 
-    try {
-      // ── POINT 1: Ensure valid auth session before payment ──
-      // Try getSession first (instant), then refreshSession with a 5s timeout.
-      // refreshSession() can HANG on mobile WebViews with corrupt refresh tokens.
-      console.log(ts(), 'STEP_1_SESSION_CHECK');
-      let session: any = null;
-      try {
-        const { data: cached } = await supabase.auth.getSession();
-        if (cached?.session) {
-          // Check if token expires in less than 2 minutes
-          const expiresAt = (cached.session.expires_at || 0) * 1000;
-          const twoMinFromNow = Date.now() + 120_000;
-          if (expiresAt > twoMinFromNow) {
-            session = cached.session;
-            console.log(ts(), 'STEP_1_CACHED_SESSION_VALID, expires:', new Date(expiresAt).toISOString());
-          } else {
-            console.log(ts(), 'STEP_1_CACHED_SESSION_EXPIRING_SOON, refreshing...');
-          }
-        }
-      } catch (e: any) {
-        console.warn(ts(), 'STEP_1_GET_SESSION_ERROR', e.message);
+    // ── WATCHDOG: 15s timeout to reset UI if everything hangs ──
+    const watchdogTimeout = setTimeout(() => {
+      console.warn(ts(), 'WATCHDOG_15S_TRIGGERED');
+      setIsSubmitting(false);
+      if (!rideCreatedRef.current) {
+        setStep('estimate');
+        toast({
+          title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
+          description: language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.',
+          variant: 'destructive'
+        });
       }
+    }, 15000);
 
-      // Only refresh if cached session is missing or expiring soon
+    try {
+      // ── SESSION: Quick validation — don't pre-refresh (that hangs on WebViews).
+      // Instead, just verify we have a cached session. The Supabase client will
+      // auto-refresh internally when making the API call. If the call fails, we
+      // catch it and handle it. ──
+      console.log(ts(), 'STEP_1_SESSION_CHECK');
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-        try {
-          const refreshPromise = supabase.auth.refreshSession();
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Session refresh timed out')), 5000));
-          const { data: refreshData, error: refreshErr } = await Promise.race([refreshPromise, timeoutPromise]) as any;
-          if (refreshErr || !refreshData?.session) {
-            throw new Error(refreshErr?.message || 'No session after refresh');
-          }
-          session = refreshData.session;
-          console.log(ts(), 'STEP_1_SESSION_REFRESHED, expires:', new Date((session.expires_at || 0) * 1000).toISOString());
-        } catch (refreshError: any) {
-          console.error(ts(), 'STEP_1_REFRESH_FAILED', refreshError.message);
-          toast({
-            title: language === 'fr' ? 'Session expirée' : 'Session expired',
-            description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
-            variant: 'destructive'
-          });
-          setIsSubmitting(false);
-          navigate('/login');
-          return;
-        }
+        // No session at all — must login
+        console.error(ts(), 'STEP_1_NO_SESSION');
+        clearTimeout(watchdogTimeout);
+        setIsSubmitting(false);
+        toast({
+          title: language === 'fr' ? 'Session expirée' : 'Session expired',
+          description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+          variant: 'destructive'
+        });
+        navigate('/login');
+        return;
       }
+      console.log(ts(), 'STEP_1_SESSION_OK');
 
       // Show payment UI (unless test account)
       if (!skipPayment) {
         setStep('payment');
       }
 
-      // ── POINT 4: Watchdog timeout — 25s ──
-      const watchdogTimeout = setTimeout(() => {
-        console.warn(ts(), 'WATCHDOG_25S_TRIGGERED');
-        setIsSubmitting(false);
-        if (!rideCreatedRef.current) {
-          setStep('estimate');
-          toast({
-            title: language === 'fr' ? 'Délai dépassé' : 'Payment timed out',
-            description: language === 'fr' ? 'Veuillez réessayer.' : 'Please retry.',
-            variant: 'destructive'
-          });
+      // ── RIDE CREATION ──
+      console.log(ts(), 'STEP_2_CREATING_RIDE');
+      const rideStatus = (skipPayment ? 'searching' : 'pending_payment') as 'searching' | 'pending_payment';
+
+      const ridePayload = {
+        rider_id: user.id,
+        pickup_address: pickup.address,
+        pickup_lat: pickup.lat,
+        pickup_lng: pickup.lng,
+        dropoff_address: dropoff.address,
+        dropoff_lat: dropoff.lat,
+        dropoff_lng: dropoff.lng,
+        distance_km: distanceKm,
+        estimated_duration_minutes: Math.round(durationMinutes),
+        estimated_fare: fareEstimate.total,
+        promo_discount: fareEstimate.promoDiscount,
+        subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+        gst_amount: fareEstimate.gstAmount,
+        qst_amount: fareEstimate.qstAmount,
+        platform_fee: fareEstimate.platformFee,
+        status: rideStatus
+      };
+
+      let ride: any = null;
+      let rideErr: any = null;
+
+      // First attempt
+      const result1 = await supabase.from('rides').insert([ridePayload])
+        .select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id')
+        .single();
+      ride = result1.data;
+      rideErr = result1.error;
+
+      // If first attempt failed, check if it's an auth error and try to refresh
+      if (rideErr) {
+        console.warn(ts(), 'STEP_2_FIRST_ATTEMPT_FAILED', rideErr.message, rideErr.code);
+
+        // Try a quick session refresh before retry (max 4s)
+        try {
+          const refreshPromise = supabase.auth.refreshSession();
+          const { error: refreshErr } = await Promise.race([
+            refreshPromise,
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('refresh timeout')), 4000))
+          ]) as any;
+          if (refreshErr) console.warn(ts(), 'STEP_2_REFRESH_FAILED', refreshErr.message);
+          else console.log(ts(), 'STEP_2_SESSION_REFRESHED_FOR_RETRY');
+        } catch (e: any) {
+          console.warn(ts(), 'STEP_2_REFRESH_TIMEOUT', e.message);
         }
-        // POINT 4: Do NOT cancel ride if it was already created
-      }, 25000);
 
-      try {
-        // ── POINT 5: Log every step ──
-        console.log(ts(), 'STEP_2_CREATING_RIDE');
-        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-
-        const { data: ride, error: rideErr } = await supabase.from('rides').insert({
-          rider_id: user.id,
-          pickup_address: pickup.address,
-          pickup_lat: pickup.lat,
-          pickup_lng: pickup.lng,
-          dropoff_address: dropoff.address,
-          dropoff_lat: dropoff.lat,
-          dropoff_lng: dropoff.lng,
-          distance_km: distanceKm,
-          estimated_duration_minutes: Math.round(durationMinutes),
-          estimated_fare: fareEstimate.total,
-          promo_discount: fareEstimate.promoDiscount,
-          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-          gst_amount: fareEstimate.gstAmount,
-          qst_amount: fareEstimate.qstAmount,
-          platform_fee: fareEstimate.platformFee,
-          status: rideStatus
-        }).select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id').single();
+        // Retry
+        await new Promise(r => setTimeout(r, 300));
+        const result2 = await supabase.from('rides').insert([ridePayload])
+          .select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id')
+          .single();
+        ride = result2.data;
+        rideErr = result2.error;
 
         if (rideErr || !ride?.id) {
-          // One auto-retry after 400ms
-          console.warn(ts(), 'STEP_2_FIRST_ATTEMPT_FAILED', rideErr?.message);
-          await new Promise(r => setTimeout(r, 400));
-          const { data: ride2, error: rideErr2 } = await supabase.from('rides').insert({
-            rider_id: user.id,
-            pickup_address: pickup.address,
-            pickup_lat: pickup.lat,
-            pickup_lng: pickup.lng,
-            dropoff_address: dropoff.address,
-            dropoff_lat: dropoff.lat,
-            dropoff_lng: dropoff.lng,
-            distance_km: distanceKm,
-            estimated_duration_minutes: Math.round(durationMinutes),
-            estimated_fare: fareEstimate.total,
-            promo_discount: fareEstimate.promoDiscount,
-            subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-            gst_amount: fareEstimate.gstAmount,
-            qst_amount: fareEstimate.qstAmount,
-            platform_fee: fareEstimate.platformFee,
-            status: rideStatus
-          }).select('id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id').single();
-          if (rideErr2 || !ride2?.id) throw new Error(rideErr2?.message || 'Ride creation failed');
-          console.log(ts(), 'STEP_2_RIDE_CREATED rideId=' + ride2.id);
-          rideCreatedRef.current = true;
-          setCurrentRide(ride2 as any);
-          updateRide(ride2 as any);
-
-          // Non-blocking notification
-          void supabase.from('notifications').insert({
-            user_id: user.id, ride_id: ride2.id, type: 'ride_booked',
-            title: skipPayment ? 'Test ride created' : 'Payment required',
-            message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
-          });
-        } else {
-          console.log(ts(), 'STEP_2_RIDE_CREATED rideId=' + ride.id);
-          rideCreatedRef.current = true;
-          setCurrentRide(ride as any);
-          updateRide(ride as any);
-
-          void supabase.from('notifications').insert({
-            user_id: user.id, ride_id: ride.id, type: 'ride_booked',
-            title: skipPayment ? 'Test ride created' : 'Payment required',
-            message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
-          });
+          throw new Error(rideErr?.message || 'Ride creation failed after retry');
         }
-
-        if (skipPayment) {
-          if (!isUnlimited && freeRidesLeft > 0 && user.email) incrementFreeRidesUsed(user.email);
-          setStep('searching');
-          const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
-          toast({
-            title: 'Test mode',
-            description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
-          });
-        }
-
-        console.log(ts(), 'STEP_2_COMPLETE');
-      } finally {
-        clearTimeout(watchdogTimeout);
-        setIsSubmitting(false);
       }
+
+      if (!ride?.id) throw new Error('No ride ID returned');
+
+      console.log(ts(), 'STEP_2_RIDE_CREATED rideId=' + ride.id);
+      rideCreatedRef.current = true;
+      setCurrentRide(ride as any);
+      updateRide(ride as any);
+
+      // Non-blocking notification
+      void supabase.from('notifications').insert({
+        user_id: user.id, ride_id: ride.id, type: 'ride_booked',
+        title: skipPayment ? 'Test ride created' : 'Payment required',
+        message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
+      });
+
+      if (skipPayment) {
+        if (!isUnlimited && freeRidesLeft > 0 && user.email) incrementFreeRidesUsed(user.email);
+        setStep('searching');
+        const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
+        toast({
+          title: 'Test mode',
+          description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
+        });
+      }
+
+      console.log(ts(), 'STEP_2_COMPLETE');
     } catch (err: any) {
       // ── POINT 3: Full error surfacing — never silent ──
       console.error('PAYMENT_FLOW_ERROR', err);
       toast({
-        title: language === 'fr' ? 'Erreur de paiement' : 'Payment failed',
+        title: language === 'fr' ? 'Erreur' : 'Error',
         description: err.message || 'An unexpected error occurred.',
         variant: 'destructive'
       });
       setStep('estimate');
+    } finally {
+      clearTimeout(watchdogTimeout);
       setIsSubmitting(false);
     }
   };
