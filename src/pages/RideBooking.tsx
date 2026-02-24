@@ -29,6 +29,7 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
+import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 import welcomeBg from '@/assets/drivveme-galaxy-bg-new.png';
 import rideBg from '@/assets/drivveme-ride-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
@@ -491,6 +492,9 @@ const RideBooking = () => {
       if (idleMs < IDLE_THRESHOLD_MS) return;
 
       console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's');
+
+      // Proactively refresh token so payment/ride creation don't hit expired JWT
+      getValidAccessToken().catch(() => {});
 
       // Warm GPS so next action has a fresh position
       if ('geolocation' in navigator && (step === 'input' || step === 'estimate')) {
@@ -1153,21 +1157,19 @@ const RideBooking = () => {
   // before sending requests. On mobile WebViews the auto-refresh timer gets
   // corrupted after backgrounding, causing .insert() to hang forever.
   // Direct fetch() with AbortController gives us a REAL cancellable timeout.
-  const rawInsertRide = async (payload: Record<string, any>, accessToken: string): Promise<any> => {
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+  const rawInsertRide = async (payload: Record<string, any>, token: string): Promise<any> => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000); // hard 8s timeout
+    const timeout = setTimeout(() => controller.abort(), 8000);
 
     try {
       const res = await fetch(
-        `${supabaseUrl}/rest/v1/rides?select=id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id`,
+        `${SUPABASE_URL}/rest/v1/rides?select=id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'apikey': anonKey,
-            'Authorization': `Bearer ${accessToken}`,
+            'apikey': ANON_KEY,
+            'Authorization': `Bearer ${token}`,
             'Prefer': 'return=representation',
           },
           body: JSON.stringify(payload),
@@ -1182,7 +1184,6 @@ const RideBooking = () => {
       }
 
       const rows = await res.json();
-      // REST API returns an array; we want the first row
       return Array.isArray(rows) ? rows[0] : rows;
     } catch (err: any) {
       clearTimeout(timeout);
@@ -1224,25 +1225,14 @@ const RideBooking = () => {
     }, 12000);
 
     try {
-      // ── SESSION: Read token DIRECTLY from localStorage ──
-      // CRITICAL: supabase.auth.getSession() can trigger an internal GoTrue
-      // refresh that HANGS on mobile WebViews (Median/GoNative).
-      // Reading localStorage is synchronous and never hangs.
+      // ── SESSION: Get a VALID token (auto-refreshes if expired) ──
+      // Uses raw HTTP refresh — never touches the Supabase JS client's GoTrue layer.
       console.log(ts(), 'STEP_1_GET_TOKEN');
-      let accessToken: string | null = null;
+      let accessToken: string;
       try {
-        const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
-        const raw = localStorage.getItem(storageKey);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          accessToken = parsed?.access_token || parsed?.currentSession?.access_token || null;
-        }
-      } catch (e) {
-        console.warn(ts(), 'STEP_1_LOCALSTORAGE_PARSE_FAIL', e);
-      }
-
-      if (!accessToken) {
-        console.error(ts(), 'STEP_1_NO_SESSION');
+        accessToken = await getValidAccessToken();
+      } catch (e: any) {
+        console.error(ts(), 'STEP_1_NO_SESSION', e.message);
         clearTimeout(watchdogTimeout);
         setIsSubmitting(false);
         navigate('/login');
@@ -1285,19 +1275,12 @@ const RideBooking = () => {
       } catch (firstErr: any) {
         console.warn(ts(), 'STEP_2_FIRST_ATTEMPT_FAILED:', firstErr.message);
 
-        // If it was a 401 (expired token), try ONE refresh then retry
+        // If 401, the token we got was somehow still invalid — try one more refresh
         if (firstErr.message.includes('401') || firstErr.message.includes('JWT')) {
-          console.log(ts(), 'STEP_2_TOKEN_EXPIRED — refreshing');
+          console.log(ts(), 'STEP_2_TOKEN_INVALID — re-refreshing via raw HTTP');
           try {
-            const { data: refreshData } = await Promise.race([
-              supabase.auth.refreshSession(),
-              new Promise<never>((_, rej) => setTimeout(() => rej(new Error('refresh_timeout')), 4000)),
-            ]) as any;
-            if (refreshData?.session?.access_token) {
-              ride = await rawInsertRide(ridePayload, refreshData.session.access_token);
-            } else {
-              throw new Error('Session refresh failed');
-            }
+            const freshToken = await getValidAccessToken();
+            ride = await rawInsertRide(ridePayload, freshToken);
           } catch (refreshErr: any) {
             console.error(ts(), 'STEP_2_REFRESH_AND_RETRY_FAILED:', refreshErr.message);
             clearTimeout(watchdogTimeout);
@@ -1311,7 +1294,6 @@ const RideBooking = () => {
             return;
           }
         } else {
-          // Non-auth error (timeout, network) — show error, go back to estimate
           throw firstErr;
         }
       }
@@ -1358,31 +1340,24 @@ const RideBooking = () => {
     // Payment succeeded – transition ride status to searching so drivers can see it
     if (currentRide?.id) {
       try {
-        // Use raw fetch to avoid Supabase client hangs on mobile WebViews
-        const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
-        const raw = localStorage.getItem(storageKey);
-        const token = raw ? JSON.parse(raw)?.access_token : null;
-        if (token) {
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-          const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 8000);
-          await fetch(
-            `${supabaseUrl}/rest/v1/rides?id=eq.${currentRide.id}&status=eq.pending_payment`,
-            {
-              method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                'apikey': anonKey,
-                'Authorization': `Bearer ${token}`,
-                'Prefer': 'return=minimal',
-              },
-              body: JSON.stringify({ status: 'searching' }),
-              signal: controller.signal,
-            }
-          ).catch(() => {});
-          clearTimeout(timeout);
-        }
+        const token = await getValidAccessToken();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/rides?id=eq.${currentRide.id}&status=eq.pending_payment`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': ANON_KEY,
+              'Authorization': `Bearer ${token}`,
+              'Prefer': 'return=minimal',
+            },
+            body: JSON.stringify({ status: 'searching' }),
+            signal: controller.signal,
+          }
+        ).catch(() => {});
+        clearTimeout(timeout);
       } catch (e) {
         console.error('Failed to update ride status to searching', e);
       }

@@ -16,6 +16,7 @@ import { Loader2, CreditCard, Shield, Smartphone } from 'lucide-react';
 import { SavedCardsSelector, SaveCardPrompt } from '@/components/SavedCardsSelector';
 import { Checkbox as CheckboxUI } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 
 // Global cache for Stripe instance to avoid re-fetching
 let cachedStripePromise: Promise<Stripe | null> | null = null;
@@ -33,12 +34,10 @@ const getStripePromise = (): Promise<Stripe | null> => {
   
   // Fetch from edge function and cache the promise
   cachedStripePromise = (async () => {
-    // Use raw fetch to avoid Supabase client GoTrue hangs on mobile
-    const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
-    const raw = localStorage.getItem(storageKey);
-    const accessToken = raw ? JSON.parse(raw)?.access_token : null;
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-    const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+    // Use session recovery to get a valid token (auto-refreshes if expired)
+    const accessToken = await getValidAccessToken();
+    const supabaseUrl = SUPABASE_URL;
+    const anonKey = ANON_KEY;
     
     const res = await fetch(`${supabaseUrl}/functions/v1/get-stripe-config`, {
       method: 'POST',
@@ -392,14 +391,11 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
         const stripePromiseToUse = getStripePromise();
         setStripePromise(stripePromiseToUse);
         
-        // Read token directly from localStorage to avoid GoTrue hangs on mobile
-        const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
-        const raw = localStorage.getItem(storageKey);
-        const accessToken = raw ? JSON.parse(raw)?.access_token : null;
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-        const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
-
-        if (!accessToken) {
+        // Use session recovery to get a valid token (auto-refreshes if expired)
+        let accessToken: string;
+        try {
+          accessToken = await getValidAccessToken();
+        } catch {
           throw new Error('No session found. Please sign in again.');
         }
 
@@ -411,11 +407,11 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
           try {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 10000);
-            const res = await fetch(`${supabaseUrl}/functions/v1/create-payment-intent`, {
+            const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment-intent`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'apikey': anonKey,
+                'apikey': ANON_KEY,
                 'Authorization': `Bearer ${accessToken}`,
               },
               body: JSON.stringify({ rideId, amount }),
@@ -473,19 +469,14 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     
     setIsPayingWithSaved(true);
     try {
-      // Use raw fetch to avoid Supabase client hangs on mobile
-      const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
-      const raw = localStorage.getItem(storageKey);
-      const accessToken = raw ? JSON.parse(raw)?.access_token : null;
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+      const accessToken = await getValidAccessToken();
       
-      const res = await fetch(`${supabaseUrl}/functions/v1/manage-saved-cards`, {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/manage-saved-cards`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'apikey': anonKey,
-          'Authorization': `Bearer ${accessToken || anonKey}`,
+          'apikey': ANON_KEY,
+          'Authorization': `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           action: 'pay_with_saved',
