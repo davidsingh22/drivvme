@@ -1224,14 +1224,24 @@ const RideBooking = () => {
     }, 12000);
 
     try {
-      // ── SESSION: Read cached token (fast, no network) ──
-      // Do NOT call refreshSession() here — it can hang on mobile WebViews.
-      // We just need the access_token to pass to our raw fetch().
-      // If the token is expired, the REST API returns 401 and we handle it.
+      // ── SESSION: Read token DIRECTLY from localStorage ──
+      // CRITICAL: supabase.auth.getSession() can trigger an internal GoTrue
+      // refresh that HANGS on mobile WebViews (Median/GoNative).
+      // Reading localStorage is synchronous and never hangs.
       console.log(ts(), 'STEP_1_GET_TOKEN');
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
+      let accessToken: string | null = null;
+      try {
+        const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          accessToken = parsed?.access_token || parsed?.currentSession?.access_token || null;
+        }
+      } catch (e) {
+        console.warn(ts(), 'STEP_1_LOCALSTORAGE_PARSE_FAIL', e);
+      }
+
+      if (!accessToken) {
         console.error(ts(), 'STEP_1_NO_SESSION');
         clearTimeout(watchdogTimeout);
         setIsSubmitting(false);
@@ -1271,7 +1281,7 @@ const RideBooking = () => {
       let ride: any = null;
 
       try {
-        ride = await rawInsertRide(ridePayload, session.access_token);
+        ride = await rawInsertRide(ridePayload, accessToken);
       } catch (firstErr: any) {
         console.warn(ts(), 'STEP_2_FIRST_ATTEMPT_FAILED:', firstErr.message);
 
@@ -1348,11 +1358,31 @@ const RideBooking = () => {
     // Payment succeeded – transition ride status to searching so drivers can see it
     if (currentRide?.id) {
       try {
-        await supabase.from('rides').update({
-          status: 'searching'
-        }).eq('id', currentRide.id).eq('status', 'pending_payment');
-
-        // Escalation hook will automatically start notifying drivers when step changes to 'searching'
+        // Use raw fetch to avoid Supabase client hangs on mobile WebViews
+        const storageKey = `sb-siadshsaiuecesydqzqo-auth-token`;
+        const raw = localStorage.getItem(storageKey);
+        const token = raw ? JSON.parse(raw)?.access_token : null;
+        if (token) {
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+          const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 8000);
+          await fetch(
+            `${supabaseUrl}/rest/v1/rides?id=eq.${currentRide.id}&status=eq.pending_payment`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': anonKey,
+                'Authorization': `Bearer ${token}`,
+                'Prefer': 'return=minimal',
+              },
+              body: JSON.stringify({ status: 'searching' }),
+              signal: controller.signal,
+            }
+          ).catch(() => {});
+          clearTimeout(timeout);
+        }
       } catch (e) {
         console.error('Failed to update ride status to searching', e);
       }
