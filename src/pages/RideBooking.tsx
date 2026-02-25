@@ -1573,52 +1573,47 @@ const RideBooking = () => {
   const handleCancelRide = async () => {
     if (!currentRide) return;
 
-    // Optimistic UI update first — makes cancel feel instant
+    // CRITICAL: Capture ALL needed data before any state changes.
+    // Do NOT call resetBooking() or navigate() until DB work is done,
+    // because navigate() unmounts this component and kills async work.
     const rideId = currentRide.id;
-    resetBooking();
-    navigate('/rider-home');
-    toast({
-      title: 'Cancelling ride…'
-    });
-    try {
-      // Capture driver_id before we cancel (needed for notification)
-      const driverIdForNotif = currentRide.driver_id;
+    const driverIdForNotif = currentRide.driver_id;
+    const userId = user?.id;
 
-      // IMPORTANT: Insert the cancellation notification BEFORE updating ride status.
-      // RLS on notifications requires the ride to still be in an active status
-      // for riders_can_notify_driver_for_their_rides policy to pass.
+    toast({ title: 'Cancelling ride…' });
+
+    try {
+      // 1. Insert cancellation notification BEFORE updating ride status.
+      //    RLS requires the ride to still be in an active status.
       if (driverIdForNotif) {
-        await supabase.from('notifications').insert({
+        const { error: notifErr } = await supabase.from('notifications').insert({
           user_id: driverIdForNotif,
           ride_id: rideId,
           type: 'ride_cancelled',
           title: 'Ride Cancelled ❌',
           message: 'The rider cancelled this ride.',
-        }).then(({ error: notifErr }) => {
-          if (notifErr) console.warn('[RideBooking] Failed to insert cancel notification:', notifErr);
         });
+        if (notifErr) console.warn('[RideBooking] Failed to insert cancel notification:', notifErr);
+        else console.log('[RideBooking] ✅ Cancel notification inserted for driver', driverIdForNotif);
       }
 
-      const {
-        error
-      } = await supabase.from('rides').update({
+      // 2. Update ride status to cancelled
+      const { error } = await supabase.from('rides').update({
         status: 'cancelled',
         cancelled_at: new Date().toISOString(),
-        cancelled_by: user?.id,
+        cancelled_by: userId,
         cancellation_reason: 'Cancelled by rider'
       }).eq('id', rideId);
       if (error) throw error;
 
-      // Clean up driver notifications so no driver sees a stale ride offer
+      // 3. Clean up stale new_ride notifications (non-blocking)
       void supabase.from('notifications')
         .delete()
         .eq('ride_id', rideId)
         .eq('type', 'new_ride')
         .then(() => {});
 
-      toast({
-        title: 'Ride cancelled'
-      });
+      toast({ title: 'Ride cancelled' });
     } catch (error: any) {
       console.error('Cancel ride error:', error);
       toast({
@@ -1627,6 +1622,10 @@ const RideBooking = () => {
         variant: 'destructive'
       });
     }
+
+    // 4. ONLY navigate/reset AFTER all DB work is complete
+    resetBooking();
+    navigate('/rider-home');
   };
   const resetBooking = () => {
     setStep('input');
