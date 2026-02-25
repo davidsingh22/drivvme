@@ -167,6 +167,8 @@ const RideBooking = () => {
   const [durationMinutes, setDurationMinutes] = useState(0);
   const [currentRide, setCurrentRide] = useState<any>(null);
   const [driverInfo, setDriverInfo] = useState<any>(null);
+  const driverInfoRef = useRef<any>(null);
+  const driverInfoFetchedForId = useRef<string | null>(null);
   const [driverLocation, setDriverLocation] = useState<{
     lat: number;
     lng: number;
@@ -222,17 +224,7 @@ const RideBooking = () => {
     token: mapboxToken
   } = useMapboxToken();
 
-  // Safety net: if in active ride phase but driverInfo is null, force-fetch it
-  useEffect(() => {
-    if (!isActiveRidePhase || driverInfo || !currentRide?.driver_id) return;
-    const timer = setTimeout(() => {
-      if (!driverInfo) {
-        console.log('[RideBooking] Safety net: fetching missing driverInfo');
-        fetchDriverInfo(currentRide.driver_id);
-      }
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [isActiveRidePhase, driverInfo, currentRide?.driver_id]);
+  // Safety net moved below fetchDriverInfo declaration
 
   // Track rider location for admin visibility
   useRiderLocationTracking(true);
@@ -784,7 +776,7 @@ const RideBooking = () => {
           break;
         case 'driver_en_route':
           setStep('arriving');
-          if (!driverInfo && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
+          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Driver on the way',
             description: 'Your driver is heading to your pickup location.'
@@ -792,7 +784,7 @@ const RideBooking = () => {
           break;
         case 'arrived':
           setStep('arrived');
-          if (!driverInfo && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
+          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Driver has arrived!',
             description: 'Your driver is waiting at the pickup location.'
@@ -800,7 +792,7 @@ const RideBooking = () => {
           break;
         case 'in_progress':
           setStep('inProgress');
-          if (!driverInfo && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
+          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Ride started',
             description: 'Enjoy your trip!'
@@ -879,37 +871,7 @@ const RideBooking = () => {
     };
   }, [currentRide?.id, step, fareEstimate, toast, isTestAccount]);
 
-  // Fallback polling: if realtime misses updates, poll every 5 seconds
-  useEffect(() => {
-    if (!currentRide?.id) return;
-    // Only poll when in 'searching' status
-    if (currentRide.status !== 'searching') return;
-    const pollInterval = setInterval(async () => {
-      console.log('[RideBooking] Polling ride status...');
-      const {
-        data,
-        error
-      } = await supabase.from('rides').select('*').eq('id', currentRide.id).single();
-      if (error) {
-        console.error('[RideBooking] Poll error:', error);
-        return;
-      }
-      if (data && data.status !== currentRide.status) {
-        console.log('[RideBooking] Poll detected status change:', data.status);
-        setCurrentRide(data);
-        updateRide(data);
-        if (data.status === 'driver_assigned') {
-          setStep('matched');
-          fetchDriverInfo(data.driver_id);
-          toast({
-            title: t('booking.found'),
-            description: 'Your driver is on the way!'
-          });
-        }
-      }
-    }, 5000);
-    return () => clearInterval(pollInterval);
-  }, [currentRide?.id, currentRide?.status, t, toast]);
+  // Fallback polling moved below fetchDriverInfo declaration
 
   // Subscribe to driver location updates
   useEffect(() => {
@@ -1018,8 +980,20 @@ const RideBooking = () => {
       }
     };
   }, [step, pickup]);
-  const fetchDriverInfo = async (driverId: string, attempt = 1) => {
+  const setDriverInfoSafe = useCallback((info: any) => {
+    console.log('[RideBooking] setDriverInfoSafe called', info?.first_name);
+    driverInfoRef.current = info;
+    setDriverInfo(info);
+  }, []);
+
+  const fetchDriverInfo = useCallback(async (driverId: string, attempt = 1) => {
+    // Skip if already fetched for this driver
+    if (driverInfoRef.current && driverInfoFetchedForId.current === driverId) {
+      console.log('[RideBooking] driverInfo already fetched for', driverId);
+      return;
+    }
     console.log('[RideBooking] Fetching driver info for:', driverId, 'attempt:', attempt);
+    driverInfoFetchedForId.current = driverId;
     try {
       const [profileResult, driverProfileResult] = await Promise.all([
         supabase.from('profiles').select('first_name, last_name, phone_number, avatar_url').eq('user_id', driverId).maybeSingle(),
@@ -1030,8 +1004,7 @@ const RideBooking = () => {
       if (profileError) console.error('[RideBooking] Error fetching driver profile:', profileError);
       if (driverProfileError) console.error('[RideBooking] Error fetching driver vehicle info:', driverProfileError);
 
-      // Always set something so the in-ride UI can render (never blank screen)
-      setDriverInfo({
+      setDriverInfoSafe({
         first_name: profile?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver'),
         last_name: profile?.last_name || '',
         phone_number: profile?.phone_number || null,
@@ -1044,13 +1017,11 @@ const RideBooking = () => {
       });
     } catch (err) {
       console.error('[RideBooking] fetchDriverInfo failed:', err);
-      // Retry up to 3 times with 2s delay
       if (attempt < 3) {
+        driverInfoFetchedForId.current = null; // Allow retry
         setTimeout(() => fetchDriverInfo(driverId, attempt + 1), 2000);
       } else {
-        // Set fallback info so UI is never stuck on "Loading trip details..."
-        console.warn('[RideBooking] fetchDriverInfo gave up after 3 attempts, using fallback');
-        setDriverInfo({
+        setDriverInfoSafe({
           first_name: language === 'fr' ? 'Chauffeur' : 'Driver',
           last_name: '',
           phone_number: null,
@@ -1063,9 +1034,78 @@ const RideBooking = () => {
         });
       }
     }
-  };
+  }, [language, setDriverInfoSafe]);
 
-  // Save dropoff destination for frequent places suggestions
+  // Safety net: if in active ride phase but driverInfo is null, aggressively fetch it
+  useEffect(() => {
+    if (!isActiveRidePhase || !currentRide?.driver_id) return;
+    if (driverInfoRef.current) return;
+    
+    // Immediate attempt
+    console.log('[RideBooking] Safety net: immediate fetch for missing driverInfo');
+    fetchDriverInfo(currentRide.driver_id);
+    
+    // Backup: retry every 3s until driverInfo is set
+    const interval = setInterval(() => {
+      if (driverInfoRef.current) {
+        clearInterval(interval);
+        return;
+      }
+      console.log('[RideBooking] Safety net: retrying driverInfo fetch');
+      driverInfoFetchedForId.current = null; // Force re-fetch
+      fetchDriverInfo(currentRide.driver_id);
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [isActiveRidePhase, currentRide?.driver_id, fetchDriverInfo]);
+
+  // Fallback polling: poll every 5 seconds for ALL active phases
+  useEffect(() => {
+    if (!currentRide?.id) return;
+    const activeStatuses = ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
+    if (!activeStatuses.includes(currentRide.status)) return;
+    const pollInterval = setInterval(async () => {
+      const { data, error } = await supabase.from('rides').select('*').eq('id', currentRide.id).single();
+      if (error) {
+        console.error('[RideBooking] Poll error:', error);
+        return;
+      }
+      if (data && data.status !== currentRide.status) {
+        console.log('[RideBooking] Poll detected status change:', data.status);
+        setCurrentRide(data);
+        updateRide(data);
+        const statusToStep: Record<string, RideStep> = {
+          searching: 'searching',
+          driver_assigned: 'matched',
+          driver_en_route: 'arriving',
+          arrived: 'arrived',
+          in_progress: 'inProgress',
+          completed: 'completed',
+        };
+        const newStep = statusToStep[data.status];
+        if (newStep) setStep(newStep);
+        if (data.driver_id && !driverInfoRef.current) {
+          fetchDriverInfo(data.driver_id);
+        }
+        if (data.status === 'completed') {
+          clearRide();
+          if (dropoff && user?.id) saveDropoffDestination(dropoff);
+        }
+        if (data.status === 'cancelled') {
+          toast({ title: t('booking.cancelled'), variant: 'destructive' });
+          clearRide();
+          resetBooking();
+          navigate('/rider-home');
+        }
+      }
+      // Even if status hasn't changed, check if driverInfo is missing
+      if (data?.driver_id && !driverInfoRef.current) {
+        fetchDriverInfo(data.driver_id);
+      }
+    }, 5000);
+    return () => clearInterval(pollInterval);
+  }, [currentRide?.id, currentRide?.status, t, toast, fetchDriverInfo]);
+
   const saveDropoffDestination = async (destination: Location) => {
     if (!user?.id) return;
     try {
@@ -1547,6 +1587,8 @@ const RideBooking = () => {
     setFareEstimate(null);
     setCurrentRide(null);
     setDriverInfo(null);
+    driverInfoRef.current = null;
+    driverInfoFetchedForId.current = null;
     setDriverLocation(null);
     clearRide(); // Clear from localStorage
     hasRestoredRide.current = false;
