@@ -24,6 +24,7 @@ import InRideStatusBar from '@/components/ride/InRideStatusBar';
 import InRideDriverCard from '@/components/ride/InRideDriverCard';
 import SafetySheet from '@/components/ride/SafetySheet';
 import TripCompletionScreen from '@/components/ride/TripCompletionScreen';
+import FloatingCancelButton from '@/components/ride/FloatingCancelButton';
 import { MapRecenterButton } from '@/components/MapRecenterButton';
 import { useRealtimeDriverTracking } from '@/hooks/useRealtimeDriverTracking';
 import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
@@ -1816,7 +1817,12 @@ const RideBooking = () => {
         {/* Safety Sheet */}
         <SafetySheet open={safetySheetOpen} onOpenChange={setSafetySheetOpen} rideId={currentRide?.id || ''} driverName={driverInfo?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver')} vehicleInfo={driverInfo ? `${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}` : ''} licensePlate={driverInfo?.license_plate || ''} onShareLocation={handleShareTrip} />
 
-        {/* Cancel button is now inside InRideDriverCard trip details */}
+        {/* Floating Cancel — state-independent, always visible */}
+        <FloatingCancelButton
+          rideId={currentRide?.id}
+          driverId={currentRide?.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${currentRide?.id}`) || null}
+          userId={user?.id}
+        />
       </div>;
   }
 
