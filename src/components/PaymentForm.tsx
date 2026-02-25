@@ -464,9 +464,10 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
         setClientSecret(clientSecretResult);
       } catch (err: any) {
         if (!isMounted) return;
-        // ── POINT 3: Full error surfacing ──
         console.error('PAYMENT_FLOW_ERROR', err);
         setError(err.message);
+        // Reset initKey so the user can retry without needing a new ride
+        initKeyRef.current = null;
         toast({
           title: 'Payment error',
           description: err.message || 'Failed to initialize payment. Please try again.',
