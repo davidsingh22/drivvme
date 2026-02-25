@@ -106,10 +106,12 @@ const DriverDashboard = () => {
   // Refs to avoid stale closures in the realtime listener
   const currentRideRef = useRef<RideRequest | null>(null);
   const newRideAlertOpenRef = useRef(false);
+  const newRideAlertRideIdRef = useRef<string | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
   useEffect(() => { newRideAlertOpenRef.current = newRideAlertOpen; }, [newRideAlertOpen]);
+  useEffect(() => { newRideAlertRideIdRef.current = newRideAlertRideId; }, [newRideAlertRideId]);
 
 
   // GPS Streaming for live driver location (continuous foreground tracking)
@@ -392,9 +394,9 @@ const DriverDashboard = () => {
       }
     };
 
-    // Validate immediately and then every 10 seconds
+    // Validate immediately and then every 5 seconds
     validate();
-    const interval = window.setInterval(validate, 10000);
+    const interval = window.setInterval(validate, 5000);
     return () => window.clearInterval(interval);
   }, [currentRide?.id, session?.user?.id]);
 
@@ -420,6 +422,31 @@ const DriverDashboard = () => {
         async (payload) => {
           try {
             const notif = payload.new as { type: string; ride_id: string | null };
+
+            // Handle ride_cancelled notifications — dismiss offer modal or clear active ride
+            if (notif.type === 'ride_cancelled' && notif.ride_id) {
+              console.log('[DriverDashboard] 🚫 Received ride_cancelled notification for ride:', notif.ride_id);
+              // Dismiss offer modal if it matches (use ref to avoid stale closure)
+              if (newRideAlertRideIdRef.current === notif.ride_id) {
+                setNewRideAlertOpen(false);
+                setCachedAlertRide(null);
+                setNewRideAlertRideId(null);
+                alertStartTimeRef.current = null;
+              }
+              // Clear active ride if it matches
+              if (currentRideRef.current?.id === notif.ride_id) {
+                setCurrentRide(null);
+                setRiderInfo(null);
+                setShowGPSNavigation(false);
+              }
+              toast({
+                title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+                description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+                variant: 'destructive',
+              });
+              return;
+            }
+
             if (notif.type !== 'new_ride' || !notif.ride_id) return;
             if (currentRideRef.current || newRideAlertOpenRef.current) return; // already busy
 

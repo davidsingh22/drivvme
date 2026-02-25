@@ -1549,6 +1549,24 @@ const RideBooking = () => {
       title: 'Cancelling ride…'
     });
     try {
+      // Capture driver_id before we cancel (needed for notification)
+      const driverIdForNotif = currentRide.driver_id;
+
+      // IMPORTANT: Insert the cancellation notification BEFORE updating ride status.
+      // RLS on notifications requires the ride to still be in an active status
+      // for riders_can_notify_driver_for_their_rides policy to pass.
+      if (driverIdForNotif) {
+        await supabase.from('notifications').insert({
+          user_id: driverIdForNotif,
+          ride_id: rideId,
+          type: 'ride_cancelled',
+          title: 'Ride Cancelled ❌',
+          message: 'The rider cancelled this ride.',
+        }).then(({ error: notifErr }) => {
+          if (notifErr) console.warn('[RideBooking] Failed to insert cancel notification:', notifErr);
+        });
+      }
+
       const {
         error
       } = await supabase.from('rides').update({
