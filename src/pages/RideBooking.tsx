@@ -770,6 +770,10 @@ const RideBooking = () => {
         case 'driver_assigned':
           setStep('matched');
           fetchDriverInfo(updatedRide.driver_id);
+          // Store driver ID as backup for cancellation reliability
+          if (updatedRide.driver_id) {
+            localStorage.setItem(`drivvme_last_accepted_driver_${updatedRide.id}`, updatedRide.driver_id);
+          }
           // Notify rider that driver has been found
           toast({
             title: t('booking.found'),
@@ -1576,9 +1580,19 @@ const RideBooking = () => {
     if (!currentRide || isCancelling) return;
     setIsCancelling(true);
 
+    // ── Capture ALL IDs immediately so async state changes can't lose them ──
     const rideId = currentRide.id;
-    const driverIdForNotif = currentRide.driver_id;
     const userId = user?.id;
+    // Primary: current ride's driver_id. Fallback: last known accepted driver.
+    const targetDriverId =
+      currentRide.driver_id ||
+      localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) ||
+      null;
+
+    console.log('[RideBooking] ── handleCancelRide START ──');
+    console.log('[RideBooking] Ride ID:', rideId);
+    console.log('[RideBooking] Pushing to Driver ID:', targetDriverId);
+    console.log('[RideBooking] Rider (me):', userId);
 
     toast({ title: 'Cancelling ride…' });
 
@@ -1591,11 +1605,11 @@ const RideBooking = () => {
 
     try {
       // 1. NOTIFICATION FIRST — fire push before any DB mutation
-      if (driverIdForNotif) {
+      if (targetDriverId) {
         try {
           await withTimeout(
             supabase.from('notifications').insert({
-              user_id: driverIdForNotif,
+              user_id: targetDriverId,
               ride_id: rideId,
               type: 'ride_cancelled',
               title: 'Ride Cancelled ❌',
@@ -1604,10 +1618,31 @@ const RideBooking = () => {
             3000,
             'Cancel notification'
           );
-          console.log('[RideBooking] ✅ Cancel notification sent to driver', driverIdForNotif);
+          console.log('[RideBooking] ✅ Cancel notification inserted for driver', targetDriverId);
         } catch (notifErr) {
-          console.warn('[RideBooking] Cancel notification failed/timed out:', notifErr);
+          console.warn('[RideBooking] ❌ Cancel notification failed/timed out:', notifErr);
         }
+
+        // Also fire OneSignal push via edge function (external_user_id = Supabase UID)
+        try {
+          await withTimeout(
+            supabase.functions.invoke('send-onesignal-notification', {
+              body: {
+                externalUserIds: [targetDriverId],
+                title: 'Ride Cancelled ❌',
+                message: 'The rider cancelled this ride.',
+                url: '/driver',
+              },
+            }),
+            3000,
+            'Cancel push notification'
+          );
+          console.log('[RideBooking] ✅ OneSignal push sent to driver external ID:', targetDriverId);
+        } catch (pushErr) {
+          console.warn('[RideBooking] ❌ OneSignal push failed/timed out:', pushErr);
+        }
+      } else {
+        console.warn('[RideBooking] ⚠️ No driver ID available — skipping notification');
       }
 
       // 2. Update ride status (best-effort, remaining time before 4s deadline)
