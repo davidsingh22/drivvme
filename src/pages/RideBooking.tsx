@@ -1002,32 +1002,51 @@ const RideBooking = () => {
       }
     };
   }, [step, pickup]);
-  const fetchDriverInfo = async (driverId: string) => {
-    console.log('[RideBooking] Fetching driver info for:', driverId);
-    const [profileResult, driverProfileResult] = await Promise.all([supabase.from('profiles').select('first_name, last_name, phone_number, avatar_url').eq('user_id', driverId).maybeSingle(), supabase.from('driver_profiles').select('vehicle_make, vehicle_model, vehicle_color, license_plate, average_rating').eq('user_id', driverId).maybeSingle()]);
-    const {
-      data: profile,
-      error: profileError
-    } = profileResult;
-    const {
-      data: driverProfile,
-      error: driverProfileError
-    } = driverProfileResult;
-    if (profileError) console.error('[RideBooking] Error fetching driver profile:', profileError);
-    if (driverProfileError) console.error('[RideBooking] Error fetching driver vehicle info:', driverProfileError);
+  const fetchDriverInfo = async (driverId: string, attempt = 1) => {
+    console.log('[RideBooking] Fetching driver info for:', driverId, 'attempt:', attempt);
+    try {
+      const [profileResult, driverProfileResult] = await Promise.all([
+        supabase.from('profiles').select('first_name, last_name, phone_number, avatar_url').eq('user_id', driverId).maybeSingle(),
+        supabase.from('driver_profiles').select('vehicle_make, vehicle_model, vehicle_color, license_plate, average_rating').eq('user_id', driverId).maybeSingle(),
+      ]);
+      const { data: profile, error: profileError } = profileResult;
+      const { data: driverProfile, error: driverProfileError } = driverProfileResult;
+      if (profileError) console.error('[RideBooking] Error fetching driver profile:', profileError);
+      if (driverProfileError) console.error('[RideBooking] Error fetching driver vehicle info:', driverProfileError);
 
-    // Always set something so the in-ride UI can render (never blank screen)
-    setDriverInfo({
-      first_name: profile?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver'),
-      last_name: profile?.last_name || '',
-      phone_number: profile?.phone_number || null,
-      avatar_url: profile?.avatar_url || null,
-      vehicle_make: driverProfile?.vehicle_make || '',
-      vehicle_model: driverProfile?.vehicle_model || '',
-      vehicle_color: driverProfile?.vehicle_color || '',
-      license_plate: driverProfile?.license_plate || '—',
-      average_rating: Number(driverProfile?.average_rating ?? 5)
-    });
+      // Always set something so the in-ride UI can render (never blank screen)
+      setDriverInfo({
+        first_name: profile?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver'),
+        last_name: profile?.last_name || '',
+        phone_number: profile?.phone_number || null,
+        avatar_url: profile?.avatar_url || null,
+        vehicle_make: driverProfile?.vehicle_make || '',
+        vehicle_model: driverProfile?.vehicle_model || '',
+        vehicle_color: driverProfile?.vehicle_color || '',
+        license_plate: driverProfile?.license_plate || '—',
+        average_rating: Number(driverProfile?.average_rating ?? 5)
+      });
+    } catch (err) {
+      console.error('[RideBooking] fetchDriverInfo failed:', err);
+      // Retry up to 3 times with 2s delay
+      if (attempt < 3) {
+        setTimeout(() => fetchDriverInfo(driverId, attempt + 1), 2000);
+      } else {
+        // Set fallback info so UI is never stuck on "Loading trip details..."
+        console.warn('[RideBooking] fetchDriverInfo gave up after 3 attempts, using fallback');
+        setDriverInfo({
+          first_name: language === 'fr' ? 'Chauffeur' : 'Driver',
+          last_name: '',
+          phone_number: null,
+          avatar_url: null,
+          vehicle_make: '',
+          vehicle_model: '',
+          vehicle_color: '',
+          license_plate: '—',
+          average_rating: 5
+        });
+      }
+    }
   };
 
   // Save dropoff destination for frequent places suggestions
