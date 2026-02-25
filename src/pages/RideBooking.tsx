@@ -500,6 +500,23 @@ const RideBooking = () => {
       // Proactively refresh token so payment/ride creation don't hit expired JWT
       getValidAccessToken().catch(() => {});
 
+      // If we're in an active ride phase, verify ride is still active in DB
+      if (currentRide?.id && ['searching', 'matched', 'arriving', 'arrived', 'inProgress', 'completed'].includes(step)) {
+        try {
+          const { data: freshRide } = await supabase
+            .from('rides')
+            .select('status')
+            .eq('id', currentRide.id)
+            .maybeSingle();
+          if (freshRide && ['completed', 'cancelled'].includes(freshRide.status) && step !== 'completed') {
+            console.log('[RideBooking] Ride ended while app was backgrounded, redirecting home');
+            clearRide();
+            navigate('/rider-home', { replace: true });
+            return;
+          }
+        } catch { /* ignore, continue normally */ }
+      }
+
       // Warm GPS so next action has a fresh position
       if ('geolocation' in navigator && (step === 'input' || step === 'estimate')) {
         navigator.geolocation.getCurrentPosition(
@@ -523,7 +540,7 @@ const RideBooking = () => {
 
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [step, mapboxToken, reverseGeocode]);
+  }, [step, mapboxToken, reverseGeocode, currentRide?.id, clearRide, navigate]);
 
   // Phase 3: If arriving from /search with a destination, auto-fill and jump to estimate
   const hasAppliedSearchState = useRef(false);
@@ -635,6 +652,13 @@ const RideBooking = () => {
     if (activeRideLoading || !activeRide || hasRestoredRide.current) return;
     hasRestoredRide.current = true;
     console.log('Restoring active ride:', activeRide.id, activeRide.status);
+
+    // If the ride is already completed or cancelled, don't restore — go to clean state
+    if (['completed', 'cancelled'].includes(activeRide.status)) {
+      console.log('[RideBooking] Ride already finished, clearing stale state');
+      clearRide();
+      return;
+    }
 
     // Check if payment was completed for this ride before restoring to searching step
     const checkPaymentAndRestore = async () => {
