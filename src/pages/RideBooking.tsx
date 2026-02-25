@@ -1599,39 +1599,39 @@ const RideBooking = () => {
     if (!targetDriverId) {
       console.warn('[Cancel] No driver ID — skipping notification');
     } else {
-      // Fire OneSignal push (fire-and-forget, no blocking)
-      supabase.functions.invoke('send-onesignal-notification', {
+      // Fire OneSignal push (fire-and-forget)
+      Promise.resolve(supabase.functions.invoke('send-onesignal-notification', {
         body: {
           externalUserIds: [targetDriverId],
           title: 'Ride Cancelled ❌',
           message: 'The rider cancelled this ride.',
           url: '/driver',
         },
-      }).then(r => console.log('[Cancel] Push sent:', r)).catch(e => console.warn('[Cancel] Push err:', e));
+      })).then(r => console.log('[Cancel] Push sent:', r)).catch(e => console.warn('[Cancel] Push err:', e));
 
       // DB notification (fire-and-forget)
-      supabase.from('notifications').insert({
+      Promise.resolve(supabase.from('notifications').insert({
         user_id: targetDriverId,
         ride_id: rideId,
         type: 'ride_cancelled',
         title: 'Ride Cancelled ❌',
         message: 'The rider cancelled this ride.',
-      }).then(() => console.log('[Cancel] DB notif ok')).catch(e => console.warn('[Cancel] DB notif err:', e));
+      })).then(() => console.log('[Cancel] DB notif ok')).catch(e => console.warn('[Cancel] DB notif err:', e));
 
       // Purge localStorage
       localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
     }
 
     // Update ride status (fire-and-forget)
-    supabase.from('rides').update({
+    Promise.resolve(supabase.from('rides').update({
       status: 'cancelled',
       cancelled_at: new Date().toISOString(),
       cancelled_by: userId,
       cancellation_reason: 'Cancelled by rider'
-    }).eq('id', rideId).then(() => console.log('[Cancel] Ride DB updated')).catch(e => console.warn('[Cancel] Ride update err:', e));
+    }).eq('id', rideId)).then(() => console.log('[Cancel] Ride DB updated')).catch(e => console.warn('[Cancel] Ride update err:', e));
 
     // Clean up stale new_ride notifications
-    supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride').then(() => {});
+    Promise.resolve(supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride')).then(() => {});
 
     toast({ title: 'Ride cancelled' });
   };
