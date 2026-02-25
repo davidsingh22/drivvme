@@ -134,7 +134,7 @@ const RiderHome = () => {
 
         {/* Glowing Book a Ride button — NEVER disabled, GPS is non-blocking */}
         <motion.button
-          onClick={() => navigate('/ride')}
+          onClick={() => navigate('/ride?new=1')}
           className="relative group flex items-center gap-3 px-10 py-5 rounded-2xl font-display font-bold text-xl text-white overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, hsl(270 80% 45%), hsl(280 90% 35%))',
