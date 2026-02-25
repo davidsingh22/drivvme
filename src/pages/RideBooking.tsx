@@ -1613,7 +1613,13 @@ const RideBooking = () => {
       }
 
       // 1. NOTIFICATION FIRST — fire push before any DB mutation
-      if (targetDriverId) {
+      if (!targetDriverId) {
+        alert('No Driver ID found - Notification skipped');
+        console.warn('[RideBooking] ⚠️ No driver ID available — skipping notification');
+      } else {
+        console.log('[RideBooking] 🎯 Sending cancel notification to driver:', targetDriverId);
+
+        // 1a. DB notification
         try {
           await withTimeout(
             supabase.from('notifications').insert({
@@ -1628,13 +1634,14 @@ const RideBooking = () => {
           );
           console.log('[RideBooking] ✅ Cancel notification inserted for driver', targetDriverId);
         } catch (notifErr: any) {
-          console.warn('[RideBooking] ❌ Cancel notification failed/timed out:', notifErr);
-          alert('Notification Error: ' + (notifErr?.message || String(notifErr)));
+          const errMsg = notifErr?.message || String(notifErr);
+          console.warn('[RideBooking] ❌ Cancel notification failed/timed out:', errMsg);
+          alert('Notification Error: ' + errMsg);
         }
 
-        // Also fire OneSignal push via edge function (external_user_id = Supabase UID)
+        // 1b. OneSignal push via edge function
         try {
-          await withTimeout(
+          const pushResult = await withTimeout(
             supabase.functions.invoke('send-onesignal-notification', {
               body: {
                 externalUserIds: [targetDriverId],
@@ -1646,17 +1653,16 @@ const RideBooking = () => {
             3000,
             'Cancel push notification'
           );
-          console.log('[RideBooking] ✅ OneSignal push sent to driver external ID:', targetDriverId);
+          console.log('[RideBooking] ✅ OneSignal push sent. Result:', JSON.stringify(pushResult));
         } catch (pushErr: any) {
-          console.warn('[RideBooking] ❌ OneSignal push failed/timed out:', pushErr);
-          alert('Push Error: ' + (pushErr?.message || String(pushErr)));
+          const errMsg = pushErr?.message || String(pushErr);
+          console.warn('[RideBooking] ❌ OneSignal push failed/timed out:', errMsg);
+          alert('Push Error: ' + errMsg);
         }
 
-        // Purge localStorage for this ride so stale data can't interfere with next test
+        // Purge localStorage AFTER all notifications are done
         localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
         console.log('[RideBooking] 🧹 Purged localStorage for ride', rideId);
-      } else {
-        console.warn('[RideBooking] ⚠️ No driver ID available — skipping notification');
       }
 
       // 2. Update ride status (best-effort, remaining time before 4s deadline)
