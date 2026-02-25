@@ -159,6 +159,7 @@ const RideBooking = () => {
   } = useActiveRide(user?.id);
   const hasRestoredRide = useRef(false);
   const [step, setStep] = useState<RideStep>('input');
+  const [isCancelling, setIsCancelling] = useState(false);
   const [pickup, setPickup] = useState<Location | null>(null);
   const [dropoff, setDropoff] = useState<Location | null>(null);
   const [pickupAddress, setPickupAddress] = useState('');
@@ -1572,22 +1573,27 @@ const RideBooking = () => {
     navigate('/rider-home');
   };
   const handleCancelRide = async () => {
-    if (!currentRide) return;
+    if (!currentRide || isCancelling) return;
+    setIsCancelling(true);
 
-    // Capture ALL needed data before any state changes
     const rideId = currentRide.id;
     const driverIdForNotif = currentRide.driver_id;
     const userId = user?.id;
 
     toast({ title: 'Cancelling ride…' });
 
+    // Hard 4-second deadline: no matter what, reset UI after this
+    const forceResetTimer = window.setTimeout(() => {
+      console.warn('[RideBooking] 4s deadline hit — forcing UI reset');
+      resetBooking();
+      navigate('/rider-home');
+    }, 4000);
+
     try {
-      // 1. Insert cancellation notification BEFORE updating ride status.
-      //    RLS requires ride to still be in an active status.
-      //    Wrap in timeout so mobile network hangs don't block forever.
+      // 1. NOTIFICATION FIRST — fire push before any DB mutation
       if (driverIdForNotif) {
         try {
-          const { error: notifErr } = await withTimeout(
+          await withTimeout(
             supabase.from('notifications').insert({
               user_id: driverIdForNotif,
               ride_id: rideId,
@@ -1595,32 +1601,30 @@ const RideBooking = () => {
               title: 'Ride Cancelled ❌',
               message: 'The rider cancelled this ride.',
             }),
-            7000,
+            3000,
             'Cancel notification'
           );
-          if (notifErr) console.warn('[RideBooking] Cancel notification RLS error:', notifErr.message);
-          else console.log('[RideBooking] ✅ Cancel notification inserted for driver', driverIdForNotif);
-        } catch (notifTimeout) {
-          console.warn('[RideBooking] Cancel notification timed out, proceeding with cancel');
+          console.log('[RideBooking] ✅ Cancel notification sent to driver', driverIdForNotif);
+        } catch (notifErr) {
+          console.warn('[RideBooking] Cancel notification failed/timed out:', notifErr);
         }
       }
 
-      // 2. Update ride status to cancelled (also with timeout)
+      // 2. Update ride status (best-effort, remaining time before 4s deadline)
       try {
-        const { error } = await withTimeout(
+        await withTimeout(
           supabase.from('rides').update({
             status: 'cancelled',
             cancelled_at: new Date().toISOString(),
             cancelled_by: userId,
             cancellation_reason: 'Cancelled by rider'
           }).eq('id', rideId),
-          7000,
+          3000,
           'Cancel ride update'
         );
-        if (error) console.error('[RideBooking] Ride cancel update error:', error.message);
-        else console.log('[RideBooking] ✅ Ride cancelled in DB');
-      } catch (updateTimeout) {
-        console.warn('[RideBooking] Ride cancel update timed out');
+        console.log('[RideBooking] ✅ Ride cancelled in DB');
+      } catch (updateErr) {
+        console.warn('[RideBooking] Ride cancel DB update failed/timed out:', updateErr);
       }
 
       // 3. Clean up stale new_ride notifications (non-blocking)
@@ -1632,7 +1636,7 @@ const RideBooking = () => {
 
       toast({ title: 'Ride cancelled' });
     } catch (error: any) {
-      console.error('Cancel ride error:', error);
+      console.error('[RideBooking] Cancel ride error:', error);
       toast({
         title: 'Cancel may have failed',
         description: error.message,
@@ -1640,8 +1644,9 @@ const RideBooking = () => {
       });
     }
 
-    // 4. ALWAYS navigate away regardless of success/failure
-    //    This prevents the rider from being stuck on a dead ride screen
+    // Clear the safety timer and navigate
+    window.clearTimeout(forceResetTimer);
+    setIsCancelling(false);
     resetBooking();
     navigate('/rider-home');
   };
@@ -2409,8 +2414,8 @@ const RideBooking = () => {
                     </div>
                   </Card>
 
-                  <Button variant="outline" onClick={handleCancelRide} className="w-full text-destructive border-destructive/50 hover:bg-destructive/10">
-                    {t('common.cancel')} {language === 'fr' ? 'la course' : 'Ride'}
+                  <Button variant="outline" onClick={handleCancelRide} disabled={isCancelling} className="w-full text-destructive border-destructive/50 hover:bg-destructive/10">
+                    {isCancelling ? (language === 'fr' ? 'Annulation…' : 'Cancelling…') : `${t('common.cancel')} ${language === 'fr' ? 'la course' : 'Ride'}`}
                   </Button>
                 </motion.div>}
             </AnimatePresence>
