@@ -1717,22 +1717,18 @@ const RideBooking = () => {
         {/* Status Bar Overlay */}
         <InRideStatusBar phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} driverLocation={effectiveDriverLocation} pickupLocation={pickup} dropoffLocation={dropoff} lastUpdateSeconds={lastUpdateSeconds} />
 
-        {/* Driver Card at Bottom */}
-        {driverInfo ? <InRideDriverCard driverInfo={driverInfo} driverId={currentRide?.driver_id || ''} pickupAddress={pickup?.address || currentRide?.pickup_address || ''} dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''} estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0} distanceKm={distanceKm || currentRide?.distance_km || 0} durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0} rideId={currentRide?.id || ''} rideStatus={currentRide?.status || ''} phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} minutesAway={minutesAway} onShareTrip={handleShareTrip} onSafetyPress={() => setSafetySheetOpen(true)} onCancelRide={handleCancelRide} /> : <div className="absolute bottom-0 left-0 right-0 z-10">
-            <Card className="rounded-t-3xl rounded-b-none border-b-0 shadow-2xl p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">
-                    {language === 'fr' ? 'Chargement des détails...' : 'Loading trip details...'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {language === 'fr' ? 'La carte et le trajet sont en direct — les infos du chauffeur arrivent.' : 'Map is live — driver details will appear shortly.'}
-                  </p>
-                </div>
-                <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-              </div>
-            </Card>
-          </div>}
+        {/* Driver Card at Bottom — always render with fallback values to prevent hanging */}
+        <InRideDriverCard driverInfo={driverInfo || {
+          first_name: language === 'fr' ? 'Chauffeur' : 'Driver',
+          last_name: '',
+          phone_number: null,
+          avatar_url: null,
+          vehicle_make: '',
+          vehicle_model: '',
+          vehicle_color: '',
+          license_plate: '—',
+          average_rating: 5
+        }} driverId={currentRide?.driver_id || ''} pickupAddress={pickup?.address || currentRide?.pickup_address || ''} dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''} estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0} distanceKm={distanceKm || currentRide?.distance_km || 0} durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0} rideId={currentRide?.id || ''} rideStatus={currentRide?.status || ''} phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} minutesAway={minutesAway} onShareTrip={handleShareTrip} onSafetyPress={() => setSafetySheetOpen(true)} onCancelRide={handleCancelRide} />
 
         {/* Safety Sheet */}
         <SafetySheet open={safetySheetOpen} onOpenChange={setSafetySheetOpen} rideId={currentRide?.id || ''} driverName={driverInfo?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver')} vehicleInfo={driverInfo ? `${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}` : ''} licensePlate={driverInfo?.license_plate || ''} onShareLocation={handleShareTrip} />
@@ -1742,11 +1738,11 @@ const RideBooking = () => {
   }
 
   // TRIP COMPLETION SCREEN
-  if (step === 'completed' && currentRide && driverInfo) {
+  if (step === 'completed' && currentRide) {
     return <div className="min-h-screen bg-background">
         <Navbar />
         <div className="pt-20 pb-12 container mx-auto px-4 max-w-md">
-          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={driverInfo} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={() => { resetBooking(); window.location.href = '/rider-home'; }} />
+          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={driverInfo || { first_name: language === 'fr' ? 'Chauffeur' : 'Driver', last_name: '', phone_number: null, avatar_url: null, vehicle_make: '', vehicle_model: '', vehicle_color: '', license_plate: '—', average_rating: 5 }} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={() => { resetBooking(); window.location.href = '/rider-home'; }} />
         </div>
       </div>;
   }
