@@ -222,6 +222,18 @@ const RideBooking = () => {
     token: mapboxToken
   } = useMapboxToken();
 
+  // Safety net: if in active ride phase but driverInfo is null, force-fetch it
+  useEffect(() => {
+    if (!isActiveRidePhase || driverInfo || !currentRide?.driver_id) return;
+    const timer = setTimeout(() => {
+      if (!driverInfo) {
+        console.log('[RideBooking] Safety net: fetching missing driverInfo');
+        fetchDriverInfo(currentRide.driver_id);
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [isActiveRidePhase, driverInfo, currentRide?.driver_id]);
+
   // Track rider location for admin visibility
   useRiderLocationTracking(true);
 
@@ -772,6 +784,7 @@ const RideBooking = () => {
           break;
         case 'driver_en_route':
           setStep('arriving');
+          if (!driverInfo && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Driver on the way',
             description: 'Your driver is heading to your pickup location.'
@@ -779,6 +792,7 @@ const RideBooking = () => {
           break;
         case 'arrived':
           setStep('arrived');
+          if (!driverInfo && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Driver has arrived!',
             description: 'Your driver is waiting at the pickup location.'
@@ -786,6 +800,7 @@ const RideBooking = () => {
           break;
         case 'in_progress':
           setStep('inProgress');
+          if (!driverInfo && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Ride started',
             description: 'Enjoy your trip!'
