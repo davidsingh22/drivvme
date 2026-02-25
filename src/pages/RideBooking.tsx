@@ -1604,6 +1604,14 @@ const RideBooking = () => {
     }, 4000);
 
     try {
+      // 0. Refresh session to prevent stale auth on repeated cancels
+      try {
+        await supabase.auth.refreshSession();
+        console.log('[RideBooking] ✅ Session refreshed before cancel');
+      } catch (sessErr) {
+        console.warn('[RideBooking] Session refresh failed (continuing):', sessErr);
+      }
+
       // 1. NOTIFICATION FIRST — fire push before any DB mutation
       if (targetDriverId) {
         try {
@@ -1619,8 +1627,9 @@ const RideBooking = () => {
             'Cancel notification'
           );
           console.log('[RideBooking] ✅ Cancel notification inserted for driver', targetDriverId);
-        } catch (notifErr) {
+        } catch (notifErr: any) {
           console.warn('[RideBooking] ❌ Cancel notification failed/timed out:', notifErr);
+          alert('Notification Error: ' + (notifErr?.message || String(notifErr)));
         }
 
         // Also fire OneSignal push via edge function (external_user_id = Supabase UID)
@@ -1638,9 +1647,14 @@ const RideBooking = () => {
             'Cancel push notification'
           );
           console.log('[RideBooking] ✅ OneSignal push sent to driver external ID:', targetDriverId);
-        } catch (pushErr) {
+        } catch (pushErr: any) {
           console.warn('[RideBooking] ❌ OneSignal push failed/timed out:', pushErr);
+          alert('Push Error: ' + (pushErr?.message || String(pushErr)));
         }
+
+        // Purge localStorage for this ride so stale data can't interfere with next test
+        localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+        console.log('[RideBooking] 🧹 Purged localStorage for ride', rideId);
       } else {
         console.warn('[RideBooking] ⚠️ No driver ID available — skipping notification');
       }
@@ -1658,8 +1672,9 @@ const RideBooking = () => {
           'Cancel ride update'
         );
         console.log('[RideBooking] ✅ Ride cancelled in DB');
-      } catch (updateErr) {
+      } catch (updateErr: any) {
         console.warn('[RideBooking] Ride cancel DB update failed/timed out:', updateErr);
+        alert('DB Cancel Error: ' + (updateErr?.message || String(updateErr)));
       }
 
       // 3. Clean up stale new_ride notifications (non-blocking)
@@ -1672,6 +1687,7 @@ const RideBooking = () => {
       toast({ title: 'Ride cancelled' });
     } catch (error: any) {
       console.error('[RideBooking] Cancel ride error:', error);
+      alert('Cancel Ride Error: ' + (error?.message || String(error)));
       toast({
         title: 'Cancel may have failed',
         description: error.message,
