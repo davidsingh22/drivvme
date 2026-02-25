@@ -1579,17 +1579,17 @@ const RideBooking = () => {
   const handleCancelRide = async () => {
     console.log('STARTING CANCEL');
     if (!currentRide || isCancelling) return;
+    setIsCancelling(true);
 
     const rideId = currentRide.id;
     const userId = user?.id;
     const targetDriverId = currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
-
     console.log('[Cancel] rideId:', rideId, 'driverId:', targetDriverId);
 
-    // 1. PRIORITIZE the push — send it BEFORE any state changes
-    if (targetDriverId) {
-      try {
-        const pushResult = await supabase.functions.invoke('send-onesignal-notification', {
+    try {
+      // 1. Send push notification to driver (with 5s timeout so it never hangs)
+      if (targetDriverId) {
+        const pushPromise = supabase.functions.invoke('send-onesignal-notification', {
           body: {
             externalUserIds: [targetDriverId],
             tagUids: [targetDriverId],
@@ -1598,48 +1598,46 @@ const RideBooking = () => {
             url: '/driver',
           },
         });
-        console.log('[Cancel] Push SENT ✅:', pushResult);
-      } catch (e) {
-        console.warn('[Cancel] Push err (continuing anyway):', e);
+        const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('Push timeout')), 5000));
+        try {
+          const result = await Promise.race([pushPromise, timeout]);
+          console.log('[Cancel] Push SENT ✅:', result);
+        } catch (e) {
+          console.warn('[Cancel] Push err (continuing):', e);
+        }
       }
-    } else {
-      console.warn('[Cancel] No driver ID — skipping notification');
-    }
 
-    // 2. NOW set cancelling state and show UI
-    setIsCancelling(true);
-    toast({ title: 'Cancelling ride…' });
+      // 2. Update ride status
+      await supabase.from('rides').update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        cancelled_by: userId,
+        cancellation_reason: 'Cancelled by rider',
+      }).eq('id', rideId);
+      console.log('[Cancel] Ride DB updated');
 
-    // 3. Fire DB updates (fire-and-forget from here)
-    Promise.resolve(supabase.from('rides').update({
-      status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
-      cancelled_by: userId,
-      cancellation_reason: 'Cancelled by rider'
-    }).eq('id', rideId)).then(() => console.log('[Cancel] Ride DB updated')).catch(e => console.warn('[Cancel] Ride update err:', e));
+      // 3. DB notification + cleanup (fire-and-forget)
+      if (targetDriverId) {
+        supabase.from('notifications').insert({
+          user_id: targetDriverId,
+          ride_id: rideId,
+          type: 'ride_cancelled',
+          title: 'Ride Cancelled ❌',
+          message: 'The rider cancelled this ride.',
+        }).then(() => console.log('[Cancel] DB notif ok'));
+        localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+      }
+      supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride').then(() => {});
 
-    if (targetDriverId) {
-      Promise.resolve(supabase.from('notifications').insert({
-        user_id: targetDriverId,
-        ride_id: rideId,
-        type: 'ride_cancelled',
-        title: 'Ride Cancelled ❌',
-        message: 'The rider cancelled this ride.',
-      })).then(() => console.log('[Cancel] DB notif ok')).catch(e => console.warn('[Cancel] DB notif err:', e));
-
-      localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
-    }
-
-    Promise.resolve(supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride')).then(() => {});
-
-    // 4. Exit after 2s
-    window.setTimeout(() => {
+    } catch (err) {
+      console.error('[Cancel] Error:', err);
+    } finally {
+      // 4. Always exit
+      toast({ title: 'Ride cancelled' });
       setIsCancelling(false);
       resetBooking();
       navigate('/rider-home');
-    }, 2000);
-
-    toast({ title: 'Ride cancelled' });
+    }
   };
   const resetBooking = () => {
     setStep('input');
