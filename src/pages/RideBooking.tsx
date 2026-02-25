@@ -656,6 +656,7 @@ const RideBooking = () => {
 
 
   // Detect ?new=1 parameter to force a fresh booking flow
+  // Also: if mounted without ?new=1 and no active ride, redirect to rider-home
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('new') === '1') {
@@ -668,6 +669,23 @@ const RideBooking = () => {
       window.history.replaceState({}, document.title, '/ride');
     }
   }, []); // only on mount
+
+  // Safety: if no active ride and not coming from search or ?new=1, redirect to rider-home
+  // This prevents the app from reopening to a stale /ride page
+  useEffect(() => {
+    if (activeRideLoading) return; // wait for ride check
+    if (hasRestoredRide.current) return; // already handled
+    if (activeRide) return; // there IS an active ride to show
+
+    // Check if we arrived from search (has state) or ?new=1 (already handled above)
+    const hasSearchState = routeLocation.state?.dropoffAddress;
+    if (hasSearchState) return;
+
+    // No active ride, no search state, no ?new=1 — user shouldn't be here
+    console.log('[RideBooking] No active ride and no search context — redirecting to rider-home');
+    hasRestoredRide.current = true;
+    window.location.href = '/rider-home';
+  }, [activeRideLoading, activeRide, routeLocation.state]);
 
   useEffect(() => {
     if (activeRideLoading || !activeRide || hasRestoredRide.current) return;
@@ -819,7 +837,7 @@ const RideBooking = () => {
           });
           clearRide(); // Clear from localStorage
           resetBooking();
-          navigate('/rider-home');
+          window.location.href = '/rider-home';
           break;
       }
     }).subscribe(status => {
@@ -855,7 +873,7 @@ const RideBooking = () => {
           });
           clearRide();
           resetBooking();
-          navigate('/rider-home');
+          window.location.href = '/rider-home';
         }
       })
       .subscribe();
@@ -1578,21 +1596,26 @@ const RideBooking = () => {
   };
   const handleCancelRide = async () => {
     console.log('STARTING CANCEL');
-    if (!currentRide || isCancelling) return;
-    setIsCancelling(true);
-
-    const rideId = currentRide.id;
+    if (isCancelling) return;
+    // Capture values before any state changes
+    const rideId = currentRide?.id;
     const userId = user?.id;
-    const targetDriverId = currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
+    const targetDriverId = currentRide?.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
 
+    if (!rideId) {
+      console.warn('[Cancel] No ride to cancel, redirecting home');
+      resetBooking();
+      window.location.href = '/rider-home';
+      return;
+    }
+
+    setIsCancelling(true);
     console.log('[Cancel] rideId:', rideId, 'driverId:', targetDriverId);
     toast({ title: 'Cancelling ride…' });
 
-    // One click = exit after 2s no matter what
+    // Hard exit after 2s no matter what — use window.location to fully reset state
     window.setTimeout(() => {
-      setIsCancelling(false);
-      resetBooking();
-      navigate('/rider-home');
+      window.location.href = '/rider-home';
     }, 2000);
 
     // Fire notification immediately (don't await DB first)
@@ -1633,6 +1656,8 @@ const RideBooking = () => {
     // Clean up stale new_ride notifications
     Promise.resolve(supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride')).then(() => {});
 
+    // Clear local state immediately
+    clearRide();
     toast({ title: 'Ride cancelled' });
   };
   const resetBooking = () => {
@@ -1647,6 +1672,7 @@ const RideBooking = () => {
     driverInfoRef.current = null;
     driverInfoFetchedForId.current = null;
     setDriverLocation(null);
+    setIsCancelling(false);
     clearRide(); // Clear from localStorage
     hasRestoredRide.current = false;
   };
