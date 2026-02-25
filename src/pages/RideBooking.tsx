@@ -553,6 +553,7 @@ const RideBooking = () => {
     const state = routeLocation.state as any;
     if (!state?.dropoffAddress || hasAppliedSearchState.current) return;
     hasAppliedSearchState.current = true;
+    hasRestoredRide.current = true; // prevent stale ride restoration from overriding
 
     // Set dropoff
     setDropoffAddress(state.dropoffAddress);
