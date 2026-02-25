@@ -825,6 +825,38 @@ const RideBooking = () => {
     };
   }, [currentRide?.id, t, toast]);
 
+  // Listen for ride_cancelled notifications from the driver (backup channel)
+  useEffect(() => {
+    if (!currentRide?.id || !user?.id) return;
+    const activeStatuses = ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
+    if (!activeStatuses.includes(currentRide.status)) return;
+
+    const channel = supabase
+      .channel(`rider-cancel-notif-${currentRide.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`,
+      }, (payload) => {
+        const notif = payload.new as { type: string; ride_id: string | null; title: string; message: string };
+        if (notif.type === 'ride_cancelled' && notif.ride_id === currentRide.id) {
+          console.log('[RideBooking] Received ride_cancelled notification from driver');
+          toast({
+            title: notif.title || t('booking.cancelled'),
+            description: notif.message,
+            variant: 'destructive',
+          });
+          clearRide();
+          resetBooking();
+          navigate('/rider-home');
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [currentRide?.id, currentRide?.status, user?.id, t, toast]);
+
   // Hard payment gate: never allow the UI to show "searching" (or beyond) if payment isn't succeeded.
   // Test accounts bypass this gate entirely (unlimited or limited free rides).
   const isUnlimitedTestAccount = user?.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
