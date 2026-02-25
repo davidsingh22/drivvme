@@ -648,6 +648,20 @@ const RideBooking = () => {
   }, [routeLocation.state, user?.id]);
 
 
+  // Detect ?new=1 parameter to force a fresh booking flow
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('new') === '1') {
+      console.log('[RideBooking] ?new=1 detected — clearing stale ride and starting fresh');
+      hasRestoredRide.current = true; // prevent restoration
+      clearRide();
+      setCurrentRide(null);
+      setStep('input');
+      // Clean the URL without triggering a re-render
+      window.history.replaceState({}, document.title, '/ride');
+    }
+  }, []); // only on mount
+
   useEffect(() => {
     if (activeRideLoading || !activeRide || hasRestoredRide.current) return;
     hasRestoredRide.current = true;
