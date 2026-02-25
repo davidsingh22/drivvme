@@ -462,9 +462,19 @@ const DriverDashboard = () => {
   }, [isOnline, user, session]);
 
   // Watch alerted ride for cancellation — dismiss modal if rider cancels
+  // Uses BOTH realtime (may fail due to RLS on cancelled rows) AND polling fallback
   useEffect(() => {
     if (!newRideAlertRideId || !newRideAlertOpen) return;
 
+    const dismissAlert = (reason: string) => {
+      console.log('[DriverDashboard] Alerted ride dismissed:', reason);
+      setNewRideAlertOpen(false);
+      setCachedAlertRide(null);
+      setNewRideAlertRideId(null);
+      alertStartTimeRef.current = null;
+    };
+
+    // Realtime listener (works when RLS allows seeing the updated row)
     const channel = supabase
       .channel(`alert-ride-cancel-${newRideAlertRideId}`)
       .on(
@@ -478,11 +488,7 @@ const DriverDashboard = () => {
         (payload) => {
           const updated = payload.new as any;
           if (updated.status === 'cancelled' || (updated.driver_id && updated.driver_id !== user?.id)) {
-            console.log('[DriverDashboard] Alerted ride cancelled/taken — dismissing modal');
-            setNewRideAlertOpen(false);
-            setCachedAlertRide(null);
-            setNewRideAlertRideId(null);
-            alertStartTimeRef.current = null;
+            dismissAlert('realtime: ' + updated.status);
             if (updated.status === 'cancelled') {
               toast({
                 title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
@@ -495,7 +501,35 @@ const DriverDashboard = () => {
       )
       .subscribe();
 
+    // Polling fallback every 3s — catches cancellations that realtime misses
+    // (driver RLS only allows SELECT on status='searching', so cancelled rows are invisible to realtime)
+    const rideId = newRideAlertRideId;
+    const pollInterval = setInterval(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('rides')
+          .select('status, driver_id')
+          .eq('id', rideId)
+          .maybeSingle();
+
+        // If ride is no longer visible (RLS blocks cancelled rows) or status changed
+        if (error || !data || data.status !== 'searching' || (data.driver_id && data.driver_id !== user?.id)) {
+          dismissAlert('poll: ' + (data?.status || 'not visible'));
+          if (!data || data.status === 'cancelled' || (!data && !error)) {
+            toast({
+              title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+              description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+              variant: 'destructive',
+            });
+          }
+        }
+      } catch (e) {
+        // Network error — ignore, will retry next interval
+      }
+    }, 3000);
+
     return () => {
+      clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
   }, [newRideAlertRideId, newRideAlertOpen, user?.id]);
