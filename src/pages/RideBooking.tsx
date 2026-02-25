@@ -1577,135 +1577,63 @@ const RideBooking = () => {
     navigate('/rider-home');
   };
   const handleCancelRide = async () => {
+    console.log('STARTING CANCEL');
     if (!currentRide || isCancelling) return;
     setIsCancelling(true);
 
-    // ── Capture ALL IDs immediately so async state changes can't lose them ──
     const rideId = currentRide.id;
     const userId = user?.id;
-    // Primary: current ride's driver_id. Fallback: last known accepted driver.
-    const targetDriverId =
-      currentRide.driver_id ||
-      localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) ||
-      null;
+    const targetDriverId = currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
 
-    console.log('[RideBooking] ── handleCancelRide START ──');
-    console.log('[RideBooking] Ride ID:', rideId);
-    console.log('[RideBooking] Pushing to Driver ID:', targetDriverId);
-    console.log('[RideBooking] Rider (me):', userId);
-
+    console.log('[Cancel] rideId:', rideId, 'driverId:', targetDriverId);
     toast({ title: 'Cancelling ride…' });
 
-    // Hard 4-second deadline: no matter what, reset UI after this
-    const forceResetTimer = window.setTimeout(() => {
-      console.warn('[RideBooking] 4s deadline hit — forcing UI reset');
+    // One click = exit after 2s no matter what
+    window.setTimeout(() => {
+      setIsCancelling(false);
       resetBooking();
       navigate('/rider-home');
-    }, 4000);
+    }, 2000);
 
-    try {
-      // 0. Refresh session to prevent stale auth on repeated cancels
-      try {
-        await supabase.auth.refreshSession();
-        console.log('[RideBooking] ✅ Session refreshed before cancel');
-      } catch (sessErr) {
-        console.warn('[RideBooking] Session refresh failed (continuing):', sessErr);
-      }
+    // Fire notification immediately (don't await DB first)
+    if (!targetDriverId) {
+      console.warn('[Cancel] No driver ID — skipping notification');
+    } else {
+      // Fire OneSignal push (fire-and-forget, no blocking)
+      supabase.functions.invoke('send-onesignal-notification', {
+        body: {
+          externalUserIds: [targetDriverId],
+          title: 'Ride Cancelled ❌',
+          message: 'The rider cancelled this ride.',
+          url: '/driver',
+        },
+      }).then(r => console.log('[Cancel] Push sent:', r)).catch(e => console.warn('[Cancel] Push err:', e));
 
-      // 1. NOTIFICATION FIRST — fire push before any DB mutation
-      if (!targetDriverId) {
-        alert('No Driver ID found - Notification skipped');
-        console.warn('[RideBooking] ⚠️ No driver ID available — skipping notification');
-      } else {
-        console.log('[RideBooking] 🎯 Sending cancel notification to driver:', targetDriverId);
+      // DB notification (fire-and-forget)
+      supabase.from('notifications').insert({
+        user_id: targetDriverId,
+        ride_id: rideId,
+        type: 'ride_cancelled',
+        title: 'Ride Cancelled ❌',
+        message: 'The rider cancelled this ride.',
+      }).then(() => console.log('[Cancel] DB notif ok')).catch(e => console.warn('[Cancel] DB notif err:', e));
 
-        // 1a. DB notification
-        try {
-          await withTimeout(
-            supabase.from('notifications').insert({
-              user_id: targetDriverId,
-              ride_id: rideId,
-              type: 'ride_cancelled',
-              title: 'Ride Cancelled ❌',
-              message: 'The rider cancelled this ride.',
-            }),
-            3000,
-            'Cancel notification'
-          );
-          console.log('[RideBooking] ✅ Cancel notification inserted for driver', targetDriverId);
-        } catch (notifErr: any) {
-          const errMsg = notifErr?.message || String(notifErr);
-          console.warn('[RideBooking] ❌ Cancel notification failed/timed out:', errMsg);
-          alert('Notification Error: ' + errMsg);
-        }
-
-        // 1b. OneSignal push via edge function
-        try {
-          const pushResult = await withTimeout(
-            supabase.functions.invoke('send-onesignal-notification', {
-              body: {
-                externalUserIds: [targetDriverId],
-                title: 'Ride Cancelled ❌',
-                message: 'The rider cancelled this ride.',
-                url: '/driver',
-              },
-            }),
-            3000,
-            'Cancel push notification'
-          );
-          console.log('[RideBooking] ✅ OneSignal push sent. Result:', JSON.stringify(pushResult));
-        } catch (pushErr: any) {
-          const errMsg = pushErr?.message || String(pushErr);
-          console.warn('[RideBooking] ❌ OneSignal push failed/timed out:', errMsg);
-          alert('Push Error: ' + errMsg);
-        }
-
-        // Purge localStorage AFTER all notifications are done
-        localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
-        console.log('[RideBooking] 🧹 Purged localStorage for ride', rideId);
-      }
-
-      // 2. Update ride status (best-effort, remaining time before 4s deadline)
-      try {
-        await withTimeout(
-          supabase.from('rides').update({
-            status: 'cancelled',
-            cancelled_at: new Date().toISOString(),
-            cancelled_by: userId,
-            cancellation_reason: 'Cancelled by rider'
-          }).eq('id', rideId),
-          3000,
-          'Cancel ride update'
-        );
-        console.log('[RideBooking] ✅ Ride cancelled in DB');
-      } catch (updateErr: any) {
-        console.warn('[RideBooking] Ride cancel DB update failed/timed out:', updateErr);
-        alert('DB Cancel Error: ' + (updateErr?.message || String(updateErr)));
-      }
-
-      // 3. Clean up stale new_ride notifications (non-blocking)
-      void supabase.from('notifications')
-        .delete()
-        .eq('ride_id', rideId)
-        .eq('type', 'new_ride')
-        .then(() => {});
-
-      toast({ title: 'Ride cancelled' });
-    } catch (error: any) {
-      console.error('[RideBooking] Cancel ride error:', error);
-      alert('Cancel Ride Error: ' + (error?.message || String(error)));
-      toast({
-        title: 'Cancel may have failed',
-        description: error.message,
-        variant: 'destructive'
-      });
+      // Purge localStorage
+      localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
     }
 
-    // Clear the safety timer and navigate
-    window.clearTimeout(forceResetTimer);
-    setIsCancelling(false);
-    resetBooking();
-    navigate('/rider-home');
+    // Update ride status (fire-and-forget)
+    supabase.from('rides').update({
+      status: 'cancelled',
+      cancelled_at: new Date().toISOString(),
+      cancelled_by: userId,
+      cancellation_reason: 'Cancelled by rider'
+    }).eq('id', rideId).then(() => console.log('[Cancel] Ride DB updated')).catch(e => console.warn('[Cancel] Ride update err:', e));
+
+    // Clean up stale new_ride notifications
+    supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride').then(() => {});
+
+    toast({ title: 'Ride cancelled' });
   };
   const resetBooking = () => {
     setStep('input');
