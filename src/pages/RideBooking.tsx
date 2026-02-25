@@ -1268,10 +1268,7 @@ const RideBooking = () => {
       }
       console.log(ts(), 'STEP_1_TOKEN_OK');
 
-      // Show payment UI immediately (unless test account)
-      if (!skipPayment) {
-        setStep('payment');
-      }
+      // ── NOTE: We show payment UI AFTER ride creation so PaymentForm has a valid rideId ──
 
       // ── RIDE CREATION via raw fetch (bypasses Supabase client internals) ──
       console.log(ts(), 'STEP_2_CREATING_RIDE');
@@ -1348,6 +1345,9 @@ const RideBooking = () => {
           title: 'Test mode',
           description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
         });
+      } else {
+        // Show payment UI AFTER ride exists in DB — prevents "Load failed" race condition
+        setStep('payment');
       }
 
       console.log(ts(), 'STEP_2_COMPLETE');
@@ -1399,12 +1399,13 @@ const RideBooking = () => {
   const handlePaymentCancel = async () => {
     // Cancel the ride if payment is cancelled — use raw fetch to avoid Supabase client hangs
     if (currentRide) {
+      const rideId = currentRide.id;
       try {
         const token = await getValidAccessToken();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
         await fetch(
-          `${SUPABASE_URL}/rest/v1/rides?id=eq.${currentRide.id}`,
+          `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}`,
           {
             method: 'PATCH',
             headers: {
@@ -1423,6 +1424,18 @@ const RideBooking = () => {
           }
         );
         clearTimeout(timeout);
+
+        // Clean up driver notifications for this ride
+        void fetch(
+          `${SUPABASE_URL}/rest/v1/notifications?ride_id=eq.${rideId}&type=eq.new_ride`,
+          {
+            method: 'DELETE',
+            headers: {
+              'apikey': ANON_KEY,
+              'Authorization': `Bearer ${token}`,
+            },
+          }
+        ).catch(() => {});
       } catch (err: any) {
         console.error('[RideBooking] Cancel ride error:', err.message);
         toast({
@@ -1456,6 +1469,14 @@ const RideBooking = () => {
         cancellation_reason: 'Cancelled by rider'
       }).eq('id', rideId);
       if (error) throw error;
+
+      // Clean up driver notifications so no driver sees a stale ride offer
+      void supabase.from('notifications')
+        .delete()
+        .eq('ride_id', rideId)
+        .eq('type', 'new_ride')
+        .then(() => {});
+
       toast({
         title: 'Ride cancelled'
       });

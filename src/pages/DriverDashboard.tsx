@@ -654,6 +654,31 @@ const DriverDashboard = () => {
 
     console.log('[AcceptRide] START — ride.id:', ride.id, 'user.id:', user.id);
 
+    // Pre-check: verify ride is still available before committing UI changes
+    try {
+      const { data: freshRide } = await supabase
+        .from('rides')
+        .select('status, driver_id')
+        .eq('id', ride.id)
+        .maybeSingle();
+
+      if (!freshRide || freshRide.status !== 'searching' || freshRide.driver_id) {
+        console.log('[AcceptRide] Ride no longer available:', freshRide?.status, freshRide?.driver_id);
+        setNewRideAlertOpen(false);
+        setCachedAlertRide(null);
+        setNewRideAlertRideId(null);
+        alertStartTimeRef.current = null;
+        toast({
+          title: language === 'fr' ? 'Course non disponible' : 'Ride unavailable',
+          description: language === 'fr' ? 'Cette course a été annulée ou prise par un autre chauffeur' : 'This ride was cancelled or taken by another driver',
+          variant: 'destructive',
+        });
+        return;
+      }
+    } catch {
+      // If pre-check fails (network), proceed with acceptance attempt — DB constraints will catch it
+    }
+
     // Stop the beep immediately and clear cached ride
     setNewRideAlertOpen(false);
     setCachedAlertRide(null);
