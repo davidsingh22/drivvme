@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { withTimeout } from '@/lib/withTimeout';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft } from 'lucide-react';
@@ -1573,9 +1574,7 @@ const RideBooking = () => {
   const handleCancelRide = async () => {
     if (!currentRide) return;
 
-    // CRITICAL: Capture ALL needed data before any state changes.
-    // Do NOT call resetBooking() or navigate() until DB work is done,
-    // because navigate() unmounts this component and kills async work.
+    // Capture ALL needed data before any state changes
     const rideId = currentRide.id;
     const driverIdForNotif = currentRide.driver_id;
     const userId = user?.id;
@@ -1584,27 +1583,45 @@ const RideBooking = () => {
 
     try {
       // 1. Insert cancellation notification BEFORE updating ride status.
-      //    RLS requires the ride to still be in an active status.
+      //    RLS requires ride to still be in an active status.
+      //    Wrap in timeout so mobile network hangs don't block forever.
       if (driverIdForNotif) {
-        const { error: notifErr } = await supabase.from('notifications').insert({
-          user_id: driverIdForNotif,
-          ride_id: rideId,
-          type: 'ride_cancelled',
-          title: 'Ride Cancelled ❌',
-          message: 'The rider cancelled this ride.',
-        });
-        if (notifErr) console.warn('[RideBooking] Failed to insert cancel notification:', notifErr);
-        else console.log('[RideBooking] ✅ Cancel notification inserted for driver', driverIdForNotif);
+        try {
+          const { error: notifErr } = await withTimeout(
+            supabase.from('notifications').insert({
+              user_id: driverIdForNotif,
+              ride_id: rideId,
+              type: 'ride_cancelled',
+              title: 'Ride Cancelled ❌',
+              message: 'The rider cancelled this ride.',
+            }),
+            7000,
+            'Cancel notification'
+          );
+          if (notifErr) console.warn('[RideBooking] Cancel notification RLS error:', notifErr.message);
+          else console.log('[RideBooking] ✅ Cancel notification inserted for driver', driverIdForNotif);
+        } catch (notifTimeout) {
+          console.warn('[RideBooking] Cancel notification timed out, proceeding with cancel');
+        }
       }
 
-      // 2. Update ride status to cancelled
-      const { error } = await supabase.from('rides').update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        cancelled_by: userId,
-        cancellation_reason: 'Cancelled by rider'
-      }).eq('id', rideId);
-      if (error) throw error;
+      // 2. Update ride status to cancelled (also with timeout)
+      try {
+        const { error } = await withTimeout(
+          supabase.from('rides').update({
+            status: 'cancelled',
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: userId,
+            cancellation_reason: 'Cancelled by rider'
+          }).eq('id', rideId),
+          7000,
+          'Cancel ride update'
+        );
+        if (error) console.error('[RideBooking] Ride cancel update error:', error.message);
+        else console.log('[RideBooking] ✅ Ride cancelled in DB');
+      } catch (updateTimeout) {
+        console.warn('[RideBooking] Ride cancel update timed out');
+      }
 
       // 3. Clean up stale new_ride notifications (non-blocking)
       void supabase.from('notifications')
@@ -1623,7 +1640,8 @@ const RideBooking = () => {
       });
     }
 
-    // 4. ONLY navigate/reset AFTER all DB work is complete
+    // 4. ALWAYS navigate away regardless of success/failure
+    //    This prevents the rider from being stuck on a dead ride screen
     resetBooking();
     navigate('/rider-home');
   };
