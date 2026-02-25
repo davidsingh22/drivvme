@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Star, DollarSign, TrendingDown, CheckCircle2, MessageSquare, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -73,8 +73,23 @@ const TripCompletionScreen = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
+  const autoRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Auto-redirect after 30 seconds if no action taken
+  useEffect(() => {
+    autoRedirectRef.current = setTimeout(() => {
+      console.log('[TripCompletion] 30s auto-redirect — no action taken');
+      onComplete();
+    }, 30000);
+
+    return () => {
+      if (autoRedirectRef.current) clearTimeout(autoRedirectRef.current);
+    };
+  }, [onComplete]);
 
   const handleSubmit = async () => {
+    // Clear auto-redirect since user is actively submitting
+    if (autoRedirectRef.current) clearTimeout(autoRedirectRef.current);
     if (isSubmitting) return; // prevent double-tap
     setIsSubmitting(true);
 

@@ -461,6 +461,45 @@ const DriverDashboard = () => {
     };
   }, [isOnline, user, session]);
 
+  // Watch alerted ride for cancellation — dismiss modal if rider cancels
+  useEffect(() => {
+    if (!newRideAlertRideId || !newRideAlertOpen) return;
+
+    const channel = supabase
+      .channel(`alert-ride-cancel-${newRideAlertRideId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rides',
+          filter: `id=eq.${newRideAlertRideId}`,
+        },
+        (payload) => {
+          const updated = payload.new as any;
+          if (updated.status === 'cancelled' || (updated.driver_id && updated.driver_id !== user?.id)) {
+            console.log('[DriverDashboard] Alerted ride cancelled/taken — dismissing modal');
+            setNewRideAlertOpen(false);
+            setCachedAlertRide(null);
+            setNewRideAlertRideId(null);
+            alertStartTimeRef.current = null;
+            if (updated.status === 'cancelled') {
+              toast({
+                title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+                description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+                variant: 'destructive',
+              });
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [newRideAlertRideId, newRideAlertOpen, user?.id]);
+
   // Subscribe to current ride updates
   useEffect(() => {
     if (!currentRide?.id) return;
