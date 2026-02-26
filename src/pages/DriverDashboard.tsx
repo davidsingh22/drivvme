@@ -1259,6 +1259,7 @@ const DriverDashboard = () => {
             {/* ========== DRIVER ACTIVE RIDE PANEL ========== */}
             {/* Always shows Start/End Ride buttons for the assigned driver */}
             <DriverActiveRidePanel
+              driverLocation={driverLocation}
               onRideCompleted={() => {
                 setCurrentRide(null);
                 setRiderInfo(null);
