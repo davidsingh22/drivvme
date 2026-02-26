@@ -413,10 +413,24 @@ const DriverDashboard = () => {
   // IMPORTANT: NOT gated on isOnline — driver may tap push before toggling online.
   useEffect(() => {
     if (!user || !session) return;
+    let cancelled = false;
 
     const checkPendingOffers = async () => {
+      if (cancelled) return;
       if (currentRideRef.current || newRideAlertOpenRef.current) return;
+
       try {
+        // Ensure session is fresh (mobile may have stale token after background)
+        try {
+          const { data: { session: freshSession } } = await supabase.auth.getSession();
+          if (!freshSession) {
+            console.log('[Recovery] No active session, attempting refresh…');
+            await supabase.auth.refreshSession();
+          }
+        } catch {
+          // non-fatal — proceed with existing token
+        }
+
         const { data: pending } = await supabase
           .from('notifications')
           .select('ride_id, created_at')
@@ -428,11 +442,11 @@ const DriverDashboard = () => {
           .maybeSingle();
 
         if (!pending?.ride_id) return;
-        if (currentRideRef.current || newRideAlertOpenRef.current) return;
+        if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return;
 
         const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
         if (notifAge > COUNTDOWN_SECONDS) {
-          console.log('[DriverDashboard] ⏰ Skipping expired ride offer (age:', Math.round(notifAge), 's)');
+          console.log('[Recovery] ⏰ Skipping expired offer (age:', Math.round(notifAge), 's)');
           await supabase
             .from('notifications')
             .update({ is_read: true })
@@ -449,48 +463,69 @@ const DriverDashboard = () => {
           .eq('status', 'searching')
           .maybeSingle();
 
-        if (!ride) return;
-        if (currentRideRef.current || newRideAlertOpenRef.current) return;
+        if (!ride) {
+          // Ride taken/cancelled — mark notification read so it doesn't block future ones
+          await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('ride_id', pending.ride_id)
+            .eq('user_id', user.id)
+            .eq('type', 'new_ride');
+          return;
+        }
+        if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return;
 
         const remaining = Math.max(1, Math.round(COUNTDOWN_SECONDS - notifAge));
-        console.log('[DriverDashboard] 🔄 Recovery: found pending ride offer:', ride.id, '(age:', Math.round(notifAge), 's, remaining:', remaining, 's)');
+        console.log('[Recovery] ✅ Found pending ride offer:', ride.id, '(age:', Math.round(notifAge), 's, remaining:', remaining, 's)');
         setRecoveredCountdown(remaining);
         setCachedAlertRide(ride);
         setNewRideAlertRideId(ride.id);
         setNewRideAlertOpen(true);
         alertStartTimeRef.current = Date.now() - (notifAge * 1000);
       } catch (err) {
-        console.warn('[DriverDashboard] Recovery check failed:', err);
+        console.warn('[Recovery] check failed:', err);
       }
     };
 
+    // Staggered initial checks — covers auth hydration delays on cold start
     checkPendingOffers();
+    const t1 = setTimeout(checkPendingOffers, 1500);
+    const t2 = setTimeout(checkPendingOffers, 4000);
 
     const interval = window.setInterval(checkPendingOffers, 3000);
 
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        console.log('[DriverDashboard] 👁️ App resumed — checking pending offers');
-        setTimeout(checkPendingOffers, 300);
+    const handleResume = () => {
+      if (document.visibilityState === 'visible' || !document.hidden) {
+        console.log('[Recovery] 👁️ App resumed — checking offers');
+        // Stagger checks to handle session recovery timing
+        checkPendingOffers();
+        setTimeout(checkPendingOffers, 500);
+        setTimeout(checkPendingOffers, 2000);
       }
     };
     const handleFocus = () => {
-      console.log('[DriverDashboard] 👁️ Window focused — checking pending offers');
-      setTimeout(checkPendingOffers, 300);
+      console.log('[Recovery] 👁️ Window focused — checking offers');
+      checkPendingOffers();
+      setTimeout(checkPendingOffers, 500);
+      setTimeout(checkPendingOffers, 2000);
     };
     const handlePageShow = (e: PageTransitionEvent) => {
-      if (e.persisted) {
-        console.log('[DriverDashboard] 👁️ pageshow (bfcache) — checking pending offers');
-        setTimeout(checkPendingOffers, 300);
-      }
+      console.log('[Recovery] 👁️ pageshow — checking offers');
+      checkPendingOffers();
+      setTimeout(checkPendingOffers, 500);
+      setTimeout(checkPendingOffers, 2000);
     };
-    document.addEventListener('visibilitychange', handleVisibility);
+
+    document.addEventListener('visibilitychange', handleResume);
     window.addEventListener('focus', handleFocus);
     window.addEventListener('pageshow', handlePageShow);
 
     return () => {
+      cancelled = true;
+      clearTimeout(t1);
+      clearTimeout(t2);
       window.clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibility);
+      document.removeEventListener('visibilitychange', handleResume);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pageshow', handlePageShow);
     };
@@ -834,10 +869,23 @@ const DriverDashboard = () => {
     }
 
     // Stop the beep immediately and clear cached ride
+    const acceptedRideId = newRideAlertRideId; // capture before clearing
     setNewRideAlertOpen(false);
     setCachedAlertRide(null);
     setNewRideAlertRideId(null);
+    setRecoveredCountdown(null);
     setBusyAction('accept');
+
+    // Mark notification as read so recovery doesn't re-find it
+    if (acceptedRideId && user) {
+      supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('ride_id', acceptedRideId)
+        .eq('user_id', user.id)
+        .eq('type', 'new_ride')
+        .then(() => {});
+    }
 
     try {
       // Calculate acceptance time for priority driver reward
