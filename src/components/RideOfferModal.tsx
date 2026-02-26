@@ -125,8 +125,8 @@ export function RideOfferModal({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          {/* Backdrop */}
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-xl" />
+          {/* Backdrop — pointer-events-none so it doesn't block button taps */}
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-xl pointer-events-none" />
 
           <motion.div
             initial={{ y: 50, scale: 0.9, opacity: 0 }}
@@ -236,11 +236,15 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Accept Button */}
+                {/* Accept Button — use onTouchEnd + onClick for reliable mobile taps */}
                 <Button
                   size="lg"
                   onClick={onAccept}
-                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white rounded-xl"
+                  onTouchEnd={(e) => {
+                    e.preventDefault();
+                    onAccept();
+                  }}
+                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white rounded-xl relative z-10"
                 >
                   {language === 'fr' ? 'Accepter la course' : 'Accept Ride'}
                 </Button>
@@ -262,7 +266,11 @@ export function RideOfferModal({
                 <Button
                   size="lg"
                   onClick={onDecline}
-                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl"
+                  onTouchEnd={(e) => {
+                    e.preventDefault();
+                    onDecline();
+                  }}
+                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl relative z-10"
                 >
                   <X className="h-5 w-5 mr-2" />
                   {language === 'fr' ? 'Non merci — Passer' : 'No thanks — Skip'}
