@@ -466,7 +466,26 @@ const DriverDashboard = () => {
 
     // Poll every 5s as safety net
     const interval = window.setInterval(checkPendingOffers, 5000);
-    return () => window.clearInterval(interval);
+
+    // Re-check when app resumes from background (push notification tap)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[DriverDashboard] 👁️ App resumed — checking pending offers');
+        checkPendingOffers();
+      }
+    };
+    const handleFocus = () => {
+      console.log('[DriverDashboard] 👁️ Window focused — checking pending offers');
+      checkPendingOffers();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [isOnline, user?.id, session]);
 
   // Push-based ride offer listener — no polling, no feed.
