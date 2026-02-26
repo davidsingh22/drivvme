@@ -403,12 +403,11 @@ const DriverDashboard = () => {
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
-  // Recovery: check for pending new_ride notifications on mount/resume.
+  // Recovery: check for pending new_ride notifications on mount/resume/going online.
   // This catches notifications inserted BEFORE the realtime listener was active
   // (e.g. driver taps push notification and app opens fresh).
-  // NOTE: No isOnline guard — driver may open app from push while offline.
   useEffect(() => {
-    if (!user || !session) return;
+    if (!isOnline || !user || !session) return;
 
     const COUNTDOWN_SECONDS = 25; // must match RideOfferModal countdownSeconds
 
@@ -488,13 +487,12 @@ const DriverDashboard = () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [user?.id, session]);
+  }, [isOnline, user?.id, session]);
 
   // Push-based ride offer listener — no polling, no feed.
   // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
-  // NOTE: No isOnline guard — driver may receive notifications while technically "offline" in UI.
   useEffect(() => {
-    if (!user || !session) return;
+    if (!isOnline || !user || !session) return;
 
     // Listen for new ride notifications via realtime on the notifications table
     const channel = supabase
@@ -574,7 +572,7 @@ const DriverDashboard = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, session]);
+  }, [isOnline, user, session]);
 
   // Watch alerted ride for cancellation — dismiss modal if rider cancels
   // Uses BOTH realtime (may fail due to RLS on cancelled rows) AND polling fallback
@@ -911,16 +909,6 @@ const DriverDashboard = () => {
         });
       }
 
-      // Auto-set driver online when accepting a ride (critical for GPS + ride panel)
-      if (!isOnline) {
-        setIsOnline(true);
-        supabase
-          .from('driver_profiles')
-          .update({ is_online: true })
-          .eq('user_id', user.id)
-          .then(() => {});
-      }
-
       // Update UI immediately
       setCurrentRide({ ...ride, status: 'driver_assigned' });
       
@@ -1166,33 +1154,13 @@ const DriverDashboard = () => {
         countdownSeconds={20}
         driverLocation={driverLocation}
         onDecline={() => {
-          // Mark the notification as read so it doesn't block future offers
-          if (newRideAlertRideId && user?.id) {
-            supabase
-              .from('notifications')
-              .update({ is_read: true })
-              .eq('ride_id', newRideAlertRideId)
-              .eq('user_id', user.id)
-              .eq('type', 'new_ride')
-              .then(() => {});
-          }
           setNewRideAlertOpen(false);
           setCachedAlertRide(null);
           setNewRideAlertRideId(null);
           alertStartTimeRef.current = null;
         }}
         onAccept={() => {
-          // Mark the notification as read so it doesn't block future offers
-          if (newRideAlertRideId && user?.id) {
-            supabase
-              .from('notifications')
-              .update({ is_read: true })
-              .eq('ride_id', newRideAlertRideId)
-              .eq('user_id', user.id)
-              .eq('type', 'new_ride')
-              .then(() => {});
-          }
-          // Use cached ride data for acceptance
+          // Use cached ride data for acceptance (persists even if ride was removed from availableRides)
           if (cachedAlertRide) {
             acceptRide(cachedAlertRide);
           }
@@ -1291,7 +1259,6 @@ const DriverDashboard = () => {
             {/* ========== DRIVER ACTIVE RIDE PANEL ========== */}
             {/* Always shows Start/End Ride buttons for the assigned driver */}
             <DriverActiveRidePanel
-              driverLocation={driverLocation}
               onRideCompleted={() => {
                 setCurrentRide(null);
                 setRiderInfo(null);
