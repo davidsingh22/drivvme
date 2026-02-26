@@ -403,6 +403,92 @@ const DriverDashboard = () => {
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
+  // Recovery: check for pending new_ride notifications on mount/resume/going online.
+  // This catches notifications inserted BEFORE the realtime listener was active
+  // (e.g. driver taps push notification and app opens fresh).
+  useEffect(() => {
+    if (!isOnline || !user || !session) return;
+
+    const COUNTDOWN_SECONDS = 25; // must match RideOfferModal countdownSeconds
+
+    const checkPendingOffers = async () => {
+      // Guard inside the function so it re-evaluates each poll cycle
+      if (currentRideRef.current || newRideAlertOpenRef.current) return;
+      try {
+        const { data: pending } = await supabase
+          .from('notifications')
+          .select('ride_id, created_at')
+          .eq('user_id', user.id)
+          .eq('type', 'new_ride')
+          .eq('is_read', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!pending?.ride_id) return;
+        if (currentRideRef.current || newRideAlertOpenRef.current) return;
+
+        // Skip if notification is older than the countdown window
+        const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
+        if (notifAge > COUNTDOWN_SECONDS) {
+          console.log('[DriverDashboard] ⏰ Skipping expired ride offer (age:', Math.round(notifAge), 's)');
+          // Mark as read so we don't keep checking it
+          await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('ride_id', pending.ride_id)
+            .eq('user_id', user.id)
+            .eq('type', 'new_ride');
+          return;
+        }
+
+        const { data: ride } = await supabase
+          .from('rides')
+          .select('*')
+          .eq('id', pending.ride_id)
+          .eq('status', 'searching')
+          .maybeSingle();
+
+        if (!ride) return;
+        if (currentRideRef.current || newRideAlertOpenRef.current) return;
+
+        console.log('[DriverDashboard] 🔄 Recovery: found pending ride offer:', ride.id, '(age:', Math.round(notifAge), 's)');
+        setCachedAlertRide(ride);
+        setNewRideAlertRideId(ride.id);
+        setNewRideAlertOpen(true);
+        alertStartTimeRef.current = Date.now();
+      } catch (err) {
+        console.warn('[DriverDashboard] Recovery check failed:', err);
+      }
+    };
+
+    // Check immediately on mount/online
+    checkPendingOffers();
+
+    // Poll every 5s as safety net
+    const interval = window.setInterval(checkPendingOffers, 5000);
+
+    // Re-check when app resumes from background (push notification tap)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[DriverDashboard] 👁️ App resumed — checking pending offers');
+        checkPendingOffers();
+      }
+    };
+    const handleFocus = () => {
+      console.log('[DriverDashboard] 👁️ Window focused — checking pending offers');
+      checkPendingOffers();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [isOnline, user?.id, session]);
+
   // Push-based ride offer listener — no polling, no feed.
   // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
   useEffect(() => {
