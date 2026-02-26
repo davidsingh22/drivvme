@@ -410,11 +410,13 @@ const DriverDashboard = () => {
     if (!isOnline || !user || !session) return;
     if (currentRideRef.current || newRideAlertOpenRef.current) return;
 
+    const COUNTDOWN_SECONDS = 25; // must match RideOfferModal countdownSeconds
+
     const checkPendingOffers = async () => {
       try {
         const { data: pending } = await supabase
           .from('notifications')
-          .select('ride_id')
+          .select('ride_id, created_at')
           .eq('user_id', user.id)
           .eq('type', 'new_ride')
           .eq('is_read', false)
@@ -424,6 +426,20 @@ const DriverDashboard = () => {
 
         if (!pending?.ride_id) return;
         if (currentRideRef.current || newRideAlertOpenRef.current) return;
+
+        // Skip if notification is older than the countdown window
+        const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
+        if (notifAge > COUNTDOWN_SECONDS) {
+          console.log('[DriverDashboard] ⏰ Skipping expired ride offer (age:', Math.round(notifAge), 's)');
+          // Mark as read so we don't keep checking it
+          await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('ride_id', pending.ride_id)
+            .eq('user_id', user.id)
+            .eq('type', 'new_ride');
+          return;
+        }
 
         const { data: ride } = await supabase
           .from('rides')
@@ -435,7 +451,7 @@ const DriverDashboard = () => {
         if (!ride) return;
         if (currentRideRef.current || newRideAlertOpenRef.current) return;
 
-        console.log('[DriverDashboard] 🔄 Recovery: found pending ride offer:', ride.id);
+        console.log('[DriverDashboard] 🔄 Recovery: found pending ride offer:', ride.id, '(age:', Math.round(notifAge), 's)');
         setCachedAlertRide(ride);
         setNewRideAlertRideId(ride.id);
         setNewRideAlertOpen(true);
