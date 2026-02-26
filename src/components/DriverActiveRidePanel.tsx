@@ -77,9 +77,10 @@ interface RiderInfo {
 interface DriverActiveRidePanelProps {
   onRideCompleted?: () => void;
   onRideUpdated?: (ride: ActiveRide) => void;
+  driverLocation?: { lat: number; lng: number } | null;
 }
 
-const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveRidePanelProps) => {
+const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated, driverLocation: parentDriverLocation }: DriverActiveRidePanelProps) => {
   const { user, session } = useAuth();
   const { language } = useLanguage();
   const { toast } = useToast();
@@ -92,7 +93,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [driverMismatch, setDriverMismatch] = useState<string | null>(null);
   const [showNavigation, setShowNavigation] = useState(false);
-  const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const driverLocation = parentDriverLocation ?? null;
   const [unreadMessages, setUnreadMessages] = useState(0);
 
   const driverId = session?.user?.id ?? user?.id;

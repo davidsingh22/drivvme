@@ -19,21 +19,24 @@ export function DriverGPSErrorBanner({ error, retryCount, onRetry }: DriverGPSEr
   const isTimeout = error.code === 3;
 
   const getErrorTitle = () => {
-    if (isPermissionDenied) return t('gpsPermissionDenied') || 'Location Access Blocked';
-    if (isPositionUnavailable) return t('gpsUnavailable') || 'GPS Signal Lost';
-    if (isTimeout) return t('gpsTimeout') || 'Location Timeout';
-    return t('gpsError') || 'Location Error';
+    const key = isPermissionDenied ? 'gpsPermissionDenied' : isPositionUnavailable ? 'gpsUnavailable' : isTimeout ? 'gpsTimeout' : 'gpsError';
+    const fallback = isPermissionDenied ? 'Location Access Blocked' : isPositionUnavailable ? 'GPS Signal Lost' : isTimeout ? 'Location Timeout' : 'Location Error';
+    const translated = t(key);
+    return translated !== key ? translated : fallback;
   };
 
   const getErrorMessage = () => {
     if (isPermissionDenied) {
-      return t('gpsPermissionDeniedMsg') || 'Please enable location access in your browser/device settings to continue tracking.';
+      const val = t('gpsPermissionDeniedMsg');
+      return val !== 'gpsPermissionDeniedMsg' ? val : 'Please enable location access in your browser/device settings to continue tracking.';
     }
     if (isPositionUnavailable) {
-      return t('gpsUnavailableMsg') || 'Unable to get your location. Make sure GPS is enabled and you have a clear view of the sky.';
+      const val = t('gpsUnavailableMsg');
+      return val !== 'gpsUnavailableMsg' ? val : 'Unable to get your location. Make sure GPS is enabled and you have a clear view of the sky.';
     }
     if (isTimeout) {
-      return t('gpsTimeoutMsg') || 'Location request timed out. Retrying...';
+      const val = t('gpsTimeoutMsg');
+      return val !== 'gpsTimeoutMsg' ? val : 'Location request timed out. Retrying...';
     }
     return error.message;
   };
@@ -111,7 +114,7 @@ export function DriverGPSErrorBanner({ error, retryCount, onRetry }: DriverGPSEr
                 className="gap-1.5"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                {t('retry') || 'Retry'}
+                {(() => { const v = t('retry'); return v !== 'retry' ? v : 'Retry'; })()}
               </Button>
               
               {isPermissionDenied && (
@@ -130,7 +133,7 @@ export function DriverGPSErrorBanner({ error, retryCount, onRetry }: DriverGPSEr
                   }}
                 >
                   <Settings className="w-3.5 h-3.5" />
-                  {t('openSettings') || 'Check Settings'}
+                  {(() => { const v = t('openSettings'); return v !== 'openSettings' ? v : 'Check Settings'; })()}
                 </Button>
               )}
             </div>
@@ -143,7 +146,7 @@ export function DriverGPSErrorBanner({ error, retryCount, onRetry }: DriverGPSEr
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-destructive"></span>
           </span>
-          {t('riderCannotSeeYou') || "Rider can't see your live location"}
+          {(() => { const v = t('riderCannotSeeYou'); return v !== 'riderCannotSeeYou' ? v : "Rider can't see your live location"; })()}
         </div>
       </div>
     </motion.div>
