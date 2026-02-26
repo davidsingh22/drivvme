@@ -49,6 +49,7 @@ async function getDriverInfo(driverId: string): Promise<DriverInfo> {
   };
 }
 
+/** Estimate ETA in minutes between two points using Haversine + city avg speed */
 function estimateEtaMinutes(lat1: number, lng1: number, lat2: number, lng2: number): number | null {
   if (!lat1 || !lng1 || !lat2 || !lng2) return null;
   const R = 6371;
@@ -56,6 +57,7 @@ function estimateEtaMinutes(lat1: number, lng1: number, lat2: number, lng2: numb
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   const km = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  // City average ~25 km/h
   return Math.max(1, Math.round((km / 25) * 60));
 }
 
@@ -114,7 +116,6 @@ function getNotificationConfig(payload: RidePayload, driverInfo?: DriverInfo, et
   }
 }
 
-/** Multi-channel push: tries player_id first, then external_user_id, then tag-based */
 async function sendPush(
   targetUserId: string,
   title: string,
@@ -126,64 +127,34 @@ async function sendPush(
 
   console.log("[ride-status-push] target:", targetUserId, "title:", title);
 
-  // Look up stored player_id from profiles table
-  const supabase = getSupabase();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("onesignal_player_id")
-    .eq("user_id", targetUserId)
-    .single();
-
-  const playerId = profile?.onesignal_player_id;
-  console.log("[ride-status-push] player_id from DB:", playerId || "none");
-
-  const basePayload = {
+  const osPayload: Record<string, unknown> = {
     app_id: ONESIGNAL_APP_ID,
+    include_external_user_ids: [targetUserId],
     headings: { en: String(title) },
     contents: { en: String(message) },
     priority: 10,
     content_available: true,
     mutable_content: true,
     ios_sound: "default",
+    // Thread ID groups notifications so new ones replace old (Uber-style stacking)
     thread_id: `ride_${data.ride_id}`,
     collapse_id: `ride_status_${data.ride_id}`,
     android_group: `ride_${data.ride_id}`,
     data,
   };
 
-  const sendToOneSignal = async (targeting: Record<string, unknown>, label: string) => {
-    const payload = { ...basePayload, ...targeting };
-    const res = await fetch("https://onesignal.com/api/v1/notifications", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        Authorization: `Basic ${restApiKey}`,
-      },
-      body: JSON.stringify(payload),
-    });
-    const body = await res.json();
-    console.log(`[ride-status-push] ${label} response:`, res.status, JSON.stringify(body));
-    // Check if notification actually reached someone
-    const recipients = body?.recipients || 0;
-    return { ok: res.ok, status: res.status, data: body, delivered: recipients > 0 };
-  };
+  const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      Authorization: `Basic ${restApiKey}`,
+    },
+    body: JSON.stringify(osPayload),
+  });
 
-  // Strategy 1: player_id (most reliable if stored)
-  if (playerId) {
-    const r1 = await sendToOneSignal({ include_player_ids: [playerId] }, "player_id");
-    if (r1.delivered) return r1;
-    console.log("[ride-status-push] player_id didn't deliver, trying fallbacks...");
-  }
-
-  // Strategy 2: tag-based (uid tag — works if device has tag set)
-  const r2 = await sendToOneSignal({
-    filters: [{ field: "tag", key: "uid", relation: "=", value: targetUserId }],
-  }, "tag_uid");
-  if (r2.delivered) return r2;
-
-  // Strategy 3: external_user_id (last resort)
-  const r3 = await sendToOneSignal({ include_external_user_ids: [targetUserId] }, "external_id");
-  return r3;
+  const osData = await osRes.json();
+  console.log("[ride-status-push] onesignal response:", osRes.status, JSON.stringify(osData));
+  return { ok: osRes.ok, status: osRes.status, data: osData };
 }
 
 serve(async (req) => {
@@ -196,10 +167,12 @@ serve(async (req) => {
     console.log("[ride-status-push] body:", rawBody);
     const payload: RidePayload = JSON.parse(rawBody);
 
+    // Fetch driver info + ETA in parallel for relevant statuses
     let driverInfo: DriverInfo | undefined;
     let etaMinutes: number | null = null;
 
     if (payload.driver_id && ["driver_assigned", "driver_en_route", "arrived"].includes(payload.new_status)) {
+      // Also need pickup coords for ETA
       const supabase = getSupabase();
       const [info, rideRes] = await Promise.all([
         getDriverInfo(payload.driver_id),
@@ -224,6 +197,13 @@ serve(async (req) => {
     if (driverInfo?.vehicle_color) pushData.vehicle_color = driverInfo.vehicle_color;
 
     const result = await sendPush(config.targetUserId, config.title, config.message, pushData);
+
+    if (!result.ok) {
+      return new Response(
+        JSON.stringify({ error: "OneSignal error", details: result.data }),
+        { status: result.status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // For cancelled rides, also notify the rider
     if (payload.new_status === "cancelled" && payload.rider_id) {

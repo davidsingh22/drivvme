@@ -195,82 +195,60 @@ async function getAccessToken(): Promise<string> {
   return tokenData.access_token;
 }
 
-// Send OneSignal notification to specific drivers using player_ids + tag fallback
-async function sendOneSignalDriverAlert(
-  rideId: string,
-  pickupAddress?: string,
-  driverUserIds?: string[],
-): Promise<{ success: boolean; error?: string }> {
+// Send OneSignal notification to all drivers via tag filter
+async function sendOneSignalDriverAlert(rideId: string, pickupAddress?: string): Promise<{ success: boolean; error?: string }> {
   const apiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
   if (!apiKey) {
     console.error("ONESIGNAL_REST_API_KEY not configured");
     return { success: false, error: "Missing OneSignal API key" };
   }
 
-  const appId = "5a6c4131-8faa-4969-b5c4-5a09033c8e2a";
+  // Use ONESIGNAL_APP_ID if set, otherwise skip
+  const appId = Deno.env.get("ONESIGNAL_APP_ID");
+  if (!appId) {
+    console.error("ONESIGNAL_APP_ID not configured");
+    return { success: false, error: "Missing OneSignal App ID" };
+  }
 
-  const basePayload = {
+  const payload: Record<string, unknown> = {
     app_id: appId,
+    // Target drivers using tag filter (role = driver)
+    filters: [
+      { field: "tag", key: "role", relation: "=", value: "driver" },
+    ],
     headings: { en: "New Ride Request! 🚗" },
     contents: { en: "A rider is looking for a trip nearby." },
     data: { ride_id: rideId, type: "new_ride" },
     priority: 10,
     ios_sound: "default",
     android_sound: "default",
+    android_channel_id: "ride_requests",
     content_available: true,
     mutable_content: true,
   };
 
-  const sendPayload = async (targeting: Record<string, unknown>, label: string) => {
-    try {
-      const res = await fetch("https://onesignal.com/api/v1/notifications", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Basic ${apiKey}`,
-        },
-        body: JSON.stringify({ ...basePayload, ...targeting }),
-      });
-      const result = await res.json();
-      const recipients = result?.recipients || 0;
-      console.log(`OneSignal ${label}:`, JSON.stringify(result), `recipients: ${recipients}`);
-      return { success: res.ok, recipients, error: result?.errors?.[0] };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error(`OneSignal ${label} failed:`, msg);
-      return { success: false, recipients: 0, error: msg };
+  try {
+    const res = await fetch("https://onesignal.com/api/v1/notifications", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const result = await res.json();
+    console.log("OneSignal driver alert result:", JSON.stringify(result));
+
+    if (!res.ok) {
+      return { success: false, error: result?.errors?.[0] || `HTTP ${res.status}` };
     }
-  };
-
-  // Try player_id targeting if we have driver IDs
-  if (driverUserIds?.length) {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
-
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("user_id, onesignal_player_id")
-      .in("user_id", driverUserIds);
-
-    const playerIds = (profiles || [])
-      .map(p => p.onesignal_player_id)
-      .filter(Boolean) as string[];
-
-    console.log(`Found ${playerIds.length} player_ids for ${driverUserIds.length} drivers`);
-
-    if (playerIds.length > 0) {
-      const r1 = await sendPayload({ include_player_ids: playerIds }, "player_ids");
-      if (r1.recipients > 0) return { success: true };
-    }
+    return { success: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("OneSignal driver alert failed:", msg);
+    return { success: false, error: msg };
   }
-
-  // Fallback: tag-based broadcast to all drivers
-  const r2 = await sendPayload({
-    filters: [{ field: "tag", key: "role", relation: "=", value: "driver" }],
-  }, "tag_broadcast");
-
-  return { success: r2.recipients > 0, error: r2.error };
 }
 
 serve(async (req) => {
@@ -578,7 +556,7 @@ serve(async (req) => {
     const sent = results.filter((r) => r.success).length;
 
     // Also send OneSignal broadcast to all drivers
-    const oneSignalResult = await sendOneSignalDriverAlert(rideId, pickupAddress, driverUserIds);
+    const oneSignalResult = await sendOneSignalDriverAlert(rideId, pickupAddress);
     console.log("OneSignal driver alert:", oneSignalResult);
 
     return new Response(JSON.stringify({ 
