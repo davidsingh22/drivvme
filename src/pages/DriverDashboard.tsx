@@ -1154,13 +1154,33 @@ const DriverDashboard = () => {
         countdownSeconds={20}
         driverLocation={driverLocation}
         onDecline={() => {
+          // Mark the notification as read so it doesn't block future offers
+          if (newRideAlertRideId && user?.id) {
+            supabase
+              .from('notifications')
+              .update({ is_read: true })
+              .eq('ride_id', newRideAlertRideId)
+              .eq('user_id', user.id)
+              .eq('type', 'new_ride')
+              .then(() => {});
+          }
           setNewRideAlertOpen(false);
           setCachedAlertRide(null);
           setNewRideAlertRideId(null);
           alertStartTimeRef.current = null;
         }}
         onAccept={() => {
-          // Use cached ride data for acceptance (persists even if ride was removed from availableRides)
+          // Mark the notification as read so it doesn't block future offers
+          if (newRideAlertRideId && user?.id) {
+            supabase
+              .from('notifications')
+              .update({ is_read: true })
+              .eq('ride_id', newRideAlertRideId)
+              .eq('user_id', user.id)
+              .eq('type', 'new_ride')
+              .then(() => {});
+          }
+          // Use cached ride data for acceptance
           if (cachedAlertRide) {
             acceptRide(cachedAlertRide);
           }

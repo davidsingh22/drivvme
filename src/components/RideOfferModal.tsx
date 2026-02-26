@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { MapPin, Navigation, Clock, DollarSign, Zap, Trophy, X, Shield, Car } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -57,6 +57,23 @@ export function RideOfferModal({
   const timerRef = useRef<number | null>(null);
   const onDeclineRef = useRef(onDecline);
   onDeclineRef.current = onDecline;
+  const onAcceptRef = useRef(onAccept);
+  onAcceptRef.current = onAccept;
+
+  // Tap guard: prevent double-fire from onTouchEnd + onClick
+  const tapGuardRef = useRef(false);
+  const guardedAccept = useCallback(() => {
+    if (tapGuardRef.current) return;
+    tapGuardRef.current = true;
+    onAcceptRef.current();
+    setTimeout(() => { tapGuardRef.current = false; }, 1000);
+  }, []);
+  const guardedDecline = useCallback(() => {
+    if (tapGuardRef.current) return;
+    tapGuardRef.current = true;
+    onDeclineRef.current();
+    setTimeout(() => { tapGuardRef.current = false; }, 1000);
+  }, []);
 
   // Calculate distance from driver to pickup using passed driverLocation
   const driverDistanceKm = useMemo(() => {
@@ -76,6 +93,7 @@ export function RideOfferModal({
     if (open && ride) {
       setTimeLeft(countdownSeconds);
       setShowUberShimmer(true);
+      tapGuardRef.current = false; // Reset tap guard for new ride
     }
   }, [open, ride?.id, countdownSeconds]);
 
@@ -236,15 +254,15 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Accept Button — use onTouchEnd + onClick for reliable mobile taps */}
+                {/* Accept Button — guarded to prevent double-fire */}
                 <Button
                   size="lg"
-                  onClick={onAccept}
-                  onTouchEnd={(e) => {
-                    e.preventDefault();
-                    onAccept();
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    guardedAccept();
                   }}
-                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white rounded-xl relative z-10"
+                  onClick={(e) => e.preventDefault()}
+                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white rounded-xl relative z-10 touch-manipulation"
                 >
                   {language === 'fr' ? 'Accepter la course' : 'Accept Ride'}
                 </Button>
@@ -265,12 +283,12 @@ export function RideOfferModal({
                 {/* Decline Button - dismisses and returns ride to pool */}
                 <Button
                   size="lg"
-                  onClick={onDecline}
-                  onTouchEnd={(e) => {
-                    e.preventDefault();
-                    onDecline();
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    guardedDecline();
                   }}
-                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl relative z-10"
+                  onClick={(e) => e.preventDefault()}
+                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl relative z-10 touch-manipulation"
                 >
                   <X className="h-5 w-5 mr-2" />
                   {language === 'fr' ? 'Non merci — Passer' : 'No thanks — Skip'}
