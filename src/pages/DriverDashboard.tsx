@@ -408,11 +408,12 @@ const DriverDashboard = () => {
   // (e.g. driver taps push notification and app opens fresh).
   useEffect(() => {
     if (!isOnline || !user || !session) return;
-    if (currentRideRef.current || newRideAlertOpenRef.current) return;
 
     const COUNTDOWN_SECONDS = 25; // must match RideOfferModal countdownSeconds
 
     const checkPendingOffers = async () => {
+      // Guard inside the function so it re-evaluates each poll cycle
+      if (currentRideRef.current || newRideAlertOpenRef.current) return;
       try {
         const { data: pending } = await supabase
           .from('notifications')
