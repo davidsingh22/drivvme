@@ -142,9 +142,10 @@ export function RideOfferModal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          style={{ pointerEvents: 'none' }}
         >
-          {/* Backdrop — pointer-events-none so it doesn't block button taps */}
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-xl pointer-events-none" />
+          {/* Backdrop — fully non-interactive */}
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-xl" style={{ pointerEvents: 'none' }} />
 
           <motion.div
             initial={{ y: 50, scale: 0.9, opacity: 0 }}
@@ -152,6 +153,7 @@ export function RideOfferModal({
             exit={{ y: 50, scale: 0.9, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
             className="relative w-full max-w-xl my-auto"
+            style={{ pointerEvents: 'auto' }}
           >
             <Card className="relative bg-black/60 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
               {/* Header */}
@@ -254,12 +256,14 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Accept Button — pointer events for reliable mobile taps */}
+                {/* Accept Button — multiple event handlers for reliable mobile taps */}
                 <button
                   type="button"
-                  onPointerDown={(e) => { e.stopPropagation(); handleAccept(); }}
-                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 active:scale-95 text-white rounded-xl relative z-50 touch-manipulation select-none"
-                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                  onClick={(e) => { e.stopPropagation(); handleAccept(); }}
+                  onTouchStartCapture={(e) => { e.stopPropagation(); }}
+                  onTouchEndCapture={(e) => { e.preventDefault(); e.stopPropagation(); handleAccept(); }}
+                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 active:scale-95 text-white rounded-xl relative z-[60] touch-manipulation select-none cursor-pointer"
+                  style={{ WebkitTapHighlightColor: 'transparent', WebkitUserSelect: 'none' } as React.CSSProperties}
                 >
                   {language === 'fr' ? 'Accepter la course' : 'Accept Ride'}
                 </button>
@@ -280,9 +284,11 @@ export function RideOfferModal({
                 {/* Decline Button */}
                 <button
                   type="button"
-                  onPointerDown={(e) => { e.stopPropagation(); handleDecline(); }}
-                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 active:scale-95 text-white rounded-xl relative z-50 flex items-center justify-center gap-2 touch-manipulation select-none"
-                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                  onClick={(e) => { e.stopPropagation(); handleDecline(); }}
+                  onTouchStartCapture={(e) => { e.stopPropagation(); }}
+                  onTouchEndCapture={(e) => { e.preventDefault(); e.stopPropagation(); handleDecline(); }}
+                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 active:scale-95 text-white rounded-xl relative z-[60] flex items-center justify-center gap-2 touch-manipulation select-none cursor-pointer"
+                  style={{ WebkitTapHighlightColor: 'transparent', WebkitUserSelect: 'none' } as React.CSSProperties}
                 >
                   <X className="h-5 w-5" />
                   {language === 'fr' ? 'Non merci — Passer' : 'No thanks — Skip'}
