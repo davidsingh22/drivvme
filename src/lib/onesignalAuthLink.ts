@@ -51,7 +51,9 @@ export function initOneSignalAuthLink() {
               const data = event?.notification?.additionalData || event?.result?.notification?.additionalData || {};
               console.log("🔔 OneSignal notification clicked, data:", data);
               if (data.ride_id) {
-                window.location.href = "/ride";
+                // Route drivers to /driver, riders to /ride
+                const lastRoute = localStorage.getItem('last_route');
+                window.location.href = lastRoute === '/driver' ? '/driver' : '/ride';
               }
             });
             console.log("✅ OneSignal notification click handler registered");
