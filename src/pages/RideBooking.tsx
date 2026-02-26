@@ -1446,9 +1446,9 @@ const RideBooking = () => {
             return;
           }
         } else {
-          // Transient network error (cold start, "Load failed") — wait 1.5s and retry once
-          console.log(ts(), 'STEP_2_TRANSIENT_RETRY in 1.5s');
-          await new Promise(r => setTimeout(r, 1500));
+          // Transient network error (cold start, "Load failed") — quick retry
+          console.log(ts(), 'STEP_2_TRANSIENT_RETRY in 800ms');
+          await new Promise(r => setTimeout(r, 800));
           try {
             ride = await rawInsertRide(ridePayload, accessToken);
           } catch (retryErr: any) {
@@ -1621,23 +1621,40 @@ const RideBooking = () => {
       }).then(r => console.log('[Cancel] Ride DB updated:', r.status)).catch(e => console.warn('[Cancel] Ride update err:', e));
     } catch (e) { console.warn('[Cancel] Ride fetch err:', e); }
 
-    // 2) Notify driver via push (fire-and-forget with keepalive)
+    // 2) Notify driver via MULTIPLE channels for reliability
     if (targetDriverId) {
+      // 2a) ride-status-push — battle-tested, does proper driver lookup & player ID resolution
+      try {
+        fetch(`${SUPABASE_URL}/functions/v1/ride-status-push`, {
+          method: 'POST',
+          headers: { ...headers, 'Prefer': '' },
+          body: JSON.stringify({
+            ride_id: rideId,
+            rider_id: userId,
+            driver_id: targetDriverId,
+            new_status: 'cancelled',
+            old_status: currentRide.status,
+          }),
+          keepalive: true,
+        }).then(r => console.log('[Cancel] ride-status-push:', r.status)).catch(e => console.warn('[Cancel] ride-status-push err:', e));
+      } catch (e) { console.warn('[Cancel] ride-status-push fetch err:', e); }
+
+      // 2b) Tag-based push (most reliable fallback — works even if external ID not set)
       try {
         fetch(`${SUPABASE_URL}/functions/v1/send-onesignal-notification`, {
           method: 'POST',
-          headers,
+          headers: { ...headers, 'Prefer': '' },
           body: JSON.stringify({
-            externalUserIds: [targetDriverId],
+            tagUids: [targetDriverId],
             title: 'Ride Cancelled ❌',
             message: 'The rider cancelled this ride.',
             url: '/driver',
           }),
           keepalive: true,
-        }).then(r => console.log('[Cancel] Push sent:', r.status)).catch(e => console.warn('[Cancel] Push err:', e));
-      } catch (e) { console.warn('[Cancel] Push fetch err:', e); }
+        }).then(r => console.log('[Cancel] Tag push sent:', r.status)).catch(e => console.warn('[Cancel] Tag push err:', e));
+      } catch (e) { console.warn('[Cancel] Tag push fetch err:', e); }
 
-      // 3) DB notification (keepalive)
+      // 3) DB notification (keepalive) — driver's realtime listener picks this up
       try {
         fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
           method: 'POST',
