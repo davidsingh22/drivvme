@@ -403,11 +403,12 @@ const DriverDashboard = () => {
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
-  // Recovery: check for pending new_ride notifications on mount/resume/going online.
+  // Recovery: check for pending new_ride notifications on mount/resume.
   // This catches notifications inserted BEFORE the realtime listener was active
   // (e.g. driver taps push notification and app opens fresh).
+  // NOTE: No isOnline guard — driver may open app from push while offline.
   useEffect(() => {
-    if (!isOnline || !user || !session) return;
+    if (!user || !session) return;
 
     const COUNTDOWN_SECONDS = 25; // must match RideOfferModal countdownSeconds
 
@@ -487,12 +488,13 @@ const DriverDashboard = () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [isOnline, user?.id, session]);
+  }, [user?.id, session]);
 
   // Push-based ride offer listener — no polling, no feed.
   // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
+  // NOTE: No isOnline guard — driver may receive notifications while technically "offline" in UI.
   useEffect(() => {
-    if (!isOnline || !user || !session) return;
+    if (!user || !session) return;
 
     // Listen for new ride notifications via realtime on the notifications table
     const channel = supabase
@@ -572,7 +574,7 @@ const DriverDashboard = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isOnline, user, session]);
+  }, [user, session]);
 
   // Watch alerted ride for cancellation — dismiss modal if rider cancels
   // Uses BOTH realtime (may fail due to RLS on cancelled rows) AND polling fallback
@@ -907,6 +909,16 @@ const DriverDashboard = () => {
           title: '⚡ Priority Driver Activated!',
           description: 'You get priority for the next 30 minutes for accepting fast!',
         });
+      }
+
+      // Auto-set driver online when accepting a ride (critical for GPS + ride panel)
+      if (!isOnline) {
+        setIsOnline(true);
+        supabase
+          .from('driver_profiles')
+          .update({ is_online: true })
+          .eq('user_id', user.id)
+          .then(() => {});
       }
 
       // Update UI immediately
