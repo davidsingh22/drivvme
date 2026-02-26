@@ -56,7 +56,10 @@ export function RideOfferModal({
   const [showUberShimmer, setShowUberShimmer] = useState(true);
   const timerRef = useRef<number | null>(null);
   const onDeclineRef = useRef(onDecline);
+  const onAcceptRef = useRef(onAccept);
+  const tapGuardRef = useRef(false); // prevent double-fire
   onDeclineRef.current = onDecline;
+  onAcceptRef.current = onAccept;
 
   // Calculate distance from driver to pickup using passed driverLocation
   const driverDistanceKm = useMemo(() => {
@@ -76,6 +79,7 @@ export function RideOfferModal({
     if (open && ride) {
       setTimeLeft(countdownSeconds);
       setShowUberShimmer(true);
+      tapGuardRef.current = false; // reset tap guard for new offer
     }
   }, [open, ride?.id, countdownSeconds]);
 
@@ -107,6 +111,20 @@ export function RideOfferModal({
   }, [open]);
 
   if (!ride) return null;
+
+  const handleAccept = () => {
+    if (tapGuardRef.current) return;
+    tapGuardRef.current = true;
+    onAcceptRef.current();
+    setTimeout(() => { tapGuardRef.current = false; }, 1000);
+  };
+
+  const handleDecline = () => {
+    if (tapGuardRef.current) return;
+    tapGuardRef.current = true;
+    onDeclineRef.current();
+    setTimeout(() => { tapGuardRef.current = false; }, 1000);
+  };
 
   const fare = ride.estimated_fare;
   const platformFee = calculatePlatformFee(fare);
@@ -236,18 +254,15 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Accept Button — use onTouchEnd + onClick for reliable mobile taps */}
-                <Button
-                  size="lg"
-                  onClick={onAccept}
-                  onTouchEnd={(e) => {
-                    e.preventDefault();
-                    onAccept();
-                  }}
-                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white rounded-xl relative z-10"
+                {/* Accept Button — pointer events for reliable mobile taps */}
+                <button
+                  type="button"
+                  onPointerDown={(e) => { e.stopPropagation(); handleAccept(); }}
+                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 active:scale-95 text-white rounded-xl relative z-50 touch-manipulation select-none"
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
                 >
                   {language === 'fr' ? 'Accepter la course' : 'Accept Ride'}
-                </Button>
+                </button>
 
                 {/* Priority Driver Reward */}
                 <div className="flex items-center gap-3 bg-accent/10 border border-accent/30 rounded-xl p-3">
@@ -262,19 +277,16 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Decline Button - dismisses and returns ride to pool */}
-                <Button
-                  size="lg"
-                  onClick={onDecline}
-                  onTouchEnd={(e) => {
-                    e.preventDefault();
-                    onDecline();
-                  }}
-                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl relative z-10"
+                {/* Decline Button */}
+                <button
+                  type="button"
+                  onPointerDown={(e) => { e.stopPropagation(); handleDecline(); }}
+                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 active:scale-95 text-white rounded-xl relative z-50 flex items-center justify-center gap-2 touch-manipulation select-none"
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
                 >
-                  <X className="h-5 w-5 mr-2" />
+                  <X className="h-5 w-5" />
                   {language === 'fr' ? 'Non merci — Passer' : 'No thanks — Skip'}
-                </Button>
+                </button>
                 <p className="text-center text-white/40 text-xs">
                   {language === 'fr' 
                     ? 'La course restera disponible pour d\'autres chauffeurs'

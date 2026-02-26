@@ -403,16 +403,18 @@ const DriverDashboard = () => {
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
-  // Recovery: check for pending new_ride notifications on mount/resume/going online.
-  // This catches notifications inserted BEFORE the realtime listener was active
-  // (e.g. driver taps push notification and app opens fresh).
-  useEffect(() => {
-    if (!isOnline || !user || !session) return;
+  // Shared countdown constant — used by recovery, realtime, and modal
+  const COUNTDOWN_SECONDS = 25;
 
-    const COUNTDOWN_SECONDS = 25; // must match RideOfferModal countdownSeconds
+  // State to pass remaining countdown to modal when recovering an offer
+  const [recoveredCountdown, setRecoveredCountdown] = useState<number | null>(null);
+
+  // Recovery: check for pending new_ride notifications on mount/resume.
+  // IMPORTANT: NOT gated on isOnline — driver may tap push before toggling online.
+  useEffect(() => {
+    if (!user || !session) return;
 
     const checkPendingOffers = async () => {
-      // Guard inside the function so it re-evaluates each poll cycle
       if (currentRideRef.current || newRideAlertOpenRef.current) return;
       try {
         const { data: pending } = await supabase
@@ -428,11 +430,9 @@ const DriverDashboard = () => {
         if (!pending?.ride_id) return;
         if (currentRideRef.current || newRideAlertOpenRef.current) return;
 
-        // Skip if notification is older than the countdown window
         const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
         if (notifAge > COUNTDOWN_SECONDS) {
           console.log('[DriverDashboard] ⏰ Skipping expired ride offer (age:', Math.round(notifAge), 's)');
-          // Mark as read so we don't keep checking it
           await supabase
             .from('notifications')
             .update({ is_read: true })
@@ -452,47 +452,54 @@ const DriverDashboard = () => {
         if (!ride) return;
         if (currentRideRef.current || newRideAlertOpenRef.current) return;
 
-        console.log('[DriverDashboard] 🔄 Recovery: found pending ride offer:', ride.id, '(age:', Math.round(notifAge), 's)');
+        const remaining = Math.max(1, Math.round(COUNTDOWN_SECONDS - notifAge));
+        console.log('[DriverDashboard] 🔄 Recovery: found pending ride offer:', ride.id, '(age:', Math.round(notifAge), 's, remaining:', remaining, 's)');
+        setRecoveredCountdown(remaining);
         setCachedAlertRide(ride);
         setNewRideAlertRideId(ride.id);
         setNewRideAlertOpen(true);
-        alertStartTimeRef.current = Date.now();
+        alertStartTimeRef.current = Date.now() - (notifAge * 1000);
       } catch (err) {
         console.warn('[DriverDashboard] Recovery check failed:', err);
       }
     };
 
-    // Check immediately on mount/online
     checkPendingOffers();
 
-    // Poll every 5s as safety net
-    const interval = window.setInterval(checkPendingOffers, 5000);
+    const interval = window.setInterval(checkPendingOffers, 3000);
 
-    // Re-check when app resumes from background (push notification tap)
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         console.log('[DriverDashboard] 👁️ App resumed — checking pending offers');
-        checkPendingOffers();
+        setTimeout(checkPendingOffers, 300);
       }
     };
     const handleFocus = () => {
       console.log('[DriverDashboard] 👁️ Window focused — checking pending offers');
-      checkPendingOffers();
+      setTimeout(checkPendingOffers, 300);
+    };
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) {
+        console.log('[DriverDashboard] 👁️ pageshow (bfcache) — checking pending offers');
+        setTimeout(checkPendingOffers, 300);
+      }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handlePageShow);
 
     return () => {
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [isOnline, user?.id, session]);
+  }, [user?.id, session]);
 
   // Push-based ride offer listener — no polling, no feed.
   // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
   useEffect(() => {
-    if (!isOnline || !user || !session) return;
+    if (!user || !session) return;
 
     // Listen for new ride notifications via realtime on the notifications table
     const channel = supabase
@@ -572,7 +579,7 @@ const DriverDashboard = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isOnline, user, session]);
+  }, [user, session]);
 
   // Watch alerted ride for cancellation — dismiss modal if rider cancels
   // Uses BOTH realtime (may fail due to RLS on cancelled rows) AND polling fallback
@@ -1151,16 +1158,27 @@ const DriverDashboard = () => {
       <RideOfferModal
         open={newRideAlertOpen}
         ride={alertRide}
-        countdownSeconds={20}
+        countdownSeconds={recoveredCountdown ?? COUNTDOWN_SECONDS}
         driverLocation={driverLocation}
         onDecline={() => {
           setNewRideAlertOpen(false);
           setCachedAlertRide(null);
           setNewRideAlertRideId(null);
           alertStartTimeRef.current = null;
+          setRecoveredCountdown(null);
+          // Mark notification as read
+          if (newRideAlertRideId && user) {
+            supabase
+              .from('notifications')
+              .update({ is_read: true })
+              .eq('ride_id', newRideAlertRideId)
+              .eq('user_id', user.id)
+              .eq('type', 'new_ride')
+              .then(() => {});
+          }
         }}
         onAccept={() => {
-          // Use cached ride data for acceptance (persists even if ride was removed from availableRides)
+          setRecoveredCountdown(null);
           if (cachedAlertRide) {
             acceptRide(cachedAlertRide);
           }
