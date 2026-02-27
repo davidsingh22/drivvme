@@ -40,17 +40,36 @@ function readPendingRideId(): string | null {
 
 /** Force-clear all stale state, then set new ride */
 function forceInjectRide(rideId: string) {
-  try {
-    localStorage.removeItem('pendingRideFromPush');
-    localStorage.removeItem('last_notified_ride');
-    delete (window as any).__FAST_PATH_RIDE_ID;
-  } catch {}
+  clearAllRideMemory();
   try {
     localStorage.setItem('pendingRideFromPush', rideId);
     localStorage.setItem('last_notified_ride', rideId);
   } catch {}
   setPendingRideFromNotification(rideId);
 }
+
+/** Nuclear reset — clears every ride-related artifact from the client */
+function clearAllRideMemory() {
+  try {
+    localStorage.removeItem('pendingRideFromPush');
+    localStorage.removeItem('last_notified_ride');
+    delete (window as any).__FAST_PATH_RIDE_ID;
+  } catch {}
+
+  // Kill BroadcastChannel cache
+  try {
+    const ch = new BroadcastChannel('drivveme_ride_updates');
+    ch.close();
+  } catch {}
+
+  // Wipe OneSignal notification cache (best-effort)
+  try {
+    const OS = (window as any).OneSignal;
+    if (OS?.Notifications?.clearAll) OS.Notifications.clearAll();
+  } catch {}
+}
+
+export { clearAllRideMemory };
 
 export function GlobalRideOfferGuard() {
   // Immediately check for a pending ride — no useEffect delay
@@ -231,11 +250,7 @@ export function GlobalRideOfferGuard() {
   }, [rideId]);
 
   const cleanup = useCallback(() => {
-    try {
-      localStorage.removeItem('pendingRideFromPush');
-      localStorage.removeItem('last_notified_ride');
-      delete (window as any).__FAST_PATH_RIDE_ID;
-    } catch {}
+    clearAllRideMemory();
     setOpen(false);
     setRide(null);
     setRideId(null);
