@@ -146,6 +146,7 @@ const DriverDashboard = () => {
     lastUpdate: locationLastUpdate,
     locationError,
     permissionStatus: locationPermission,
+    resetLocationError,
   } = useDriverLocationTracking({
     userId: user?.id,
     // Use auth user id as the stable driver identifier for driver_locations.
@@ -626,6 +627,8 @@ const DriverDashboard = () => {
       setNewRideAlertOpen(false);
       setNewRideAlertRideId(null);
       setCachedAlertRide(null);
+      // Auto-clear the GPS error banner so it doesn't block the UI on resume
+      resetLocationError();
       // NOTE: Do NOT clear currentRideRef if there's an active ride in progress
       // Only clear if there's no state-level ride (prevents wiping a live trip)
       if (!currentRide) {

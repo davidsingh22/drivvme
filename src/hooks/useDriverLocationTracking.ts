@@ -149,11 +149,23 @@ export function useDriverLocationTracking({
     };
   }, []);
 
+  // Allow external callers (e.g. resume handler) to clear stale errors
+  const resetLocationError = useCallback(() => {
+    setLocationError(null);
+    // Re-query permission status so UI updates if user granted in Settings
+    if ('permissions' in navigator) {
+      navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+        setPermissionStatus(result.state as 'granted' | 'denied' | 'prompt');
+      }).catch(() => {});
+    }
+  }, []);
+
   return {
     isTracking,
     lastUpdate,
     locationError,
     permissionStatus,
-    stopSharing
+    stopSharing,
+    resetLocationError,
   };
 }
