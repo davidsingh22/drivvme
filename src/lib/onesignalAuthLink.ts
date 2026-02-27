@@ -57,6 +57,7 @@ export function initOneSignalAuthLink() {
                 // Also persist to localStorage as a fallback signal for cold starts
                 try {
                   localStorage.setItem('pendingRideFromPush', data.ride_id);
+                  localStorage.setItem('last_notified_ride', data.ride_id);
                   console.log('🔔 OneSignal: persisted ride_id to localStorage:', data.ride_id);
                 } catch { /* ignore */ }
                 // Route drivers to /driver, riders to /ride
