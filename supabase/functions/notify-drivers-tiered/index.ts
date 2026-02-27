@@ -527,7 +527,6 @@ serve(async (req) => {
 
         // Send to drivers WITH player IDs (primary)
         if (playerIds.length > 0) {
-          const tieredNonce = crypto.randomUUID();
           const playerPayload = {
             app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
             include_player_ids: playerIds,
@@ -540,8 +539,7 @@ serve(async (req) => {
             android_sound: "default",
             content_available: true,
             mutable_content: true,
-            collapse_id: `new_ride_${tieredNonce}`,
-            data: { ride_id: rideId, type: "new_ride", _nonce: tieredNonce, _ts: Date.now().toString() },
+            data: { ride_id: rideId, type: "new_ride" },
           };
 
           const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -564,7 +562,6 @@ serve(async (req) => {
           // OneSignal filters don't support OR across multiple uids in one call,
           // so we send one notification per driver using tag filter
           for (const uid of driversMissingPlayerId) {
-            const tagNonce = crypto.randomUUID();
             const fallbackPayload = {
               app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
               filters: [
@@ -581,8 +578,7 @@ serve(async (req) => {
               android_sound: "default",
               content_available: true,
               mutable_content: true,
-              collapse_id: `new_ride_${tagNonce}`,
-              data: { ride_id: rideId, type: "new_ride", _nonce: tagNonce, _ts: Date.now().toString() },
+              data: { ride_id: rideId, type: "new_ride" },
             };
 
             console.log(`[notify-drivers-tiered] Using tag-based targeting for uid: ${uid}`);

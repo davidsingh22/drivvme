@@ -80,38 +80,22 @@ export function GlobalRideOfferGuard() {
   });
 
   const [ride, setRide] = useState<RideSummary | null>(null);
-  // Don't auto-open on mount — wait for validation first
-  const [open, setOpen] = useState<boolean>(false);
+  const [open, setOpen] = useState<boolean>(() => !!readPendingRideId());
 
-  // State-buster key: forces full re-mount of modal when rideId changes
-  const [mountKey, setMountKey] = useState(0);
   const lastHandledRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const foregroundListenerRef = useRef(false);
   const fetchCancelRef = useRef<(() => void) | null>(null);
-  const prevRideIdRef = useRef<string | null>(rideId);
-  const openRef = useRef(false); // tracks `open` without stale closures
-  const dismissedRidesRef = useRef<Set<string>>(new Set()); // prevents re-triggering dismissed rides
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  // State-buster: if rideId changes, bump mountKey to force modal re-mount
-  useEffect(() => {
-    if (rideId && rideId !== prevRideIdRef.current) {
-      console.log('[GlobalGuard] 🔄 State-buster: rideId changed', prevRideIdRef.current, '→', rideId);
-      setMountKey(k => k + 1);
-    }
-    prevRideIdRef.current = rideId;
-  }, [rideId]);
-
   /** Core handler: receives a new ride_id from ANY source */
   const handleNewRide = useCallback((id: string) => {
     if (!mountedRef.current) return;
-    if (dismissedRidesRef.current.has(id)) return; // Already dismissed — don't re-trigger
-    if (id === lastHandledRef.current && openRef.current) return; // same ride, already showing
+    if (id === lastHandledRef.current && open) return; // same ride, already showing
     
     console.log('[GlobalGuard] 🆕 New ride event:', id);
     lastHandledRef.current = id;
@@ -126,8 +110,7 @@ export function GlobalRideOfferGuard() {
     setRide(null);
     setRideId(id);
     setOpen(true);
-    openRef.current = true;
-  }, []);
+  }, [open]);
 
   // === PERSISTENT LISTENERS ===
   useEffect(() => {
@@ -179,86 +162,19 @@ export function GlobalRideOfferGuard() {
       }
     });
 
-    // Source 6: Active heartbeat — polls DB every 5s for unread new_ride notifications
-    // ONLY for drivers — riders should never see new_ride offer modals
-    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-    const startHeartbeat = async () => {
-      if (heartbeatTimer) return;
-      // Check if user is a driver before starting heartbeat
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user?.id) return;
-        const { data: roles } = await supabase
-          .from('user_roles')
-          .select('role')
-          .eq('user_id', session.user.id);
-        const isDriver = roles?.some(r => r.role === 'driver');
-        if (!isDriver) {
-          console.log('[GlobalGuard] 🚫 Not a driver — skipping heartbeat');
-          return;
-        }
-      } catch { return; }
-
-      heartbeatTimer = setInterval(async () => {
-        if (!mountedRef.current || openRef.current) return;
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (!session?.user?.id) return;
-
-          const { data: unread } = await supabase
-            .from('notifications')
-            .select('ride_id')
-            .eq('user_id', session.user.id)
-            .eq('type', 'new_ride')
-            .eq('is_read', false)
-            .order('created_at', { ascending: false })
-            .limit(1);
-
-          const foundId = unread?.[0]?.ride_id;
-          if (!foundId || dismissedRidesRef.current.has(foundId)) return;
-
-          // Verify the ride is still searching before triggering
-          const { data: rideData } = await supabase
-            .from('rides')
-            .select('status')
-            .eq('id', foundId)
-            .maybeSingle();
-
-          if (rideData?.status !== 'searching') {
-            // Stale notification — mark as read and skip
-            dismissedRidesRef.current.add(foundId);
-            await supabase
-              .from('notifications')
-              .update({ is_read: true })
-              .eq('ride_id', foundId)
-              .eq('user_id', session.user.id)
-              .eq('type', 'new_ride');
-            return;
-          }
-
-          console.log('[GlobalGuard] 💓 Heartbeat found active ride:', foundId);
-          handleNewRide(foundId);
-        } catch {}
-      }, 5000);
-    };
-    // Start heartbeat after a short delay to let auth settle
-    const heartbeatDelay = setTimeout(startHeartbeat, 3000);
-
     return () => {
       unsub1();
       unsub2();
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
-      clearTimeout(heartbeatDelay);
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
       subscription.unsubscribe();
     };
   }, [handleNewRide]);
 
-  // === ASYNC DATA ENRICHMENT — validates ride before showing modal ===
+  // === ASYNC DATA ENRICHMENT — does NOT block modal display ===
   useEffect(() => {
     if (!rideId) return;
 
@@ -266,7 +182,7 @@ export function GlobalRideOfferGuard() {
     fetchCancelRef.current = () => { cancelled = true; };
 
     let attempts = 0;
-    const MAX_ATTEMPTS = 10;
+    const MAX_ATTEMPTS = 20;
 
     const tryFetch = async () => {
       if (cancelled) return;
@@ -287,18 +203,12 @@ export function GlobalRideOfferGuard() {
           .from('rides')
           .select('id, pickup_address, dropoff_address, estimated_fare, distance_km, estimated_duration_minutes, pickup_lat, pickup_lng, status, requested_at, created_at')
           .eq('id', rideId)
+          .eq('status', 'searching')
           .maybeSingle();
 
         if (cancelled) return;
 
-        // If ride exists but is NOT searching, it's stale — clear immediately
-        if (data && data.status !== 'searching') {
-          console.log('[GlobalGuard] ⏭️ Ride not searching (status:', data.status, ') — clearing');
-          cleanup();
-          return;
-        }
-
-        if (data && data.status === 'searching') {
+        if (data) {
           const age = (Date.now() - new Date(data.requested_at || data.created_at).getTime()) / 1000;
           if (age > 90) {
             console.log('[GlobalGuard] ⏰ Ride too old:', Math.round(age), 's');
@@ -306,7 +216,7 @@ export function GlobalRideOfferGuard() {
             return;
           }
 
-          console.log('[GlobalGuard] ✅ Ride validated on attempt', attempts);
+          console.log('[GlobalGuard] ✅ Ride enriched on attempt', attempts);
           setRide({
             id: data.id,
             pickup_address: data.pickup_address,
@@ -317,14 +227,7 @@ export function GlobalRideOfferGuard() {
             pickup_lat: data.pickup_lat ?? undefined,
             pickup_lng: data.pickup_lng ?? undefined,
           });
-          setOpen(true); // Only open AFTER validation
           return;
-        }
-
-        // Ride not found yet — could be replication lag on first few attempts
-        if (!data && attempts === 1) {
-          // On first attempt, open modal optimistically (fast-path for push wakeup)
-          setOpen(true);
         }
 
         if (error) {
@@ -347,32 +250,13 @@ export function GlobalRideOfferGuard() {
   }, [rideId]);
 
   const cleanup = useCallback(() => {
-    // Remember this ride so heartbeat doesn't re-trigger it
-    if (rideId) dismissedRidesRef.current.add(rideId);
-    
-    // Mark notification as read to stop heartbeat from re-finding it
-    const dismissedId = rideId;
-    if (dismissedId) {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user?.id) {
-          supabase.from('notifications')
-            .update({ is_read: true })
-            .eq('ride_id', dismissedId)
-            .eq('user_id', session.user.id)
-            .eq('type', 'new_ride')
-            .then(() => {});
-        }
-      });
-    }
-
     clearAllRideMemory();
     setOpen(false);
-    openRef.current = false;
     setRide(null);
     setRideId(null);
     lastHandledRef.current = null;
     fetchCancelRef.current = null;
-  }, [rideId]);
+  }, []);
 
   const handleAccept = useCallback(async () => {
     const targetId = rideId;
@@ -485,13 +369,11 @@ export function GlobalRideOfferGuard() {
         />
       )}
       <DriverBeepFix
-        key={`beep-${mountKey}`}
         incomingRide={open && displayRide ? { id: displayRide.id } : null}
         onTimeout={handleDecline}
         timeoutSeconds={25}
       />
       <RideOfferModal
-        key={`modal-${mountKey}`}
         open={open}
         ride={displayRide}
         countdownSeconds={25}
