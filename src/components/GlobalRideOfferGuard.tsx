@@ -171,6 +171,25 @@ export function GlobalRideOfferGuard() {
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleVisibility);
 
+    // Source 6: Storage event — fires when localStorage changes (same or other tab)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'pendingRideFromPush' && e.newValue && mountedRef.current) {
+        console.log('[GlobalGuard] 📦 Storage event detected:', e.newValue);
+        handleNewRide(e.newValue);
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // Source 7: Same-tab localStorage poll (storage event doesn't fire in same tab)
+    const pollInterval = setInterval(() => {
+      if (!mountedRef.current) return;
+      const id = readPendingRideId();
+      if (id && id !== lastHandledRef.current) {
+        console.log('[GlobalGuard] 🔄 Poll detected new ride:', id);
+        handleNewRide(id);
+      }
+    }, 500);
+
     // Source 5: Auth state — re-check on SIGNED_IN
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' && mountedRef.current) {
@@ -185,8 +204,10 @@ export function GlobalRideOfferGuard() {
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
+      clearInterval(pollInterval);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
+      window.removeEventListener('storage', handleStorage);
       subscription.unsubscribe();
     };
   }, [handleNewRide]);
