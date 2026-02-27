@@ -534,9 +534,12 @@ serve(async (req) => {
             contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
             url: "/driver",
             priority: 10,
+            ttl: 0,
             ios_sound: "default",
             android_sound: "default",
             content_available: true,
+            mutable_content: true,
+            data: { ride_id: rideId, type: "new_ride" },
           };
 
           const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -570,9 +573,12 @@ serve(async (req) => {
               contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
               url: "/driver",
               priority: 10,
+              ttl: 0,
               ios_sound: "default",
               android_sound: "default",
               content_available: true,
+              mutable_content: true,
+              data: { ride_id: rideId, type: "new_ride" },
             };
 
             console.log(`[notify-drivers-tiered] Using tag-based targeting for uid: ${uid}`);

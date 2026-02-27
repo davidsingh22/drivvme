@@ -409,7 +409,7 @@ const DriverDashboard = () => {
   // Max age we'll still recover an offer (gives driver time to open app)
   const MAX_OFFER_AGE_SECONDS = 90;
 
-  // State to pass remaining countdown to modal when recovering an offer
+  // recoveredCountdown is kept for API compat but always null now (always fresh 25s)
   const [recoveredCountdown, setRecoveredCountdown] = useState<number | null>(null);
 
   // Recovery: check for pending new_ride notifications on mount/resume.
@@ -445,16 +445,16 @@ const DriverDashboard = () => {
       }
       if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return false;
 
-      // Calculate remaining visual countdown from ride creation
+      // Only reject if ride is truly expired (>90s). Visual countdown always starts fresh at 25s.
       const notifAge = (Date.now() - new Date(ride.requested_at || ride.created_at).getTime()) / 1000;
       if (notifAge > MAX_OFFER_AGE_SECONDS) {
         console.log('[Recovery] ⏰ Ride too old:', Math.round(notifAge), 's');
         return false;
       }
 
-      const remaining = Math.max(5, Math.round(COUNTDOWN_SECONDS - notifAge));
-      console.log('[Recovery] ✅ Showing ride offer:', ride.id, '(age:', Math.round(notifAge), 's, visual countdown:', remaining, 's)');
-      setRecoveredCountdown(remaining);
+      // Always show a FRESH 25s countdown — the timer starts when the modal appears, not when the notification was created.
+      console.log('[Recovery] ✅ Showing ride offer:', ride.id, '(age:', Math.round(notifAge), 's, visual countdown: FRESH 25s)');
+      setRecoveredCountdown(null); // null = use full default countdown
       setCachedAlertRide(ride);
       setNewRideAlertRideId(ride.id);
       setNewRideAlertOpen(true);

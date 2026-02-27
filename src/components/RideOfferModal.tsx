@@ -74,9 +74,12 @@ export function RideOfferModal({
     );
   }, [driverLocation, ride?.pickup_lat, ride?.pickup_lng]);
 
-  // Reset timer when ride changes
+  // Reset timer when modal actually appears — countdown starts from NOW, not from DB creation time.
+  // The parent always passes countdownSeconds=25 (full), regardless of notification age.
+  // The system only rejects rides older than 90s, so the driver always gets a fresh 25s visual timer.
   useEffect(() => {
     if (open && ride) {
+      console.log('[RideOfferModal] ⏱️ Modal opened — starting fresh', countdownSeconds, 's countdown NOW');
       setTimeLeft(countdownSeconds);
       setShowUberShimmer(true);
       tapGuardRef.current = false; // reset tap guard for new offer
