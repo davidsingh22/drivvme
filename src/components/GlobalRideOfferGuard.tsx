@@ -174,17 +174,49 @@ export function GlobalRideOfferGuard() {
       }
     });
 
+    // Source 6: Active heartbeat — polls DB every 5s for unread new_ride notifications
+    // Acts as fallback when push notifications are throttled by OS
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+    const startHeartbeat = () => {
+      if (heartbeatTimer) return;
+      heartbeatTimer = setInterval(async () => {
+        if (!mountedRef.current || open) return; // Don't poll if modal already showing
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session?.user?.id) return;
+
+          const { data: unread } = await supabase
+            .from('notifications')
+            .select('ride_id')
+            .eq('user_id', session.user.id)
+            .eq('type', 'new_ride')
+            .eq('is_read', false)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          if (unread?.[0]?.ride_id) {
+            console.log('[GlobalGuard] 💓 Heartbeat found ride:', unread[0].ride_id);
+            handleNewRide(unread[0].ride_id);
+          }
+        } catch {}
+      }, 5000);
+    };
+    // Start heartbeat after a short delay to let auth settle
+    const heartbeatDelay = setTimeout(startHeartbeat, 3000);
+
     return () => {
       unsub1();
       unsub2();
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
+      clearTimeout(heartbeatDelay);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
       subscription.unsubscribe();
     };
-  }, [handleNewRide]);
+  }, [handleNewRide, open]);
 
   // === ASYNC DATA ENRICHMENT — does NOT block modal display ===
   useEffect(() => {
