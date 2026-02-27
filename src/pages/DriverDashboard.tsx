@@ -610,29 +610,25 @@ const DriverDashboard = () => {
       } catch { /* ignore */ }
     };
 
+    const resetAndRetry = (source: string) => {
+      console.log(`[Recovery] 👁️ ${source} — clearing ALL stale state, force-refreshing session + retrying GPS + running retry ladder`);
+      setRecoveredCountdown(null);
+      // Force-clear the "already processed" guards so we check with fresh eyes
+      currentRideRef.current = null;
+      newRideAlertOpenRef.current = false;
+      newRideAlertRideIdRef.current = null;
+      supabase.auth.refreshSession().catch(() => {});
+      retryGeolocation();
+      runLadder();
+    };
+
     const handleResume = () => {
       if (document.visibilityState === 'visible' || !document.hidden) {
-        console.log('[Recovery] 👁️ App resumed — clearing stale state, force-refreshing session + retrying GPS + running retry ladder');
-        setRecoveredCountdown(null);
-        supabase.auth.refreshSession().catch(() => {});
-        retryGeolocation();
-        runLadder();
+        resetAndRetry('App resumed (visibilitychange)');
       }
     };
-    const handleFocus = () => {
-      console.log('[Recovery] 👁️ Window focused — force-refreshing session + retrying GPS + running retry ladder');
-      setRecoveredCountdown(null);
-      supabase.auth.refreshSession().catch(() => {});
-      retryGeolocation();
-      runLadder();
-    };
-    const handlePageShow = () => {
-      console.log('[Recovery] 👁️ pageshow fired — force-refreshing session + retrying GPS + running retry ladder');
-      setRecoveredCountdown(null);
-      supabase.auth.refreshSession().catch(() => {});
-      retryGeolocation();
-      runLadder();
-    };
+    const handleFocus = () => resetAndRetry('Window focused');
+    const handlePageShow = () => resetAndRetry('pageshow fired');
 
     // Post-reconnection check: when auth transitions to SIGNED_IN, immediately check for rides
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
@@ -1313,7 +1309,7 @@ const DriverDashboard = () => {
   // Wrapped in a fixed container with z-[99999] and pointer-events:auto so it floats above
   // any "Reconnecting", "GPS Denied", or loading overlays.
   const globalModalLayer = (
-    <div className="fixed inset-0 z-[99999] pointer-events-none" style={{ isolation: 'isolate' }}>
+    <div className="fixed inset-0 pointer-events-none" style={{ isolation: 'isolate', zIndex: 2147483647 }}>
       <DriverBeepFix
         incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
         onTimeout={() => cleanupOffer(true)}
