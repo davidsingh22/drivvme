@@ -629,8 +629,13 @@ const DriverDashboard = () => {
       setCachedAlertRide(null);
       // Auto-clear the GPS error banner so it doesn't block the UI on resume
       resetLocationError();
+      // If a ride is active, force a GPS re-acquire so the navigation works immediately
+      if (currentRide || currentRideRef.current) {
+        try {
+          navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+        } catch (_) {}
+      }
       // NOTE: Do NOT clear currentRideRef if there's an active ride in progress
-      // Only clear if there's no state-level ride (prevents wiping a live trip)
       if (!currentRide) {
         currentRideRef.current = null;
       }
@@ -1126,7 +1131,17 @@ const DriverDashboard = () => {
 
       // Update UI immediately
       setCurrentRide({ ...ride, status: 'driver_assigned' });
-      
+
+      // Hard-reset GPS: force the browser to re-acquire a lock, clearing any stale 'denied' state
+      resetLocationError();
+      try {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => console.log('[AcceptRide] GPS re-acquired after acceptance:', pos.coords.latitude, pos.coords.longitude),
+          (err) => console.warn('[AcceptRide] GPS refresh after acceptance failed (non-blocking):', err.message),
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      } catch (e) { /* ignore */ }
+
       if (!acceptanceTimeSeconds || acceptanceTimeSeconds > 5) {
         toast({
           title: 'Ride accepted!',
@@ -1427,11 +1442,11 @@ const DriverDashboard = () => {
           
           {/* Content container - relative to appear above background */}
           <div className="relative z-10 flex flex-col flex-1 overflow-hidden">
-            {/* Wake Lock Banner - Keep screen awake while driving */}
-            <div className="pt-4">
+            {/* Banner stack — completely hidden during active ride ("Clean Slate" navigation mode) */}
+            <div className="pt-4" style={currentRide ? { display: 'none' } : undefined}>
               <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
               
-              {/* GPS Status Indicator - Simplified to just the button */}
+              {/* GPS Status Indicator */}
               {(isOnline || currentRide) && (
                 <DriverGPSStatusIndicator
                   onForceSend={gpsForceWriteWithFeedback}
@@ -1452,8 +1467,8 @@ const DriverDashboard = () => {
                 />
               )}
               
-              {/* GPS Error Banner - Show when location fails, but hide during ride offer or active ride */}
-              {!newRideAlertOpen && !currentRide && (
+              {/* GPS Error Banner */}
+              {!newRideAlertOpen && (
                 <DriverGPSErrorBanner 
                   error={gpsError} 
                   retryCount={gpsRetryCount} 
