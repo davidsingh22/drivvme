@@ -1191,97 +1191,85 @@ const DriverDashboard = () => {
   const currentRideFee = currentRide ? calculatePlatformFee(currentRideFareForFee) : 0;
   const driverEarnings = currentRide ? currentRideFareForFee - currentRideFee : 0;
 
-  // Loading states: never redirect while we are still restoring session/profile on iOS.
-  // CRITICAL: We always render the RideOfferModal + DriverBeepFix even during loading,
-  // so ride offers are never blocked by slow profile hydration.
-  const waitingForIdentity = !!session && profileLoading;
+  // Shared cleanup function for accept/decline/timeout
+  const cleanupOffer = (markRead: boolean = true) => {
+    const rideId = newRideAlertRideId;
+    setNewRideAlertOpen(false);
+    setCachedAlertRide(null);
+    setNewRideAlertRideId(null);
+    alertStartTimeRef.current = null;
+    setRecoveredCountdown(null);
+    if (markRead && rideId && user) {
+      supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('ride_id', rideId)
+        .eq('user_id', user.id)
+        .eq('type', 'new_ride')
+        .then(() => {});
+    }
+  };
 
-  const loadingOrReconnectOverlay = authLoading ? (
-    <div className="min-h-screen bg-background flex items-center justify-center">
+  // CRITICAL: RideOfferModal + DriverBeepFix are rendered ONCE here, above all early returns,
+  // so they are always mounted regardless of loading/reconnecting state.
+  const globalModalLayer = (
+    <>
       <DriverBeepFix
         incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
-        onTimeout={() => { setNewRideAlertOpen(false); setCachedAlertRide(null); setNewRideAlertRideId(null); alertStartTimeRef.current = null; }}
+        onTimeout={() => cleanupOffer(true)}
         timeoutSeconds={25}
       />
-      <RideOfferModal open={newRideAlertOpen} ride={alertRide} countdownSeconds={recoveredCountdown ?? COUNTDOWN_SECONDS} driverLocation={driverLocation}
-        onDecline={() => { setNewRideAlertOpen(false); setCachedAlertRide(null); setNewRideAlertRideId(null); alertStartTimeRef.current = null; setRecoveredCountdown(null); if (newRideAlertRideId && user) { supabase.from('notifications').update({ is_read: true }).eq('ride_id', newRideAlertRideId).eq('user_id', user.id).eq('type', 'new_ride').then(() => {}); } }}
-        onAccept={() => { setRecoveredCountdown(null); if (cachedAlertRide) { acceptRide(cachedAlertRide); } }}
-      />
-      <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
-    </div>
-  ) : waitingForIdentity ? (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <DriverBeepFix
-        incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
-        onTimeout={() => { setNewRideAlertOpen(false); setCachedAlertRide(null); setNewRideAlertRideId(null); alertStartTimeRef.current = null; }}
-        timeoutSeconds={25}
-      />
-      <RideOfferModal open={newRideAlertOpen} ride={alertRide} countdownSeconds={recoveredCountdown ?? COUNTDOWN_SECONDS} driverLocation={driverLocation}
-        onDecline={() => { setNewRideAlertOpen(false); setCachedAlertRide(null); setNewRideAlertRideId(null); alertStartTimeRef.current = null; setRecoveredCountdown(null); if (newRideAlertRideId && user) { supabase.from('notifications').update({ is_read: true }).eq('ride_id', newRideAlertRideId).eq('user_id', user.id).eq('type', 'new_ride').then(() => {}); } }}
-        onAccept={() => { setRecoveredCountdown(null); if (cachedAlertRide) { acceptRide(cachedAlertRide); } }}
-      />
-      {showReconnect ? (
-        <Card className="w-full max-w-sm p-6 text-center">
-          <div className="font-medium">Reconnecting…</div>
-          <div className="mt-2 text-sm text-muted-foreground">
-            We're keeping you signed in while we reload your driver account.
-          </div>
-          <div className="mt-5 flex flex-col gap-3">
-            <Button onClick={async () => { await refreshSession(); await refreshDriverProfile(); }}>Retry now</Button>
-            <Button variant="outline" onClick={() => window.location.reload()}>Reload page</Button>
-          </div>
-        </Card>
-      ) : (
-        <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
-      )}
-    </div>
-  ) : null;
-
-  if (loadingOrReconnectOverlay) return loadingOrReconnectOverlay;
-
-  return (
-    <div className="min-h-screen bg-background">
-
-      <DriverBeepFix
-        incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
-        onTimeout={() => {
-          setNewRideAlertOpen(false);
-          setCachedAlertRide(null);
-          setNewRideAlertRideId(null);
-          alertStartTimeRef.current = null;
-        }}
-        timeoutSeconds={25}
-      />
-
       <RideOfferModal
         open={newRideAlertOpen}
         ride={alertRide}
         countdownSeconds={recoveredCountdown ?? COUNTDOWN_SECONDS}
         driverLocation={driverLocation}
-        onDecline={() => {
-          setNewRideAlertOpen(false);
-          setCachedAlertRide(null);
-          setNewRideAlertRideId(null);
-          alertStartTimeRef.current = null;
-          setRecoveredCountdown(null);
-          // Mark notification as read
-          if (newRideAlertRideId && user) {
-            supabase
-              .from('notifications')
-              .update({ is_read: true })
-              .eq('ride_id', newRideAlertRideId)
-              .eq('user_id', user.id)
-              .eq('type', 'new_ride')
-              .then(() => {});
-          }
-        }}
+        onDecline={() => cleanupOffer(true)}
         onAccept={() => {
           setRecoveredCountdown(null);
-          if (cachedAlertRide) {
-            acceptRide(cachedAlertRide);
-          }
+          if (cachedAlertRide) acceptRide(cachedAlertRide);
         }}
       />
+    </>
+  );
+
+  // Loading states: never redirect while we are still restoring session/profile on iOS.
+  const waitingForIdentity = !!session && profileLoading;
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        {globalModalLayer}
+        <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
+      </div>
+    );
+  }
+
+  if (waitingForIdentity) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        {globalModalLayer}
+        {showReconnect ? (
+          <Card className="w-full max-w-sm p-6 text-center">
+            <div className="font-medium">Reconnecting…</div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              We're keeping you signed in while we reload your driver account.
+            </div>
+            <div className="mt-5 flex flex-col gap-3">
+              <Button onClick={async () => { await refreshSession(); await refreshDriverProfile(); }}>Retry now</Button>
+              <Button variant="outline" onClick={() => window.location.reload()}>Reload page</Button>
+            </div>
+          </Card>
+        ) : (
+          <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {globalModalLayer}
       <Navbar />
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
