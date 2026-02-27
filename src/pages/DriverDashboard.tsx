@@ -589,8 +589,15 @@ const DriverDashboard = () => {
     // Only run initial ladder if we already have a userId
     const initialTimers = userId ? runLadder() : [];
 
-    // Poll every 3 seconds as safety net (only if authenticated)
-    const interval = userId ? window.setInterval(() => checkPendingOffers(99), 3000) : 0;
+    // Poll every 3 seconds as safety net — start immediately if authenticated,
+    // otherwise the onAuthStateChange SIGNED_IN handler will start it.
+    let intervalId = userId ? window.setInterval(() => checkPendingOffers(99), 3000) : 0;
+    const ensurePolling = () => {
+      if (!intervalId) {
+        console.log('[Recovery] ▶️ Starting 3s polling interval (auth just arrived)');
+        intervalId = window.setInterval(() => checkPendingOffers(99), 3000);
+      }
+    };
 
     // Listen for global store updates (push click while already mounted)
     const unsubGlobal = onPendingRide(async (rideId) => {
@@ -613,10 +620,17 @@ const DriverDashboard = () => {
     const resetAndRetry = (source: string) => {
       console.log(`[Recovery] 👁️ ${source} — clearing ALL stale state, force-refreshing session + retrying GPS + running retry ladder`);
       setRecoveredCountdown(null);
-      // Force-clear the "already processed" guards so we check with fresh eyes
-      currentRideRef.current = null;
+      // Force-clear BOTH refs AND state so useEffect sync doesn't overwrite back
       newRideAlertOpenRef.current = false;
       newRideAlertRideIdRef.current = null;
+      setNewRideAlertOpen(false);
+      setNewRideAlertRideId(null);
+      setCachedAlertRide(null);
+      // NOTE: Do NOT clear currentRideRef if there's an active ride in progress
+      // Only clear if there's no state-level ride (prevents wiping a live trip)
+      if (!currentRide) {
+        currentRideRef.current = null;
+      }
       supabase.auth.refreshSession().catch(() => {});
       retryGeolocation();
       runLadder();
@@ -635,7 +649,8 @@ const DriverDashboard = () => {
       if (cancelled) return;
       console.log(`[Recovery] 🔐 Auth state changed: ${_event}, Session: ${newSession ? 'present' : 'null'}`);
       if (_event === 'SIGNED_IN' && newSession) {
-        console.log('[Recovery] ✅ SIGNED_IN detected — running retry ladder');
+        console.log('[Recovery] ✅ SIGNED_IN detected — running retry ladder + ensuring polling');
+        ensurePolling();
         runLadder();
       }
       if (_event === 'TOKEN_REFRESHED' && newSession) {
@@ -651,7 +666,7 @@ const DriverDashboard = () => {
     return () => {
       cancelled = true;
       initialTimers.forEach(clearTimeout);
-      if (interval) window.clearInterval(interval);
+      if (intervalId) window.clearInterval(intervalId);
       unsubGlobal();
       authListener?.subscription?.unsubscribe();
       document.removeEventListener('visibilitychange', handleResume);
@@ -1288,9 +1303,12 @@ const DriverDashboard = () => {
   // Shared cleanup function for accept/decline/timeout
   const cleanupOffer = (markRead: boolean = true) => {
     const rideId = newRideAlertRideId;
+    // Clear BOTH state AND refs immediately to prevent race conditions
     setNewRideAlertOpen(false);
     setCachedAlertRide(null);
     setNewRideAlertRideId(null);
+    newRideAlertOpenRef.current = false;
+    newRideAlertRideIdRef.current = null;
     alertStartTimeRef.current = null;
     setRecoveredCountdown(null);
     if (markRead && rideId && user) {
