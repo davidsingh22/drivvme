@@ -416,17 +416,12 @@ const DriverDashboard = () => {
   // IMPORTANT: NOT gated on isOnline — driver may tap push before toggling online.
   // Uses session?.user?.id as primary (hydrates before useAuth's user), falls back to user?.id.
   useEffect(() => {
+    // AUTH-GATE: Do NOT return early when userId is null.
+    // We mount the effect unconditionally so the onAuthStateChange listener
+    // can fire and trigger recovery once the session hydrates (cold start fix).
     const userId = session?.user?.id || user?.id;
     if (!userId) {
-      // Even without a userId, check localStorage for a pending signal
-      // (the retry ladder will re-run when session hydrates thanks to the dependency array)
-      try {
-        const lsRideId = localStorage.getItem('pendingRideFromPush');
-        if (lsRideId) {
-          console.log('[Recovery] 🔑 No session yet but found localStorage signal:', lsRideId, '— will retry when auth hydrates');
-        }
-      } catch { /* ignore */ }
-      return;
+      console.log('[Recovery] ⏳ No userId yet — mounting auth listener to wait for SIGNED_IN');
     }
     let cancelled = false;
 
@@ -495,31 +490,27 @@ const DriverDashboard = () => {
           }
         } catch { /* ignore localStorage errors */ }
 
-        // STEP 1: Force session refresh to combat mobile throttling
+        // AUTH-GATE: Force session refresh, but HARD-STOP if no session available.
+        // This prevents querying with a null user_id which returns zero results.
         let activeSession: any = null;
         try {
           const { data: { session: freshSession } } = await supabase.auth.getSession();
           activeSession = freshSession;
-          console.log(`[Recovery] Checking for ride. Auth Status: ${freshSession ? 'Authenticated (uid: ' + freshSession.user?.id + ')' : 'No Session'} (attempt ${attempt})`);
           if (!freshSession) {
-            console.log(`[Recovery] (attempt ${attempt}) No active session, refreshing…`);
+            console.log(`[Recovery] (attempt ${attempt}) ⚠️ Auth Status: No Session — attempting refresh…`);
             const { data: refreshed } = await supabase.auth.refreshSession();
             activeSession = refreshed?.session;
-            if (!activeSession) {
-              console.log(`[Recovery] ❌ (attempt ${attempt}) Session refresh failed, will retry`);
-              return; // Don't abort — next retry in the ladder may succeed
-            }
-            console.log(`[Recovery] (attempt ${attempt}) ✅ Session refreshed successfully`);
           }
         } catch (e) {
           console.warn(`[Recovery] (attempt ${attempt}) Session check error:`, e);
-          return; // Will retry on next ladder step
         }
 
-        // Use the session's user id (more reliable than the React state which may be stale)
-        const effectiveUserId = activeSession?.user?.id || userId;
+        const effectiveUserId = activeSession?.user?.id;
+        console.log(`[Recovery] Checking for ride. Auth Status: ${effectiveUserId ? 'Authenticated (uid: ' + effectiveUserId + ')' : 'No Session'} (attempt ${attempt})`);
+
+        // HARD AUTH-GATE: Do not query the database without a valid user ID.
         if (!effectiveUserId) {
-          console.log(`[Recovery] (attempt ${attempt}) ❌ No user ID available yet, will retry`);
+          console.log(`[Recovery] ❌ (attempt ${attempt}) No authenticated user — skipping DB query, will retry on next ladder step or SIGNED_IN event`);
           return;
         }
 
@@ -586,19 +577,20 @@ const DriverDashboard = () => {
       }
     };
 
-    // ===== RETRY LADDER: 100ms, 1500ms, 4000ms =====
-    console.log('[Recovery] 🚀 Effect mounted for user:', userId);
+    // ===== RETRY LADDER: 0s, 2s, 5s =====
+    console.log('[Recovery] 🚀 Effect mounted. userId:', userId || '(pending auth)');
     const runLadder = () => {
-      const t0 = setTimeout(() => checkPendingOffers(0), 100);
-      const t1 = setTimeout(() => checkPendingOffers(1), 1500);
-      const t2 = setTimeout(() => checkPendingOffers(2), 4000);
+      const t0 = setTimeout(() => checkPendingOffers(0), 0);
+      const t1 = setTimeout(() => checkPendingOffers(1), 2000);
+      const t2 = setTimeout(() => checkPendingOffers(2), 5000);
       return [t0, t1, t2];
     };
 
-    const initialTimers = runLadder();
+    // Only run initial ladder if we already have a userId
+    const initialTimers = userId ? runLadder() : [];
 
-    // Poll every 3 seconds as safety net
-    const interval = window.setInterval(() => checkPendingOffers(99), 3000);
+    // Poll every 3 seconds as safety net (only if authenticated)
+    const interval = userId ? window.setInterval(() => checkPendingOffers(99), 3000) : 0;
 
     // Listen for global store updates (push click while already mounted)
     const unsubGlobal = onPendingRide(async (rideId) => {
@@ -606,20 +598,25 @@ const DriverDashboard = () => {
       await showOfferForRide(rideId);
     });
 
+    // Force-clear stale state and re-check on app resume
     const handleResume = () => {
       if (document.visibilityState === 'visible' || !document.hidden) {
-        console.log('[Recovery] 👁️ App resumed — force-refreshing session + running retry ladder');
+        console.log('[Recovery] 👁️ App resumed — clearing stale state, force-refreshing session + running retry ladder');
+        // Force-clear any "failed" state so we start fresh
+        setRecoveredCountdown(null);
         supabase.auth.refreshSession().catch(() => {});
         runLadder();
       }
     };
     const handleFocus = () => {
       console.log('[Recovery] 👁️ Window focused — force-refreshing session + running retry ladder');
+      setRecoveredCountdown(null);
       supabase.auth.refreshSession().catch(() => {});
       runLadder();
     };
     const handlePageShow = () => {
       console.log('[Recovery] 👁️ pageshow fired — force-refreshing session + running retry ladder');
+      setRecoveredCountdown(null);
       supabase.auth.refreshSession().catch(() => {});
       runLadder();
     };
@@ -645,7 +642,7 @@ const DriverDashboard = () => {
     return () => {
       cancelled = true;
       initialTimers.forEach(clearTimeout);
-      window.clearInterval(interval);
+      if (interval) window.clearInterval(interval);
       unsubGlobal();
       authListener?.subscription?.unsubscribe();
       document.removeEventListener('visibilitychange', handleResume);
