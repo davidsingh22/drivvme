@@ -323,12 +323,12 @@ serve(async (req) => {
       }
     }
 
-    // Tier configuration — expanding radius, small batch dispatch
+    // Tier configuration — closest-driver-first: only 1 driver per tier
     const tierConfig = {
-      1: { maxDistanceKm: 3, maxEta: 10, maxDrivers: 2, description: "3km radius, max 2 drivers" },
-      2: { maxDistanceKm: 5, maxEta: 15, maxDrivers: 3, description: "5km radius, max 3 drivers" },
-      3: { maxDistanceKm: 8, maxEta: 20, maxDrivers: 3, description: "8km radius, max 3 drivers" },
-      4: { maxDistanceKm: 12, maxEta: 30, maxDrivers: 3, description: "12km radius, max 3 drivers" },
+      1: { maxDistanceKm: 3, maxEta: 10, maxDrivers: 1, description: "3km radius, closest driver" },
+      2: { maxDistanceKm: 5, maxEta: 15, maxDrivers: 1, description: "5km radius, next closest" },
+      3: { maxDistanceKm: 8, maxEta: 20, maxDrivers: 1, description: "8km radius, next closest" },
+      4: { maxDistanceKm: 12, maxEta: 30, maxDrivers: 1, description: "12km radius, next closest" },
     };
 
     const config = tierConfig[tier as keyof typeof tierConfig] || tierConfig[1];
