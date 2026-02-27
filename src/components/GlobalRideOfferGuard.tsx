@@ -90,6 +90,8 @@ export function GlobalRideOfferGuard() {
   const foregroundListenerRef = useRef(false);
   const fetchCancelRef = useRef<(() => void) | null>(null);
   const prevRideIdRef = useRef<string | null>(rideId);
+  const openRef = useRef(false); // tracks `open` without stale closures
+  const dismissedRidesRef = useRef<Set<string>>(new Set()); // prevents re-triggering dismissed rides
 
   useEffect(() => {
     mountedRef.current = true;
@@ -108,7 +110,8 @@ export function GlobalRideOfferGuard() {
   /** Core handler: receives a new ride_id from ANY source */
   const handleNewRide = useCallback((id: string) => {
     if (!mountedRef.current) return;
-    if (id === lastHandledRef.current && open) return; // same ride, already showing
+    if (dismissedRidesRef.current.has(id)) return; // Already dismissed — don't re-trigger
+    if (id === lastHandledRef.current && openRef.current) return; // same ride, already showing
     
     console.log('[GlobalGuard] 🆕 New ride event:', id);
     lastHandledRef.current = id;
@@ -123,7 +126,8 @@ export function GlobalRideOfferGuard() {
     setRide(null);
     setRideId(id);
     setOpen(true);
-  }, [open]);
+    openRef.current = true;
+  }, []);
 
   // === PERSISTENT LISTENERS ===
   useEffect(() => {
@@ -181,7 +185,7 @@ export function GlobalRideOfferGuard() {
     const startHeartbeat = () => {
       if (heartbeatTimer) return;
       heartbeatTimer = setInterval(async () => {
-        if (!mountedRef.current || open) return; // Don't poll if modal already showing
+        if (!mountedRef.current || openRef.current) return; // Don't poll if modal already showing
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (!session?.user?.id) return;
@@ -195,9 +199,10 @@ export function GlobalRideOfferGuard() {
             .order('created_at', { ascending: false })
             .limit(1);
 
-          if (unread?.[0]?.ride_id) {
-            console.log('[GlobalGuard] 💓 Heartbeat found ride:', unread[0].ride_id);
-            handleNewRide(unread[0].ride_id);
+          const foundId = unread?.[0]?.ride_id;
+          if (foundId && !dismissedRidesRef.current.has(foundId)) {
+            console.log('[GlobalGuard] 💓 Heartbeat found ride:', foundId);
+            handleNewRide(foundId);
           }
         } catch {}
       }, 5000);
@@ -217,7 +222,7 @@ export function GlobalRideOfferGuard() {
       window.removeEventListener('focus', handleVisibility);
       subscription.unsubscribe();
     };
-  }, [handleNewRide, open]);
+  }, [handleNewRide]);
 
   // === ASYNC DATA ENRICHMENT — validates ride before showing modal ===
   useEffect(() => {
@@ -308,13 +313,32 @@ export function GlobalRideOfferGuard() {
   }, [rideId]);
 
   const cleanup = useCallback(() => {
+    // Remember this ride so heartbeat doesn't re-trigger it
+    if (rideId) dismissedRidesRef.current.add(rideId);
+    
+    // Mark notification as read to stop heartbeat from re-finding it
+    const dismissedId = rideId;
+    if (dismissedId) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user?.id) {
+          supabase.from('notifications')
+            .update({ is_read: true })
+            .eq('ride_id', dismissedId)
+            .eq('user_id', session.user.id)
+            .eq('type', 'new_ride')
+            .then(() => {});
+        }
+      });
+    }
+
     clearAllRideMemory();
     setOpen(false);
+    openRef.current = false;
     setRide(null);
     setRideId(null);
     lastHandledRef.current = null;
     fetchCancelRef.current = null;
-  }, []);
+  }, [rideId]);
 
   const handleAccept = useCallback(async () => {
     const targetId = rideId;
