@@ -144,11 +144,11 @@ export function RideOfferModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[99999] flex items-start justify-center p-2 pt-16 pb-4 overflow-y-auto"
+          className="fixed inset-0 flex items-start justify-center p-2 pt-16 pb-4 overflow-y-auto"
+          style={{ zIndex: 2147483647, pointerEvents: 'none' }}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          style={{ pointerEvents: 'none' }}
         >
           {/* Backdrop — blocks background taps */}
           <div
