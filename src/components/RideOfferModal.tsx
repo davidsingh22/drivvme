@@ -144,7 +144,7 @@ export function RideOfferModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-[9999] flex items-start justify-center p-2 pt-16 pb-4 overflow-y-auto"
+          className="fixed inset-0 z-[99999] flex items-start justify-center p-2 pt-16 pb-4 overflow-y-auto"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
