@@ -373,35 +373,29 @@ export function GlobalRideOfferGuard() {
   }, [rideId, cleanup]);
 
   // === RENDER ===
-  if (!rideId && !open) return null;
-
-  // Only show the modal when we have REAL ride data — never show backdrop with placeholder
+  // DriverBeepFix is always rendered (no visual output) so audio works instantly.
+  // RideOfferModal is ONLY rendered when we have confirmed ride data — 
+  // this prevents the black backdrop from ever appearing without content.
   const hasRealData = !!ride;
   const modalOpen = open && hasRealData;
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 2147483647,
-        isolation: 'isolate',
-        pointerEvents: 'none',
-      }}
-    >
+    <>
       <DriverBeepFix
         incomingRide={open && rideId ? { id: rideId } : null}
         onTimeout={handleDecline}
         timeoutSeconds={25}
       />
-      <RideOfferModal
-        open={modalOpen}
-        ride={ride}
-        countdownSeconds={25}
-        driverLocation={null}
-        onDecline={handleDecline}
-        onAccept={handleAccept}
-      />
-    </div>
+      {modalOpen && (
+        <RideOfferModal
+          open={true}
+          ride={ride}
+          countdownSeconds={25}
+          driverLocation={null}
+          onDecline={handleDecline}
+          onAccept={handleAccept}
+        />
+      )}
+    </>
   );
 }
