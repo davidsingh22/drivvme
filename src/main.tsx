@@ -10,10 +10,19 @@ try {
   const pendingRide = localStorage.getItem('pendingRideFromPush') || localStorage.getItem('last_notified_ride');
   if (pendingRide) {
     console.log('[FastPath] 🚀 Found pending_ride from notification tap:', pendingRide);
-    // Keep it in localStorage — GlobalRideOfferGuard will consume it on mount.
     (window as any).__FAST_PATH_RIDE_ID = pendingRide;
-    // Also inject into global store so it's available immediately
     setPendingRideFromNotification(pendingRide);
+
+    // Pre-warm: fetch ride data NOW, before React even mounts
+    import('@/integrations/supabase/client').then(({ supabase }) => {
+      supabase.from('rides')
+        .select('id, pickup_address, dropoff_address, estimated_fare, distance_km, estimated_duration_minutes, pickup_lat, pickup_lng, status')
+        .eq('id', pendingRide)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) (window as any).__PREFETCHED_RIDE = data;
+        });
+    });
   }
 } catch { /* ignore */ }
 
