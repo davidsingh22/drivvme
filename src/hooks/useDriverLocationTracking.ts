@@ -15,6 +15,7 @@ export function useDriverLocationTracking({
   updateIntervalMs = 4000
 }: UseDriverLocationTrackingOptions) {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const errorSuppressedUntilRef = useRef<number>(0);
   const [isTracking, setIsTracking] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -74,6 +75,11 @@ export function useDriverLocationTracking({
       },
       (error) => {
         console.error('[DriverLocationTracking] Geolocation error:', error.code, error.message);
+        // Don't re-set error during grace period (after resetLocationError was called)
+        if (Date.now() < errorSuppressedUntilRef.current) {
+          console.log('[DriverLocationTracking] Error suppressed during grace period');
+          return;
+        }
         setLocationError(error.message);
         
         if (error.code === 1) {
@@ -152,6 +158,8 @@ export function useDriverLocationTracking({
   // Allow external callers (e.g. resume handler) to clear stale errors
   const resetLocationError = useCallback(() => {
     setLocationError(null);
+    // Suppress errors for 15 seconds so the interval doesn't immediately re-set them
+    errorSuppressedUntilRef.current = Date.now() + 15000;
     // Re-query permission status so UI updates if user granted in Settings
     if ('permissions' in navigator) {
       navigator.permissions.query({ name: 'geolocation' }).then((result) => {
