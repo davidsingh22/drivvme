@@ -80,7 +80,8 @@ export function GlobalRideOfferGuard() {
   });
 
   const [ride, setRide] = useState<RideSummary | null>(null);
-  const [open, setOpen] = useState<boolean>(() => !!readPendingRideId());
+  // Don't auto-open on mount — wait for validation first
+  const [open, setOpen] = useState<boolean>(false);
 
   // State-buster key: forces full re-mount of modal when rideId changes
   const [mountKey, setMountKey] = useState(0);
@@ -218,7 +219,7 @@ export function GlobalRideOfferGuard() {
     };
   }, [handleNewRide, open]);
 
-  // === ASYNC DATA ENRICHMENT — does NOT block modal display ===
+  // === ASYNC DATA ENRICHMENT — validates ride before showing modal ===
   useEffect(() => {
     if (!rideId) return;
 
@@ -226,7 +227,7 @@ export function GlobalRideOfferGuard() {
     fetchCancelRef.current = () => { cancelled = true; };
 
     let attempts = 0;
-    const MAX_ATTEMPTS = 20;
+    const MAX_ATTEMPTS = 10;
 
     const tryFetch = async () => {
       if (cancelled) return;
@@ -247,12 +248,18 @@ export function GlobalRideOfferGuard() {
           .from('rides')
           .select('id, pickup_address, dropoff_address, estimated_fare, distance_km, estimated_duration_minutes, pickup_lat, pickup_lng, status, requested_at, created_at')
           .eq('id', rideId)
-          .eq('status', 'searching')
           .maybeSingle();
 
         if (cancelled) return;
 
-        if (data) {
+        // If ride exists but is NOT searching, it's stale — clear immediately
+        if (data && data.status !== 'searching') {
+          console.log('[GlobalGuard] ⏭️ Ride not searching (status:', data.status, ') — clearing');
+          cleanup();
+          return;
+        }
+
+        if (data && data.status === 'searching') {
           const age = (Date.now() - new Date(data.requested_at || data.created_at).getTime()) / 1000;
           if (age > 90) {
             console.log('[GlobalGuard] ⏰ Ride too old:', Math.round(age), 's');
@@ -260,7 +267,7 @@ export function GlobalRideOfferGuard() {
             return;
           }
 
-          console.log('[GlobalGuard] ✅ Ride enriched on attempt', attempts);
+          console.log('[GlobalGuard] ✅ Ride validated on attempt', attempts);
           setRide({
             id: data.id,
             pickup_address: data.pickup_address,
@@ -271,7 +278,14 @@ export function GlobalRideOfferGuard() {
             pickup_lat: data.pickup_lat ?? undefined,
             pickup_lng: data.pickup_lng ?? undefined,
           });
+          setOpen(true); // Only open AFTER validation
           return;
+        }
+
+        // Ride not found yet — could be replication lag on first few attempts
+        if (!data && attempts === 1) {
+          // On first attempt, open modal optimistically (fast-path for push wakeup)
+          setOpen(true);
         }
 
         if (error) {
