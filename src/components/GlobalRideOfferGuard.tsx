@@ -80,8 +80,7 @@ export function GlobalRideOfferGuard() {
   });
 
   const [ride, setRide] = useState<RideSummary | null>(null);
-  // Don't auto-open on mount from stale localStorage — wait for data validation
-  const [open, setOpen] = useState<boolean>(false);
+  const [open, setOpen] = useState<boolean>(() => !!readPendingRideId());
 
   const lastHandledRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -155,45 +154,11 @@ export function GlobalRideOfferGuard() {
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleVisibility);
 
-    // Source 5: Auth state — re-check on SIGNED_IN + start Realtime
-    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    // Source 5: Auth state — re-check on SIGNED_IN
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' && mountedRef.current) {
         const id = readPendingRideId();
         if (id) handleNewRide(id);
-      }
-
-      // Source 6: Supabase Realtime on notifications table — MOST RELIABLE for "app open"
-      const uid = session?.user?.id;
-      if (uid && !realtimeChannel) {
-        realtimeChannel = supabase
-          .channel('global-ride-guard')
-          .on(
-            'postgres_changes',
-            {
-              event: 'INSERT',
-              schema: 'public',
-              table: 'notifications',
-              filter: `type=eq.new_ride`,
-            },
-            (payload: any) => {
-              const row = payload.new;
-              if (row?.user_id === uid && row?.ride_id) {
-                console.log('[GlobalGuard] 🔔 Realtime new_ride notification:', row.ride_id);
-                forceInjectRide(row.ride_id);
-                handleNewRide(row.ride_id);
-                broadcastNewRide(row.ride_id);
-              }
-            }
-          )
-          .subscribe();
-        console.log('[GlobalGuard] ✅ Realtime listener subscribed');
-      }
-
-      if (!uid && realtimeChannel) {
-        supabase.removeChannel(realtimeChannel);
-        realtimeChannel = null;
       }
     });
 
@@ -206,7 +171,6 @@ export function GlobalRideOfferGuard() {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
       subscription.unsubscribe();
-      if (realtimeChannel) supabase.removeChannel(realtimeChannel);
     };
   }, [handleNewRide]);
 
@@ -218,7 +182,7 @@ export function GlobalRideOfferGuard() {
     fetchCancelRef.current = () => { cancelled = true; };
 
     let attempts = 0;
-    const MAX_ATTEMPTS = 5;
+    const MAX_ATTEMPTS = 20;
 
     const tryFetch = async () => {
       if (cancelled) return;
@@ -373,29 +337,50 @@ export function GlobalRideOfferGuard() {
   }, [rideId, cleanup]);
 
   // === RENDER ===
-  // DriverBeepFix is always rendered (no visual output) so audio works instantly.
-  // RideOfferModal is ONLY rendered when we have confirmed ride data — 
-  // this prevents the black backdrop from ever appearing without content.
-  const hasRealData = !!ride;
-  const modalOpen = open && hasRealData;
+  if (!rideId && !open) return null;
+
+  const displayRide = ride || (rideId ? {
+    id: rideId,
+    pickup_address: 'Loading pickup…',
+    dropoff_address: 'Loading destination…',
+    estimated_fare: 0,
+  } : null);
 
   return (
-    <>
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 2147483647,
+        isolation: 'isolate',
+        pointerEvents: 'none',
+      }}
+    >
+      {/* Dark backdrop while data loads */}
+      {open && !ride && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.92)',
+            zIndex: 2147483646,
+            pointerEvents: 'auto',
+          }}
+        />
+      )}
       <DriverBeepFix
-        incomingRide={open && rideId ? { id: rideId } : null}
+        incomingRide={open && displayRide ? { id: displayRide.id } : null}
         onTimeout={handleDecline}
         timeoutSeconds={25}
       />
-      {modalOpen && (
-        <RideOfferModal
-          open={true}
-          ride={ride}
-          countdownSeconds={25}
-          driverLocation={null}
-          onDecline={handleDecline}
-          onAccept={handleAccept}
-        />
-      )}
-    </>
+      <RideOfferModal
+        open={open}
+        ride={displayRide}
+        countdownSeconds={25}
+        driverLocation={null}
+        onDecline={handleDecline}
+        onAccept={handleAccept}
+      />
+    </div>
   );
 }
