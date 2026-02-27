@@ -186,6 +186,44 @@ export function GlobalRideOfferGuard() {
       }
     });
 
+    // Source 8: Supabase Realtime — listen for new_ride notifications inserted for this driver
+    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+
+    const setupRealtime = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id;
+        if (!userId || !mountedRef.current) return;
+
+        realtimeChannel = supabase
+          .channel('global-guard-rides')
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'notifications',
+              filter: `user_id=eq.${userId}`,
+            },
+            (payload: any) => {
+              if (!mountedRef.current) return;
+              const row = payload.new;
+              if (row?.type === 'new_ride' && row?.ride_id) {
+                console.log('[GlobalGuard] 📡 Realtime notification INSERT:', row.ride_id);
+                handleNewRide(row.ride_id);
+              }
+            }
+          )
+          .subscribe((status) => {
+            console.log('[GlobalGuard] 📡 Realtime channel status:', status);
+          });
+      } catch (e) {
+        console.log('[GlobalGuard] Realtime setup error:', e);
+      }
+    };
+
+    setupRealtime();
+
     return () => {
       unsub1();
       unsub2();
@@ -197,6 +235,7 @@ export function GlobalRideOfferGuard() {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
       subscription.unsubscribe();
+      if (realtimeChannel) supabase.removeChannel(realtimeChannel);
     };
   }, [handleNewRide]);
 
