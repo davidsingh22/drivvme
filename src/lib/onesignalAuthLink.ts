@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { setPendingRideFromNotification } from "@/lib/pendingRideStore";
 
 let lastExternalId: string | null = null;
 
@@ -51,6 +52,8 @@ export function initOneSignalAuthLink() {
               const data = event?.notification?.additionalData || event?.result?.notification?.additionalData || {};
               console.log("🔔 OneSignal notification clicked, data:", data);
               if (data.ride_id) {
+                // Store the ride_id globally BEFORE navigating so DriverDashboard can pick it up
+                setPendingRideFromNotification(data.ride_id);
                 // Route drivers to /driver, riders to /ride
                 const lastRoute = localStorage.getItem('last_route');
                 window.location.href = lastRoute === '/driver' ? '/driver' : '/ride';
