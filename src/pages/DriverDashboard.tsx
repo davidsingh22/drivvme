@@ -1442,8 +1442,8 @@ const DriverDashboard = () => {
           
           {/* Content container - relative to appear above background */}
           <div className="relative z-10 flex flex-col flex-1 overflow-hidden">
-            {/* Banner stack — completely hidden during active ride ("Clean Slate" navigation mode) */}
-            <div className="pt-4" style={currentRide ? { display: 'none' } : undefined}>
+            {/* Banner stack — completely hidden during active ride or ride offer ("Clean Slate" mode) */}
+            <div className="pt-4" style={(currentRide || newRideAlertOpen) ? { display: 'none' } : undefined}>
               <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
               
               {/* GPS Status Indicator */}
