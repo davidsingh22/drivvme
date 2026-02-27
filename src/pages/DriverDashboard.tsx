@@ -599,25 +599,38 @@ const DriverDashboard = () => {
     });
 
     // Force-clear stale state and re-check on app resume
+    // Auto-retry GPS on resume to clear stale "GPS Permission Denied" banners
+    const retryGeolocation = () => {
+      try {
+        navigator.geolocation?.getCurrentPosition(
+          () => console.log('[Recovery] 📍 GPS re-acquired on resume'),
+          (err) => console.log('[Recovery] 📍 GPS retry error on resume:', err.code),
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+        );
+      } catch { /* ignore */ }
+    };
+
     const handleResume = () => {
       if (document.visibilityState === 'visible' || !document.hidden) {
-        console.log('[Recovery] 👁️ App resumed — clearing stale state, force-refreshing session + running retry ladder');
-        // Force-clear any "failed" state so we start fresh
+        console.log('[Recovery] 👁️ App resumed — clearing stale state, force-refreshing session + retrying GPS + running retry ladder');
         setRecoveredCountdown(null);
         supabase.auth.refreshSession().catch(() => {});
+        retryGeolocation();
         runLadder();
       }
     };
     const handleFocus = () => {
-      console.log('[Recovery] 👁️ Window focused — force-refreshing session + running retry ladder');
+      console.log('[Recovery] 👁️ Window focused — force-refreshing session + retrying GPS + running retry ladder');
       setRecoveredCountdown(null);
       supabase.auth.refreshSession().catch(() => {});
+      retryGeolocation();
       runLadder();
     };
     const handlePageShow = () => {
-      console.log('[Recovery] 👁️ pageshow fired — force-refreshing session + running retry ladder');
+      console.log('[Recovery] 👁️ pageshow fired — force-refreshing session + retrying GPS + running retry ladder');
       setRecoveredCountdown(null);
       supabase.auth.refreshSession().catch(() => {});
+      retryGeolocation();
       runLadder();
     };
 
@@ -1297,8 +1310,10 @@ const DriverDashboard = () => {
 
   // CRITICAL: RideOfferModal + DriverBeepFix are rendered ONCE here, above all early returns,
   // so they are always mounted regardless of loading/reconnecting state.
+  // Wrapped in a fixed container with z-[99999] and pointer-events:auto so it floats above
+  // any "Reconnecting", "GPS Denied", or loading overlays.
   const globalModalLayer = (
-    <>
+    <div className="fixed inset-0 z-[99999] pointer-events-none" style={{ isolation: 'isolate' }}>
       <DriverBeepFix
         incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
         onTimeout={() => cleanupOffer(true)}
@@ -1315,7 +1330,7 @@ const DriverDashboard = () => {
           if (cachedAlertRide) acceptRide(cachedAlertRide);
         }}
       />
-    </>
+    </div>
   );
 
   // Loading states: never redirect while we are still restoring session/profile on iOS.
