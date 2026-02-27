@@ -463,6 +463,8 @@ const DriverDashboard = () => {
       setCachedAlertRide(ride);
       setNewRideAlertRideId(ride.id);
       setNewRideAlertOpen(true);
+      // Auto-dismiss reconnecting overlay so the modal is visible immediately
+      setShowReconnect(false);
       alertStartTimeRef.current = Date.now() - (notifAge * 1000);
       return true;
     };
@@ -606,18 +608,35 @@ const DriverDashboard = () => {
 
     const handleResume = () => {
       if (document.visibilityState === 'visible' || !document.hidden) {
-        console.log('[Recovery] 👁️ App resumed — running retry ladder');
+        console.log('[Recovery] 👁️ App resumed — force-refreshing session + running retry ladder');
+        supabase.auth.refreshSession().catch(() => {});
         runLadder();
       }
     };
     const handleFocus = () => {
-      console.log('[Recovery] 👁️ Window focused — running retry ladder');
+      console.log('[Recovery] 👁️ Window focused — force-refreshing session + running retry ladder');
+      supabase.auth.refreshSession().catch(() => {});
       runLadder();
     };
     const handlePageShow = () => {
-      console.log('[Recovery] 👁️ pageshow fired — running retry ladder');
+      console.log('[Recovery] 👁️ pageshow fired — force-refreshing session + running retry ladder');
+      supabase.auth.refreshSession().catch(() => {});
       runLadder();
     };
+
+    // Post-reconnection check: when auth transitions to SIGNED_IN, immediately check for rides
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      if (cancelled) return;
+      console.log(`[Recovery] 🔐 Auth state changed: ${_event}, Session: ${newSession ? 'present' : 'null'}`);
+      if (_event === 'SIGNED_IN' && newSession) {
+        console.log('[Recovery] ✅ SIGNED_IN detected — running retry ladder');
+        runLadder();
+      }
+      if (_event === 'TOKEN_REFRESHED' && newSession) {
+        console.log('[Recovery] 🔄 TOKEN_REFRESHED — running single check');
+        checkPendingOffers(50);
+      }
+    });
 
     document.addEventListener('visibilitychange', handleResume);
     window.addEventListener('focus', handleFocus);
@@ -628,6 +647,7 @@ const DriverDashboard = () => {
       initialTimers.forEach(clearTimeout);
       window.clearInterval(interval);
       unsubGlobal();
+      authListener?.subscription?.unsubscribe();
       document.removeEventListener('visibilitychange', handleResume);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pageshow', handlePageShow);
@@ -705,6 +725,7 @@ const DriverDashboard = () => {
             setCachedAlertRide(ride);
             setNewRideAlertRideId(ride.id);
             setNewRideAlertOpen(true);
+            setShowReconnect(false); // Auto-dismiss reconnecting overlay
             setRecoveredCountdown(null); // fresh offer = full countdown
             alertStartTimeRef.current = Date.now();
 
