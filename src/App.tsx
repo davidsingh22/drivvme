@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
+import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
@@ -276,6 +277,7 @@ const App = () => {
       <LanguageProvider>
         <AuthProvider>
           <TooltipProvider>
+            <GlobalRideOfferGuard />
             <Toaster />
             <Sonner />
             <BrowserRouter>

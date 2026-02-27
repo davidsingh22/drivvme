@@ -595,13 +595,14 @@ const DriverDashboard = () => {
       }
     };
 
-    // ===== RETRY LADDER: 0s, 2s, 5s =====
+    // ===== RETRY LADDER: 500ms intervals for first 5s (10 attempts) =====
     console.log('[Recovery] 🚀 Effect mounted. userId:', userId || '(pending auth)');
     const runLadder = () => {
-      const t0 = setTimeout(() => checkPendingOffers(0), 0);
-      const t1 = setTimeout(() => checkPendingOffers(1), 2000);
-      const t2 = setTimeout(() => checkPendingOffers(2), 5000);
-      return [t0, t1, t2];
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      for (let i = 0; i < 10; i++) {
+        timers.push(setTimeout(() => checkPendingOffers(i), i * 500));
+      }
+      return timers;
     };
 
     // Only run initial ladder if we already have a userId
