@@ -82,15 +82,27 @@ export function GlobalRideOfferGuard() {
   const [ride, setRide] = useState<RideSummary | null>(null);
   const [open, setOpen] = useState<boolean>(() => !!readPendingRideId());
 
+  // State-buster key: forces full re-mount of modal when rideId changes
+  const [mountKey, setMountKey] = useState(0);
   const lastHandledRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const foregroundListenerRef = useRef(false);
   const fetchCancelRef = useRef<(() => void) | null>(null);
+  const prevRideIdRef = useRef<string | null>(rideId);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+
+  // State-buster: if rideId changes, bump mountKey to force modal re-mount
+  useEffect(() => {
+    if (rideId && rideId !== prevRideIdRef.current) {
+      console.log('[GlobalGuard] 🔄 State-buster: rideId changed', prevRideIdRef.current, '→', rideId);
+      setMountKey(k => k + 1);
+    }
+    prevRideIdRef.current = rideId;
+  }, [rideId]);
 
   /** Core handler: receives a new ride_id from ANY source */
   const handleNewRide = useCallback((id: string) => {
@@ -369,11 +381,13 @@ export function GlobalRideOfferGuard() {
         />
       )}
       <DriverBeepFix
+        key={`beep-${mountKey}`}
         incomingRide={open && displayRide ? { id: displayRide.id } : null}
         onTimeout={handleDecline}
         timeoutSeconds={25}
       />
       <RideOfferModal
+        key={`modal-${mountKey}`}
         open={open}
         ride={displayRide}
         countdownSeconds={25}
