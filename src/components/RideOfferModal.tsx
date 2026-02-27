@@ -112,6 +112,9 @@ export function RideOfferModal({
 
   if (!ride) return null;
 
+  // Log when modal JSX is actually mounted/rendered (not just state set)
+  console.log('[RideOfferModal] JSX rendered — open:', open, 'ride:', ride?.id);
+
   const handleAccept = () => {
     if (tapGuardRef.current) return;
     tapGuardRef.current = true;
@@ -138,14 +141,19 @@ export function RideOfferModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-start justify-center p-2 pt-16 pb-4 overflow-y-auto"
+          className="fixed inset-0 z-[9999] flex items-start justify-center p-2 pt-16 pb-4 overflow-y-auto"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           style={{ pointerEvents: 'none' }}
         >
-          {/* Backdrop — fully non-interactive */}
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-xl" style={{ pointerEvents: 'none' }} />
+          {/* Backdrop — blocks background taps */}
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-xl"
+            style={{ pointerEvents: 'auto' }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          />
 
           <motion.div
             initial={{ y: 50, scale: 0.9, opacity: 0 }}
