@@ -375,12 +375,9 @@ export function GlobalRideOfferGuard() {
   // === RENDER ===
   if (!rideId && !open) return null;
 
-  const displayRide = ride || (rideId ? {
-    id: rideId,
-    pickup_address: 'Loading pickup…',
-    dropoff_address: 'Loading destination…',
-    estimated_fare: 0,
-  } : null);
+  // Only show the modal when we have REAL ride data — never show backdrop with placeholder
+  const hasRealData = !!ride;
+  const modalOpen = open && hasRealData;
 
   return (
     <div
@@ -393,13 +390,13 @@ export function GlobalRideOfferGuard() {
       }}
     >
       <DriverBeepFix
-        incomingRide={open && displayRide ? { id: displayRide.id } : null}
+        incomingRide={open && rideId ? { id: rideId } : null}
         onTimeout={handleDecline}
         timeoutSeconds={25}
       />
       <RideOfferModal
-        open={open}
-        ride={displayRide}
+        open={modalOpen}
+        ride={ride}
         countdownSeconds={25}
         driverLocation={null}
         onDecline={handleDecline}
