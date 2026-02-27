@@ -1452,12 +1452,14 @@ const DriverDashboard = () => {
                 />
               )}
               
-              {/* GPS Error Banner - Show when location fails */}
-              <DriverGPSErrorBanner 
-                error={gpsError} 
-                retryCount={gpsRetryCount} 
-                onRetry={retryGPS} 
-              />
+              {/* GPS Error Banner - Show when location fails, but hide during ride offer or active ride */}
+              {!newRideAlertOpen && !currentRide && (
+                <DriverGPSErrorBanner 
+                  error={gpsError} 
+                  retryCount={gpsRetryCount} 
+                  onRetry={retryGPS} 
+                />
+              )}
             </div>
 
             <div className="p-4 flex-1 overflow-y-auto pb-8">
