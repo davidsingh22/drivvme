@@ -79,7 +79,24 @@ export function GlobalRideOfferGuard() {
     return id;
   });
 
-  const [ride, setRide] = useState<RideSummary | null>(null);
+  const [ride, setRide] = useState<RideSummary | null>(() => {
+    // Consume prefetched ride data from main.tsx fast-path
+    const prefetched = (window as any).__PREFETCHED_RIDE;
+    if (prefetched && prefetched.status === 'searching') {
+      delete (window as any).__PREFETCHED_RIDE;
+      return {
+        id: prefetched.id,
+        pickup_address: prefetched.pickup_address,
+        dropoff_address: prefetched.dropoff_address,
+        estimated_fare: prefetched.estimated_fare,
+        distance_km: prefetched.distance_km ?? undefined,
+        estimated_duration_minutes: prefetched.estimated_duration_minutes ?? undefined,
+        pickup_lat: prefetched.pickup_lat ?? undefined,
+        pickup_lng: prefetched.pickup_lng ?? undefined,
+      };
+    }
+    return null;
+  });
   const [open, setOpen] = useState<boolean>(() => !!readPendingRideId());
 
   const lastHandledRef = useRef<string | null>(null);
@@ -356,13 +373,13 @@ export function GlobalRideOfferGuard() {
         pointerEvents: 'none',
       }}
     >
-      {/* Dark backdrop while data loads */}
-      {open && !ride && (
+      {/* Solid opaque background — no blur/transparency to save GPU */}
+      {open && (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.92)',
+            background: '#1A1A1A',
             zIndex: 2147483646,
             pointerEvents: 'auto',
           }}

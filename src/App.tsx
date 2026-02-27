@@ -257,6 +257,9 @@ const RouteRestorer = () => {
 };
 
 const App = () => {
+  // Defer heavy providers for 2s so GlobalRideOfferGuard gets 100% CPU on cold start
+  const [heavyReady, setHeavyReady] = useState(false);
+
   useEffect(() => {
     const handleRejection = (event: PromiseRejectionEvent) => {
       console.error("Unhandled rejection:", event.reason);
@@ -272,9 +275,16 @@ const App = () => {
     initCaptureOneSignalId();
   }, []);
 
+  useEffect(() => {
+    const hasPending = !!(window as any).__FAST_PATH_RIDE_ID;
+    const delay = hasPending ? 2000 : 0;
+    const t = setTimeout(() => setHeavyReady(true), delay);
+    return () => clearTimeout(t);
+  }, []);
+
   return (
     <>
-      {/* Ride modal renders OUTSIDE all providers — nothing can block it */}
+      {/* Ride modal renders FIRST — nothing can block it */}
       <GlobalRideOfferGuard />
       <QueryClientProvider client={queryClient}>
         <LanguageProvider>
@@ -282,9 +292,13 @@ const App = () => {
             <TooltipProvider>
               <Toaster />
               <Sonner />
-              <BrowserRouter>
-                <AppRoutes />
-              </BrowserRouter>
+              {heavyReady ? (
+                <BrowserRouter>
+                  <AppRoutes />
+                </BrowserRouter>
+              ) : (
+                <div style={{ position: 'fixed', inset: 0, background: '#1A1A1A' }} />
+              )}
             </TooltipProvider>
           </AuthProvider>
         </LanguageProvider>
