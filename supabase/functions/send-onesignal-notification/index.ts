@@ -11,7 +11,7 @@ serve(async (req) => {
   }
 
   try {
-    const { externalUserIds, playerIds, tagUids, title, message, url } = await req.json();
+    const { externalUserIds, playerIds, tagUids, title, message, url, data: extraData } = await req.json();
 
     if ((!externalUserIds?.length && !playerIds?.length && !tagUids?.length) || !title || !message) {
       return new Response(JSON.stringify({ error: "Missing required fields: (externalUserIds, playerIds, or tagUids), title, message" }), {
@@ -25,7 +25,10 @@ serve(async (req) => {
       throw new Error("ONESIGNAL_REST_API_KEY not configured");
     }
 
-    console.log("[send-onesignal] target playerIds:", playerIds || "none", "| externalUserIds:", externalUserIds || "none", "| tagUids:", tagUids || "none");
+    // Generate unique nonce to prevent iOS/OneSignal deduplication
+    const nonce = crypto.randomUUID();
+
+    console.log("[send-onesignal] target playerIds:", playerIds || "none", "| externalUserIds:", externalUserIds || "none", "| tagUids:", tagUids || "none", "| nonce:", nonce);
 
     const payload: Record<string, unknown> = {
       app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
@@ -38,6 +41,10 @@ serve(async (req) => {
       ios_sound: "default",
       android_sound: "default",
       mutable_content: true,
+      // Force-unique collapse_id prevents OS-level deduplication
+      collapse_id: `ride_${nonce}`,
+      // Inject nonce into data so each notification is treated as unique
+      data: { ...(extraData || {}), _nonce: nonce, _ts: Date.now().toString() },
     };
 
     // Prefer player IDs > tag filters > external user IDs
@@ -60,17 +67,17 @@ serve(async (req) => {
       body: JSON.stringify(payload),
     });
 
-    const data = await res.json();
-    console.log("[send-onesignal] onesignal response status:", res.status, JSON.stringify(data));
+    const responseData = await res.json();
+    console.log("[send-onesignal] onesignal response status:", res.status, JSON.stringify(responseData));
 
     if (!res.ok) {
-      return new Response(JSON.stringify({ error: `OneSignal error: ${res.status}`, details: data }), {
+      return new Response(JSON.stringify({ error: `OneSignal error: ${res.status}`, details: responseData }), {
         status: res.status,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    return new Response(JSON.stringify(data), {
+    return new Response(JSON.stringify(responseData), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {

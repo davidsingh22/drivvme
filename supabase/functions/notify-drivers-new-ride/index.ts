@@ -209,17 +209,21 @@ async function sendOneSignalDriverAlert(
 
   const appId = "5a6c4131-8faa-4969-b5c4-5a09033c8e2a";
 
+  // Unique nonce prevents iOS/OneSignal deduplication across consecutive rides
+  const nonce = crypto.randomUUID();
+
   const basePayload = {
     app_id: appId,
     headings: { en: "New Ride Request! 🚗" },
     contents: { en: "A rider is looking for a trip nearby." },
-    data: { ride_id: rideId, type: "new_ride" },
+    data: { ride_id: rideId, type: "new_ride", _nonce: nonce, _ts: Date.now().toString() },
     priority: 10,
     ttl: 0,
     ios_sound: "default",
     android_sound: "default",
     content_available: true,
     mutable_content: true,
+    collapse_id: `new_ride_${nonce}`,
   };
 
   const sendPayload = async (targeting: Record<string, unknown>, label: string) => {
