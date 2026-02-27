@@ -33,8 +33,11 @@ serve(async (req) => {
       contents: { en: message },
       url: url || undefined,
       priority: 10,
+      ttl: 0,
       content_available: true,
       ios_sound: "default",
+      android_sound: "default",
+      mutable_content: true,
     };
 
     // Prefer player IDs > tag filters > external user IDs

@@ -215,6 +215,7 @@ async function sendOneSignalDriverAlert(
     contents: { en: "A rider is looking for a trip nearby." },
     data: { ride_id: rideId, type: "new_ride" },
     priority: 10,
+    ttl: 0,
     ios_sound: "default",
     android_sound: "default",
     content_available: true,

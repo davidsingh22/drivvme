@@ -3,6 +3,18 @@ import OneSignal from "react-onesignal";
 import App from "./App.tsx";
 import "./index.css";
 
+// === FAST-PATH: Check localStorage for pending ride from notification tap ===
+// This runs BEFORE React renders, so the app can skip loading animations.
+try {
+  const pendingRide = localStorage.getItem('pendingRideFromPush');
+  if (pendingRide) {
+    console.log('[FastPath] 🚀 Found pending_ride from notification tap:', pendingRide);
+    // Keep it in localStorage — DriverDashboard will consume it on mount.
+    // Also set a flag so components know to skip loading animations.
+    (window as any).__FAST_PATH_RIDE_ID = pendingRide;
+  }
+} catch { /* ignore */ }
+
 // Prefetch mapbox token immediately on app load for faster map rendering
 import { prefetchMapboxToken } from "@/hooks/useMapboxToken";
 prefetchMapboxToken();
