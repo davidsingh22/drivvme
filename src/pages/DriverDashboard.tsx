@@ -403,8 +403,10 @@ const DriverDashboard = () => {
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
-  // Shared countdown constant — used by recovery, realtime, and modal
+  // Shared countdown constant — visual countdown in modal
   const COUNTDOWN_SECONDS = 25;
+  // Max age we'll still recover an offer (gives driver time to open app)
+  const MAX_OFFER_AGE_SECONDS = 90;
 
   // State to pass remaining countdown to modal when recovering an offer
   const [recoveredCountdown, setRecoveredCountdown] = useState<number | null>(null);
@@ -412,12 +414,20 @@ const DriverDashboard = () => {
   // Recovery: check for pending new_ride notifications on mount/resume.
   // IMPORTANT: NOT gated on isOnline — driver may tap push before toggling online.
   useEffect(() => {
-    if (!user || !session) return;
+    const userId = user?.id;
+    if (!userId) return;
     let cancelled = false;
 
     const checkPendingOffers = async () => {
       if (cancelled) return;
-      if (currentRideRef.current || newRideAlertOpenRef.current) return;
+
+      // Log guard state for debugging
+      const hasCurrentRide = !!currentRideRef.current;
+      const hasAlertOpen = !!newRideAlertOpenRef.current;
+      if (hasCurrentRide || hasAlertOpen) {
+        console.log('[Recovery] ⏭️ Skipping — currentRide:', hasCurrentRide, 'alertOpen:', hasAlertOpen);
+        return;
+      }
 
       try {
         // Ensure session is fresh (mobile may have stale token after background)
@@ -425,58 +435,80 @@ const DriverDashboard = () => {
           const { data: { session: freshSession } } = await supabase.auth.getSession();
           if (!freshSession) {
             console.log('[Recovery] No active session, attempting refresh…');
-            await supabase.auth.refreshSession();
+            const { data: refreshed } = await supabase.auth.refreshSession();
+            if (!refreshed?.session) {
+              console.log('[Recovery] ❌ Session refresh failed, aborting check');
+              return;
+            }
           }
-        } catch {
-          // non-fatal — proceed with existing token
+        } catch (e) {
+          console.warn('[Recovery] Session check error (non-fatal):', e);
         }
 
-        const { data: pending } = await supabase
+        console.log('[Recovery] 🔍 Querying unread new_ride notifications for user:', userId);
+
+        const { data: pending, error: notifError } = await supabase
           .from('notifications')
           .select('ride_id, created_at')
-          .eq('user_id', user.id)
+          .eq('user_id', userId)
           .eq('type', 'new_ride')
           .eq('is_read', false)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        if (!pending?.ride_id) return;
+        if (notifError) {
+          console.warn('[Recovery] ❌ Notification query error:', notifError.message);
+          return;
+        }
+
+        if (!pending?.ride_id) {
+          console.log('[Recovery] No unread new_ride notifications found');
+          return;
+        }
         if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return;
 
         const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
-        if (notifAge > COUNTDOWN_SECONDS) {
-          console.log('[Recovery] ⏰ Skipping expired offer (age:', Math.round(notifAge), 's)');
+        console.log('[Recovery] 📋 Found notification — ride:', pending.ride_id, 'age:', Math.round(notifAge), 's');
+
+        if (notifAge > MAX_OFFER_AGE_SECONDS) {
+          console.log('[Recovery] ⏰ Skipping expired offer (age:', Math.round(notifAge), 's > max:', MAX_OFFER_AGE_SECONDS, 's)');
           await supabase
             .from('notifications')
             .update({ is_read: true })
             .eq('ride_id', pending.ride_id)
-            .eq('user_id', user.id)
+            .eq('user_id', userId)
             .eq('type', 'new_ride');
           return;
         }
 
-        const { data: ride } = await supabase
+        const { data: ride, error: rideError } = await supabase
           .from('rides')
           .select('*')
           .eq('id', pending.ride_id)
           .eq('status', 'searching')
           .maybeSingle();
 
+        if (rideError) {
+          console.warn('[Recovery] ❌ Ride query error:', rideError.message);
+          return;
+        }
+
         if (!ride) {
-          // Ride taken/cancelled — mark notification read so it doesn't block future ones
+          console.log('[Recovery] Ride not in searching status — marking notification read');
           await supabase
             .from('notifications')
             .update({ is_read: true })
             .eq('ride_id', pending.ride_id)
-            .eq('user_id', user.id)
+            .eq('user_id', userId)
             .eq('type', 'new_ride');
           return;
         }
         if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return;
 
-        const remaining = Math.max(1, Math.round(COUNTDOWN_SECONDS - notifAge));
-        console.log('[Recovery] ✅ Found pending ride offer:', ride.id, '(age:', Math.round(notifAge), 's, remaining:', remaining, 's)');
+        // Visual countdown: show remaining from COUNTDOWN_SECONDS, but don't expire if within MAX_OFFER_AGE
+        const remaining = Math.max(5, Math.round(COUNTDOWN_SECONDS - notifAge));
+        console.log('[Recovery] ✅ Showing ride offer:', ride.id, '(age:', Math.round(notifAge), 's, visual countdown:', remaining, 's)');
         setRecoveredCountdown(remaining);
         setCachedAlertRide(ride);
         setNewRideAlertRideId(ride.id);
@@ -488,32 +520,35 @@ const DriverDashboard = () => {
     };
 
     // Staggered initial checks — covers auth hydration delays on cold start
+    console.log('[Recovery] 🚀 Effect mounted for user:', userId);
     checkPendingOffers();
-    const t1 = setTimeout(checkPendingOffers, 1500);
-    const t2 = setTimeout(checkPendingOffers, 4000);
+    const t1 = setTimeout(checkPendingOffers, 1000);
+    const t2 = setTimeout(checkPendingOffers, 3000);
+    const t3 = setTimeout(checkPendingOffers, 6000);
 
-    const interval = window.setInterval(checkPendingOffers, 3000);
+    // Poll every 2 seconds (faster than before to catch offers quickly)
+    const interval = window.setInterval(checkPendingOffers, 2000);
 
     const handleResume = () => {
       if (document.visibilityState === 'visible' || !document.hidden) {
-        console.log('[Recovery] 👁️ App resumed — checking offers');
-        // Stagger checks to handle session recovery timing
+        console.log('[Recovery] 👁️ App resumed (visibilitychange)');
         checkPendingOffers();
         setTimeout(checkPendingOffers, 500);
-        setTimeout(checkPendingOffers, 2000);
+        setTimeout(checkPendingOffers, 1500);
+        setTimeout(checkPendingOffers, 3000);
       }
     };
     const handleFocus = () => {
-      console.log('[Recovery] 👁️ Window focused — checking offers');
+      console.log('[Recovery] 👁️ Window focused');
       checkPendingOffers();
       setTimeout(checkPendingOffers, 500);
-      setTimeout(checkPendingOffers, 2000);
+      setTimeout(checkPendingOffers, 1500);
     };
-    const handlePageShow = (e: PageTransitionEvent) => {
-      console.log('[Recovery] 👁️ pageshow — checking offers');
+    const handlePageShow = () => {
+      console.log('[Recovery] 👁️ pageshow fired');
       checkPendingOffers();
       setTimeout(checkPendingOffers, 500);
-      setTimeout(checkPendingOffers, 2000);
+      setTimeout(checkPendingOffers, 1500);
     };
 
     document.addEventListener('visibilitychange', handleResume);
@@ -524,44 +559,48 @@ const DriverDashboard = () => {
       cancelled = true;
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', handleResume);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [user?.id, session]);
+  }, [user?.id]);
 
   // Push-based ride offer listener — no polling, no feed.
   // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
+  // Use a unique channel name per user to avoid conflicts across re-renders.
   useEffect(() => {
-    if (!user || !session) return;
+    if (!user?.id) return;
+    const userId = user.id;
 
-    // Listen for new ride notifications via realtime on the notifications table
+    const channelName = `driver-ride-offers-${userId}-${Date.now()}`;
+    console.log('[Realtime] 📡 Subscribing to notifications channel:', channelName);
+
     const channel = supabase
-      .channel('driver-ride-offers')
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'notifications',
-          filter: `user_id=eq.${user.id}`,
+          filter: `user_id=eq.${userId}`,
         },
         async (payload) => {
           try {
             const notif = payload.new as { type: string; ride_id: string | null };
+            console.log('[Realtime] 📩 Notification received:', notif.type, notif.ride_id);
 
             // Handle ride_cancelled notifications — dismiss offer modal or clear active ride
             if (notif.type === 'ride_cancelled' && notif.ride_id) {
-              console.log('[DriverDashboard] 🚫 Received ride_cancelled notification for ride:', notif.ride_id);
-              // Dismiss offer modal if it matches (use ref to avoid stale closure)
+              console.log('[Realtime] 🚫 ride_cancelled for:', notif.ride_id);
               if (newRideAlertRideIdRef.current === notif.ride_id) {
                 setNewRideAlertOpen(false);
                 setCachedAlertRide(null);
                 setNewRideAlertRideId(null);
                 alertStartTimeRef.current = null;
               }
-              // Clear active ride if it matches
               if (currentRideRef.current?.id === notif.ride_id) {
                 setCurrentRide(null);
                 setRiderInfo(null);
@@ -576,7 +615,10 @@ const DriverDashboard = () => {
             }
 
             if (notif.type !== 'new_ride' || !notif.ride_id) return;
-            if (currentRideRef.current || newRideAlertOpenRef.current) return; // already busy
+            if (currentRideRef.current || newRideAlertOpenRef.current) {
+              console.log('[Realtime] ⏭️ Already busy — currentRide:', !!currentRideRef.current, 'alertOpen:', !!newRideAlertOpenRef.current);
+              return;
+            }
 
             // Fetch the ride details
             const { data: ride, error } = await supabase
@@ -586,14 +628,17 @@ const DriverDashboard = () => {
               .eq('status', 'searching')
               .maybeSingle();
 
-            if (error || !ride) return;
+            if (error || !ride) {
+              console.log('[Realtime] Ride not available:', error?.message || 'not searching');
+              return;
+            }
 
-            console.log('[DriverDashboard] 🔔 Push-based ride offer:', ride.id);
+            console.log('[Realtime] 🔔 Showing ride offer from realtime:', ride.id);
               
-            // Cache and show offer modal
             setCachedAlertRide(ride);
             setNewRideAlertRideId(ride.id);
             setNewRideAlertOpen(true);
+            setRecoveredCountdown(null); // fresh offer = full countdown
             alertStartTimeRef.current = Date.now();
 
             toast({
@@ -605,16 +650,19 @@ const DriverDashboard = () => {
               (navigator as any).vibrate?.([300, 100, 300, 100, 500]);
             }
           } catch (err) {
-            console.error('[DriverDashboard] Ride offer handler error:', err);
+            console.error('[Realtime] Ride offer handler error:', err);
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[Realtime] 📡 Channel status:', status);
+      });
 
     return () => {
+      console.log('[Realtime] 🔌 Removing channel:', channelName);
       supabase.removeChannel(channel);
     };
-  }, [user, session]);
+  }, [user?.id]);
 
   // Watch alerted ride for cancellation — dismiss modal if rider cancels
   // Uses BOTH realtime (may fail due to RLS on cancelled rows) AND polling fallback
