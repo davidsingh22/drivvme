@@ -80,7 +80,8 @@ export function GlobalRideOfferGuard() {
   });
 
   const [ride, setRide] = useState<RideSummary | null>(null);
-  const [open, setOpen] = useState<boolean>(() => !!readPendingRideId());
+  // Don't auto-open on mount from stale localStorage — wait for data validation
+  const [open, setOpen] = useState<boolean>(false);
 
   const lastHandledRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
@@ -217,7 +218,7 @@ export function GlobalRideOfferGuard() {
     fetchCancelRef.current = () => { cancelled = true; };
 
     let attempts = 0;
-    const MAX_ATTEMPTS = 20;
+    const MAX_ATTEMPTS = 5;
 
     const tryFetch = async () => {
       if (cancelled) return;
@@ -391,18 +392,6 @@ export function GlobalRideOfferGuard() {
         pointerEvents: 'none',
       }}
     >
-      {/* Dark backdrop while data loads */}
-      {open && !ride && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.92)',
-            zIndex: 2147483646,
-            pointerEvents: 'auto',
-          }}
-        />
-      )}
       <DriverBeepFix
         incomingRide={open && displayRide ? { id: displayRide.id } : null}
         onTimeout={handleDecline}
