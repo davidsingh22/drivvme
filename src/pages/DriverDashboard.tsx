@@ -31,6 +31,7 @@ import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
 import { withTimeout } from '@/lib/withTimeout';
+import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
@@ -418,34 +419,84 @@ const DriverDashboard = () => {
     if (!userId) return;
     let cancelled = false;
 
-    const checkPendingOffers = async () => {
+    /**
+     * Show a ride offer from a ride_id (used by both recovery query and global store).
+     * Returns true if successfully showed the modal.
+     */
+    const showOfferForRide = async (rideId: string): Promise<boolean> => {
+      if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return false;
+
+      const { data: ride, error: rideError } = await supabase
+        .from('rides')
+        .select('*')
+        .eq('id', rideId)
+        .eq('status', 'searching')
+        .maybeSingle();
+
+      if (rideError || !ride) {
+        console.log('[Recovery] Ride not in searching status for', rideId);
+        return false;
+      }
+      if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return false;
+
+      // Calculate remaining visual countdown from ride creation
+      const notifAge = (Date.now() - new Date(ride.requested_at || ride.created_at).getTime()) / 1000;
+      if (notifAge > MAX_OFFER_AGE_SECONDS) {
+        console.log('[Recovery] ⏰ Ride too old:', Math.round(notifAge), 's');
+        return false;
+      }
+
+      const remaining = Math.max(5, Math.round(COUNTDOWN_SECONDS - notifAge));
+      console.log('[Recovery] ✅ Showing ride offer:', ride.id, '(age:', Math.round(notifAge), 's, visual countdown:', remaining, 's)');
+      setRecoveredCountdown(remaining);
+      setCachedAlertRide(ride);
+      setNewRideAlertRideId(ride.id);
+      setNewRideAlertOpen(true);
+      alertStartTimeRef.current = Date.now() - (notifAge * 1000);
+      return true;
+    };
+
+    /**
+     * Core recovery check with forced session refresh.
+     * Retry-ladder calls this at 0, 1, 3, 7s after activation.
+     */
+    const checkPendingOffers = async (attempt: number = 0) => {
       if (cancelled) return;
 
-      // Log guard state for debugging
       const hasCurrentRide = !!currentRideRef.current;
       const hasAlertOpen = !!newRideAlertOpenRef.current;
       if (hasCurrentRide || hasAlertOpen) {
-        console.log('[Recovery] ⏭️ Skipping — currentRide:', hasCurrentRide, 'alertOpen:', hasAlertOpen);
+        console.log(`[Recovery] ⏭️ Skipping (attempt ${attempt}) — currentRide:`, hasCurrentRide, 'alertOpen:', hasAlertOpen);
         return;
       }
 
       try {
-        // Ensure session is fresh (mobile may have stale token after background)
+        // STEP 1: Force session refresh to combat mobile throttling
         try {
           const { data: { session: freshSession } } = await supabase.auth.getSession();
           if (!freshSession) {
-            console.log('[Recovery] No active session, attempting refresh…');
+            console.log(`[Recovery] (attempt ${attempt}) No active session, refreshing…`);
             const { data: refreshed } = await supabase.auth.refreshSession();
             if (!refreshed?.session) {
-              console.log('[Recovery] ❌ Session refresh failed, aborting check');
-              return;
+              console.log(`[Recovery] ❌ (attempt ${attempt}) Session refresh failed, will retry`);
+              return; // Don't abort — next retry in the ladder may succeed
             }
           }
         } catch (e) {
-          console.warn('[Recovery] Session check error (non-fatal):', e);
+          console.warn(`[Recovery] (attempt ${attempt}) Session check error:`, e);
+          return; // Will retry on next ladder step
         }
 
-        console.log('[Recovery] 🔍 Querying unread new_ride notifications for user:', userId);
+        // STEP 2: Check global pending ride store (from OneSignal click before mount)
+        const globalRideId = consumePendingRide();
+        if (globalRideId) {
+          console.log(`[Recovery] (attempt ${attempt}) 🌐 Found global pending ride:`, globalRideId);
+          const shown = await showOfferForRide(globalRideId);
+          if (shown) return;
+        }
+
+        // STEP 3: Query unread notifications
+        console.log(`[Recovery] (attempt ${attempt}) 🔍 Querying unread new_ride notifications`);
 
         const { data: pending, error: notifError } = await supabase
           .from('notifications')
@@ -458,21 +509,21 @@ const DriverDashboard = () => {
           .maybeSingle();
 
         if (notifError) {
-          console.warn('[Recovery] ❌ Notification query error:', notifError.message);
+          console.warn(`[Recovery] ❌ (attempt ${attempt}) Notification query error:`, notifError.message);
           return;
         }
 
         if (!pending?.ride_id) {
-          console.log('[Recovery] No unread new_ride notifications found');
+          console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications found`);
           return;
         }
         if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return;
 
         const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
-        console.log('[Recovery] 📋 Found notification — ride:', pending.ride_id, 'age:', Math.round(notifAge), 's');
+        console.log(`[Recovery] (attempt ${attempt}) 📋 Found notification — ride:`, pending.ride_id, 'age:', Math.round(notifAge), 's');
 
         if (notifAge > MAX_OFFER_AGE_SECONDS) {
-          console.log('[Recovery] ⏰ Skipping expired offer (age:', Math.round(notifAge), 's > max:', MAX_OFFER_AGE_SECONDS, 's)');
+          console.log(`[Recovery] ⏰ Expired (age: ${Math.round(notifAge)}s > ${MAX_OFFER_AGE_SECONDS}s) — marking read`);
           await supabase
             .from('notifications')
             .update({ is_read: true })
@@ -482,73 +533,57 @@ const DriverDashboard = () => {
           return;
         }
 
-        const { data: ride, error: rideError } = await supabase
-          .from('rides')
-          .select('*')
-          .eq('id', pending.ride_id)
-          .eq('status', 'searching')
-          .maybeSingle();
-
-        if (rideError) {
-          console.warn('[Recovery] ❌ Ride query error:', rideError.message);
-          return;
-        }
-
-        if (!ride) {
-          console.log('[Recovery] Ride not in searching status — marking notification read');
+        const shown = await showOfferForRide(pending.ride_id);
+        if (!shown) {
+          // Ride no longer searching — mark notification read to avoid re-querying
+          console.log('[Recovery] Ride not available — marking notification read');
           await supabase
             .from('notifications')
             .update({ is_read: true })
             .eq('ride_id', pending.ride_id)
             .eq('user_id', userId)
             .eq('type', 'new_ride');
-          return;
         }
-        if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return;
-
-        // Visual countdown: show remaining from COUNTDOWN_SECONDS, but don't expire if within MAX_OFFER_AGE
-        const remaining = Math.max(5, Math.round(COUNTDOWN_SECONDS - notifAge));
-        console.log('[Recovery] ✅ Showing ride offer:', ride.id, '(age:', Math.round(notifAge), 's, visual countdown:', remaining, 's)');
-        setRecoveredCountdown(remaining);
-        setCachedAlertRide(ride);
-        setNewRideAlertRideId(ride.id);
-        setNewRideAlertOpen(true);
-        alertStartTimeRef.current = Date.now() - (notifAge * 1000);
+        // NOTE: Do NOT mark is_read here if shown — only mark read on accept/decline/timeout
       } catch (err) {
-        console.warn('[Recovery] check failed:', err);
+        console.warn(`[Recovery] (attempt ${attempt}) check failed:`, err);
       }
     };
 
-    // Staggered initial checks — covers auth hydration delays on cold start
+    // ===== RETRY LADDER: 0ms, 1s, 3s, 7s =====
     console.log('[Recovery] 🚀 Effect mounted for user:', userId);
-    checkPendingOffers();
-    const t1 = setTimeout(checkPendingOffers, 1000);
-    const t2 = setTimeout(checkPendingOffers, 3000);
-    const t3 = setTimeout(checkPendingOffers, 6000);
+    const runLadder = () => {
+      checkPendingOffers(0);
+      const t1 = setTimeout(() => checkPendingOffers(1), 1000);
+      const t2 = setTimeout(() => checkPendingOffers(2), 3000);
+      const t3 = setTimeout(() => checkPendingOffers(3), 7000);
+      return [t1, t2, t3];
+    };
 
-    // Poll every 2 seconds (faster than before to catch offers quickly)
-    const interval = window.setInterval(checkPendingOffers, 2000);
+    const initialTimers = runLadder();
+
+    // Poll every 3 seconds as safety net
+    const interval = window.setInterval(() => checkPendingOffers(99), 3000);
+
+    // Listen for global store updates (push click while already mounted)
+    const unsubGlobal = onPendingRide(async (rideId) => {
+      console.log('[Recovery] 🌐 Global store event received:', rideId);
+      await showOfferForRide(rideId);
+    });
 
     const handleResume = () => {
       if (document.visibilityState === 'visible' || !document.hidden) {
-        console.log('[Recovery] 👁️ App resumed (visibilitychange)');
-        checkPendingOffers();
-        setTimeout(checkPendingOffers, 500);
-        setTimeout(checkPendingOffers, 1500);
-        setTimeout(checkPendingOffers, 3000);
+        console.log('[Recovery] 👁️ App resumed — running retry ladder');
+        runLadder();
       }
     };
     const handleFocus = () => {
-      console.log('[Recovery] 👁️ Window focused');
-      checkPendingOffers();
-      setTimeout(checkPendingOffers, 500);
-      setTimeout(checkPendingOffers, 1500);
+      console.log('[Recovery] 👁️ Window focused — running retry ladder');
+      runLadder();
     };
     const handlePageShow = () => {
-      console.log('[Recovery] 👁️ pageshow fired');
-      checkPendingOffers();
-      setTimeout(checkPendingOffers, 500);
-      setTimeout(checkPendingOffers, 1500);
+      console.log('[Recovery] 👁️ pageshow fired — running retry ladder');
+      runLadder();
     };
 
     document.addEventListener('visibilitychange', handleResume);
@@ -557,10 +592,9 @@ const DriverDashboard = () => {
 
     return () => {
       cancelled = true;
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
+      initialTimers.forEach(clearTimeout);
       window.clearInterval(interval);
+      unsubGlobal();
       document.removeEventListener('visibilitychange', handleResume);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pageshow', handlePageShow);
