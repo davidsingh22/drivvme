@@ -54,6 +54,11 @@ export function initOneSignalAuthLink() {
               if (data.ride_id) {
                 // Store the ride_id globally BEFORE navigating so DriverDashboard can pick it up
                 setPendingRideFromNotification(data.ride_id);
+                // Also persist to localStorage as a fallback signal for cold starts
+                try {
+                  localStorage.setItem('pendingRideFromPush', data.ride_id);
+                  console.log('🔔 OneSignal: persisted ride_id to localStorage:', data.ride_id);
+                } catch { /* ignore */ }
                 // Route drivers to /driver, riders to /ride
                 const lastRoute = localStorage.getItem('last_route');
                 window.location.href = lastRoute === '/driver' ? '/driver' : '/ride';

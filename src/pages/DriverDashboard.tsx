@@ -414,9 +414,20 @@ const DriverDashboard = () => {
 
   // Recovery: check for pending new_ride notifications on mount/resume.
   // IMPORTANT: NOT gated on isOnline — driver may tap push before toggling online.
+  // Uses session?.user?.id as primary (hydrates before useAuth's user), falls back to user?.id.
   useEffect(() => {
-    const userId = user?.id;
-    if (!userId) return;
+    const userId = session?.user?.id || user?.id;
+    if (!userId) {
+      // Even without a userId, check localStorage for a pending signal
+      // (the retry ladder will re-run when session hydrates thanks to the dependency array)
+      try {
+        const lsRideId = localStorage.getItem('pendingRideFromPush');
+        if (lsRideId) {
+          console.log('[Recovery] 🔑 No session yet but found localStorage signal:', lsRideId, '— will retry when auth hydrates');
+        }
+      } catch { /* ignore */ }
+      return;
+    }
     let cancelled = false;
 
     /**
@@ -458,7 +469,7 @@ const DriverDashboard = () => {
 
     /**
      * Core recovery check with forced session refresh.
-     * Retry-ladder calls this at 0, 1, 3, 7s after activation.
+     * Retry-ladder calls this at 100ms, 1500ms, 4000ms after activation.
      */
     const checkPendingOffers = async (attempt: number = 0) => {
       if (cancelled) return;
@@ -471,20 +482,43 @@ const DriverDashboard = () => {
       }
 
       try {
+        // STEP 0: Check localStorage signal FIRST (works before auth hydrates)
+        try {
+          const lsRideId = localStorage.getItem('pendingRideFromPush');
+          if (lsRideId && !currentRideRef.current && !newRideAlertOpenRef.current) {
+            console.log(`[Recovery] (attempt ${attempt}) 📱 Found localStorage signal:`, lsRideId);
+            localStorage.removeItem('pendingRideFromPush');
+            // Try to consume from global store too
+            consumePendingRide();
+          }
+        } catch { /* ignore localStorage errors */ }
+
         // STEP 1: Force session refresh to combat mobile throttling
+        let activeSession: any = null;
         try {
           const { data: { session: freshSession } } = await supabase.auth.getSession();
+          activeSession = freshSession;
+          console.log(`[Recovery] Checking for ride. Auth Status: ${freshSession ? 'Authenticated (uid: ' + freshSession.user?.id + ')' : 'No Session'} (attempt ${attempt})`);
           if (!freshSession) {
             console.log(`[Recovery] (attempt ${attempt}) No active session, refreshing…`);
             const { data: refreshed } = await supabase.auth.refreshSession();
-            if (!refreshed?.session) {
+            activeSession = refreshed?.session;
+            if (!activeSession) {
               console.log(`[Recovery] ❌ (attempt ${attempt}) Session refresh failed, will retry`);
               return; // Don't abort — next retry in the ladder may succeed
             }
+            console.log(`[Recovery] (attempt ${attempt}) ✅ Session refreshed successfully`);
           }
         } catch (e) {
           console.warn(`[Recovery] (attempt ${attempt}) Session check error:`, e);
           return; // Will retry on next ladder step
+        }
+
+        // Use the session's user id (more reliable than the React state which may be stale)
+        const effectiveUserId = activeSession?.user?.id || userId;
+        if (!effectiveUserId) {
+          console.log(`[Recovery] (attempt ${attempt}) ❌ No user ID available yet, will retry`);
+          return;
         }
 
         // STEP 2: Check global pending ride store (from OneSignal click before mount)
@@ -496,12 +530,12 @@ const DriverDashboard = () => {
         }
 
         // STEP 3: Query unread notifications
-        console.log(`[Recovery] (attempt ${attempt}) 🔍 Querying unread new_ride notifications`);
+        console.log(`[Recovery] (attempt ${attempt}) 🔍 Querying unread new_ride notifications for user: ${effectiveUserId}`);
 
         const { data: pending, error: notifError } = await supabase
           .from('notifications')
           .select('ride_id, created_at')
-          .eq('user_id', userId)
+          .eq('user_id', effectiveUserId)
           .eq('type', 'new_ride')
           .eq('is_read', false)
           .order('created_at', { ascending: false })
@@ -528,7 +562,7 @@ const DriverDashboard = () => {
             .from('notifications')
             .update({ is_read: true })
             .eq('ride_id', pending.ride_id)
-            .eq('user_id', userId)
+            .eq('user_id', effectiveUserId)
             .eq('type', 'new_ride');
           return;
         }
@@ -541,7 +575,7 @@ const DriverDashboard = () => {
             .from('notifications')
             .update({ is_read: true })
             .eq('ride_id', pending.ride_id)
-            .eq('user_id', userId)
+            .eq('user_id', effectiveUserId)
             .eq('type', 'new_ride');
         }
         // NOTE: Do NOT mark is_read here if shown — only mark read on accept/decline/timeout
@@ -550,14 +584,13 @@ const DriverDashboard = () => {
       }
     };
 
-    // ===== RETRY LADDER: 0ms, 1s, 3s, 7s =====
+    // ===== RETRY LADDER: 100ms, 1500ms, 4000ms =====
     console.log('[Recovery] 🚀 Effect mounted for user:', userId);
     const runLadder = () => {
-      checkPendingOffers(0);
-      const t1 = setTimeout(() => checkPendingOffers(1), 1000);
-      const t2 = setTimeout(() => checkPendingOffers(2), 3000);
-      const t3 = setTimeout(() => checkPendingOffers(3), 7000);
-      return [t1, t2, t3];
+      const t0 = setTimeout(() => checkPendingOffers(0), 100);
+      const t1 = setTimeout(() => checkPendingOffers(1), 1500);
+      const t2 = setTimeout(() => checkPendingOffers(2), 4000);
+      return [t0, t1, t2];
     };
 
     const initialTimers = runLadder();
@@ -599,7 +632,7 @@ const DriverDashboard = () => {
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [user?.id]);
+  }, [user?.id, session?.user?.id]);
 
   // Push-based ride offer listener — no polling, no feed.
   // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
