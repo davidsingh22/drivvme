@@ -2,21 +2,21 @@
  * GlobalRideOfferGuard
  * 
  * Mounted at the App.tsx root level (ABOVE all route guards and Suspense boundaries).
- * Detects a pending ride from a notification tap during cold start and immediately
- * shows the RideOfferModal — bypassing auth loading, GPS guards, and lazy-loaded routes.
+ * Detects a pending ride from a notification tap during cold start OR foreground push
+ * and IMMEDIATELY shows the RideOfferModal — no loading screens, no auth wait.
  *
- * Flow:
- * 1. On mount, checks localStorage for 'pendingRideFromPush' or 'last_notified_ride'
- * 2. Retries fetching the ride from DB every 500ms for up to 10s (auth may not be ready)
- * 3. Shows RideOfferModal the instant ride data is available
- * 4. On accept → navigates to /driver; on decline → clears state
+ * Dual-Path approach:
+ * Path A (Cold Start): Reads localStorage before React renders → instant modal with skeleton data
+ * Path B (Foreground): Persistent OneSignal listener fires setPendingRide → instant modal
+ *
+ * The modal renders instantly over a dark background. Ride data is enriched async.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { RideOfferModal } from '@/components/RideOfferModal';
 import DriverBeepFix from '@/components/DriverBeepFix';
-import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
+import { consumePendingRide, onPendingRide, setPendingRideFromNotification } from '@/lib/pendingRideStore';
 
 interface RideSummary {
   id: string;
@@ -29,100 +29,132 @@ interface RideSummary {
   pickup_lng?: number;
 }
 
+/** Read pending ride ID from any source — runs synchronously */
+function readPendingRideId(): string | null {
+  try {
+    return localStorage.getItem('pendingRideFromPush') ||
+           localStorage.getItem('last_notified_ride') ||
+           (window as any).__FAST_PATH_RIDE_ID || null;
+  } catch { return null; }
+}
+
 export function GlobalRideOfferGuard() {
-  const [rideId, setRideId] = useState<string | null>(null);
+  // Immediately check for a pending ride — no useEffect delay
+  const [rideId, setRideId] = useState<string | null>(() => {
+    const id = readPendingRideId() || consumePendingRide();
+    if (id) console.log('[GlobalGuard] 🚀 Instant rideId on mount:', id);
+    return id;
+  });
+
   const [ride, setRide] = useState<RideSummary | null>(null);
-  const [open, setOpen] = useState(false);
+  // Open the modal IMMEDIATELY when we have a rideId, even before DB fetch
+  const [open, setOpen] = useState<boolean>(() => !!readPendingRideId() || !!consumePendingRide());
+
   const resolvedRef = useRef(false);
   const mountedRef = useRef(true);
+  const foregroundListenerRef = useRef(false);
 
-  // Check localStorage for pending ride on mount
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  // Detect pending ride from multiple sources
+  // === PERSISTENT LISTENERS (never torn down until unmount) ===
   useEffect(() => {
-    // Source 1: localStorage signals
-    const checkLocalStorage = () => {
-      try {
-        const id = localStorage.getItem('pendingRideFromPush') || 
-                   localStorage.getItem('last_notified_ride');
-        if (id && !resolvedRef.current) {
-          console.log('[GlobalGuard] 🚀 Found pending ride in localStorage:', id);
-          setRideId(id);
-        }
-      } catch { /* ignore */ }
-    };
-
-    checkLocalStorage();
-
-    // Source 2: Global store (from OneSignal click handler)
-    const globalId = consumePendingRide();
-    if (globalId && !resolvedRef.current) {
-      console.log('[GlobalGuard] 🌐 Found pending ride in global store:', globalId);
-      setRideId(globalId);
-    }
-
-    // Source 3: Listen for future push clicks while mounted
+    // --- Source 1: Global store listener (push click handler) ---
     const unsub = onPendingRide((id) => {
       if (!resolvedRef.current && mountedRef.current) {
         console.log('[GlobalGuard] 📩 Live push click received:', id);
         setRideId(id);
+        setOpen(true);
       }
     });
 
-    // Source 4: OneSignal foreground notification listener
-    const setupForegroundListener = async () => {
+    // --- Source 2: OneSignal foreground listener (persistent) ---
+    const setupForegroundListener = () => {
+      if (foregroundListenerRef.current) return;
       try {
         const OS = (window as any).OneSignal;
         if (OS?.Notifications?.addEventListener) {
           OS.Notifications.addEventListener('foregroundWillDisplay', (event: any) => {
             const data = event?.notification?.additionalData || {};
             console.log('[GlobalGuard] 🔔 Foreground notification:', data);
-            if (data.ride_id && !resolvedRef.current && mountedRef.current) {
+            if (data.ride_id && mountedRef.current) {
+              resolvedRef.current = false; // Reset for new ride
               try {
                 localStorage.setItem('pendingRideFromPush', data.ride_id);
                 localStorage.setItem('last_notified_ride', data.ride_id);
               } catch { /* ignore */ }
+              setPendingRideFromNotification(data.ride_id);
+              setRide(null); // Clear stale ride data
               setRideId(data.ride_id);
+              setOpen(true); // INSTANT open
             }
           });
+          foregroundListenerRef.current = true;
           console.log('[GlobalGuard] ✅ Foreground listener registered');
         }
       } catch (e) {
-        console.log('[GlobalGuard] Foreground listener setup failed (non-fatal):', e);
+        console.log('[GlobalGuard] Foreground listener setup deferred:', e);
       }
     };
 
-    // Retry setting up foreground listener (SDK may not be ready yet)
+    // Try immediately, retry at 1s, 3s, 6s (SDK may not be ready)
     setupForegroundListener();
-    const retryTimer = setTimeout(setupForegroundListener, 3000);
+    const t1 = setTimeout(setupForegroundListener, 1000);
+    const t2 = setTimeout(setupForegroundListener, 3000);
+    const t3 = setTimeout(setupForegroundListener, 6000);
+
+    // --- Source 3: Visibilitychange — re-check localStorage when app resumes ---
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && mountedRef.current && !resolvedRef.current) {
+        const id = readPendingRideId();
+        if (id) {
+          console.log('[GlobalGuard] 👁️ App resumed, found pending ride:', id);
+          setRideId(id);
+          setOpen(true);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // --- Source 4: Auth state change — re-check on SIGNED_IN ---
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' && mountedRef.current && !resolvedRef.current) {
+        const id = readPendingRideId();
+        if (id) {
+          console.log('[GlobalGuard] 🔑 Auth ready, found pending ride:', id);
+          setRideId(id);
+          setOpen(true);
+        }
+      }
+    });
 
     return () => {
       unsub();
-      clearTimeout(retryTimer);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      subscription.unsubscribe();
     };
   }, []);
 
-  // When we have a rideId, retry fetching ride data every 500ms for up to 10s
+  // === ASYNC DATA ENRICHMENT — fetch ride details once we have a rideId ===
   useEffect(() => {
     if (!rideId || resolvedRef.current) return;
 
     let cancelled = false;
     let attempts = 0;
-    const MAX_ATTEMPTS = 20; // 20 * 500ms = 10s
+    const MAX_ATTEMPTS = 20; // 20 × 500ms = 10s
 
     const tryFetch = async () => {
       if (cancelled || resolvedRef.current) return;
       attempts++;
 
       try {
-        // Ensure auth session is available
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-          // Try refresh
           await supabase.auth.refreshSession();
         }
 
@@ -136,15 +168,14 @@ export function GlobalRideOfferGuard() {
         if (cancelled || resolvedRef.current) return;
 
         if (data) {
-          // Check age — reject if > 90s old
           const age = (Date.now() - new Date(data.requested_at || data.created_at).getTime()) / 1000;
           if (age > 90) {
-            console.log('[GlobalGuard] ⏰ Ride too old:', Math.round(age), 's — clearing');
+            console.log('[GlobalGuard] ⏰ Ride too old:', Math.round(age), 's');
             cleanup();
             return;
           }
 
-          console.log('[GlobalGuard] ✅ Ride fetched on attempt', attempts, ':', data.id);
+          console.log('[GlobalGuard] ✅ Ride enriched on attempt', attempts);
           resolvedRef.current = true;
           setRide({
             id: data.id,
@@ -156,30 +187,26 @@ export function GlobalRideOfferGuard() {
             pickup_lat: data.pickup_lat ?? undefined,
             pickup_lng: data.pickup_lng ?? undefined,
           });
-          setOpen(true);
+          // Modal is already open — data will just populate
           return;
         }
 
         if (error) {
           console.log(`[GlobalGuard] Attempt ${attempts} error:`, error.message);
-        } else {
-          console.log(`[GlobalGuard] Attempt ${attempts}: ride not found or not searching`);
         }
       } catch (e) {
         console.log(`[GlobalGuard] Attempt ${attempts} exception:`, e);
       }
 
-      // Schedule next retry
       if (attempts < MAX_ATTEMPTS && !cancelled) {
         setTimeout(tryFetch, 500);
       } else if (!cancelled) {
-        console.log('[GlobalGuard] ❌ Max retries reached — clearing pending ride');
+        console.log('[GlobalGuard] ❌ Max retries — clearing');
         cleanup();
       }
     };
 
     tryFetch();
-
     return () => { cancelled = true; };
   }, [rideId]);
 
@@ -187,6 +214,7 @@ export function GlobalRideOfferGuard() {
     try {
       localStorage.removeItem('pendingRideFromPush');
       localStorage.removeItem('last_notified_ride');
+      delete (window as any).__FAST_PATH_RIDE_ID;
     } catch { /* ignore */ }
     setOpen(false);
     setRide(null);
@@ -195,9 +223,10 @@ export function GlobalRideOfferGuard() {
   }, []);
 
   const handleAccept = useCallback(async () => {
-    if (!ride) return;
+    const targetRide = ride;
+    const targetId = rideId;
+    if (!targetId) { cleanup(); return; }
 
-    // Get current user
     const { data: { session } } = await supabase.auth.getSession();
     const userId = session?.user?.id;
     if (!userId) {
@@ -207,37 +236,46 @@ export function GlobalRideOfferGuard() {
     }
 
     try {
-      const { data: updatedRows, error } = await supabase
-        .from('rides')
-        .update({
-          driver_id: userId,
-          status: 'driver_assigned' as const,
-          accepted_at: new Date().toISOString(),
-        })
-        .eq('id', ride.id)
-        .eq('status', 'searching')
-        .is('driver_id', null)
-        .select('id')
-        .then(r => r);
-
-      if (error || !updatedRows?.length) {
-        console.log('[GlobalGuard] Accept failed:', error?.message || 'ride taken');
-      } else {
-        console.log('[GlobalGuard] ✅ Ride accepted:', ride.id);
-        // Store accepted ride for DriverDashboard to pick up
-        try { localStorage.setItem('last_accepted_driver', userId); } catch {}
+      // Try RPC first, fallback to direct update
+      let accepted = false;
+      try {
+        const { data: rpcResult } = await supabase.rpc('accept_ride', {
+          p_ride_id: targetId,
+          p_driver_id: userId,
+        });
+        accepted = rpcResult === 'accepted' || rpcResult === targetId;
+      } catch {
+        // RPC unavailable — direct update
+        const { data: updatedRows } = await supabase
+          .from('rides')
+          .update({
+            driver_id: userId,
+            status: 'driver_assigned' as const,
+            accepted_at: new Date().toISOString(),
+          })
+          .eq('id', targetId)
+          .eq('status', 'searching')
+          .is('driver_id', null)
+          .select('id');
+        accepted = !!(updatedRows?.length);
       }
 
-      // Mark notification read
-      supabase
-        .from('notifications')
+      if (accepted) {
+        console.log('[GlobalGuard] ✅ Ride accepted:', targetId);
+        try { localStorage.setItem('last_accepted_driver', userId); } catch {}
+      } else {
+        console.log('[GlobalGuard] Ride already taken');
+      }
+
+      // Mark notification read (fire and forget)
+      supabase.from('notifications')
         .update({ is_read: true })
-        .eq('ride_id', ride.id)
+        .eq('ride_id', targetId)
         .eq('user_id', userId)
         .eq('type', 'new_ride')
         .then(() => {});
 
-      // Hardware GPS wake-up
+      // GPS wake-up
       try {
         navigator.geolocation.getCurrentPosition(() => {}, () => {}, {
           enableHighAccuracy: true, timeout: 10000, maximumAge: 0
@@ -249,19 +287,16 @@ export function GlobalRideOfferGuard() {
     }
 
     cleanup();
-    // Navigate to driver dashboard
     window.location.href = '/driver';
-  }, [ride, cleanup]);
+  }, [ride, rideId, cleanup]);
 
   const handleDecline = useCallback(() => {
-    if (ride) {
-      // Mark notification read
+    if (rideId) {
       supabase.auth.getSession().then(({ data: { session } }) => {
         if (session?.user?.id) {
-          supabase
-            .from('notifications')
+          supabase.from('notifications')
             .update({ is_read: true })
-            .eq('ride_id', ride.id)
+            .eq('ride_id', rideId)
             .eq('user_id', session.user.id)
             .eq('type', 'new_ride')
             .then(() => {});
@@ -269,30 +304,33 @@ export function GlobalRideOfferGuard() {
       });
     }
     cleanup();
-  }, [ride, cleanup]);
+  }, [rideId, cleanup]);
 
-  // Don't render anything if no pending ride
+  // === RENDER: Show immediately when rideId exists, even without enriched data ===
   if (!rideId && !open) return null;
+
+  // Build a skeleton ride for the modal if real data hasn't loaded yet
+  const displayRide = ride || (rideId ? {
+    id: rideId,
+    pickup_address: 'Loading pickup…',
+    dropoff_address: 'Loading destination…',
+    estimated_fare: 0,
+  } : null);
 
   return (
     <div className="fixed inset-0 pointer-events-none" style={{ isolation: 'isolate', zIndex: 2147483647 }}>
+      {/* Dark backdrop while map loads in background */}
+      {open && !ride && (
+        <div className="fixed inset-0 bg-black/90 pointer-events-auto" style={{ zIndex: 2147483646 }} />
+      )}
       <DriverBeepFix
-        incomingRide={open && ride ? { id: ride.id } : null}
+        incomingRide={open && displayRide ? { id: displayRide.id } : null}
         onTimeout={handleDecline}
         timeoutSeconds={25}
       />
       <RideOfferModal
         open={open}
-        ride={ride ? {
-          id: ride.id,
-          pickup_address: ride.pickup_address,
-          dropoff_address: ride.dropoff_address,
-          estimated_fare: ride.estimated_fare,
-          distance_km: ride.distance_km,
-          estimated_duration_minutes: ride.estimated_duration_minutes,
-          pickup_lat: ride.pickup_lat,
-          pickup_lng: ride.pickup_lng,
-        } : null}
+        ride={displayRide}
         countdownSeconds={25}
         driverLocation={null}
         onDecline={handleDecline}
