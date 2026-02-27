@@ -180,12 +180,27 @@ export function GlobalRideOfferGuard() {
     });
 
     // Source 6: Active heartbeat — polls DB every 5s for unread new_ride notifications
-    // Acts as fallback when push notifications are throttled by OS
+    // ONLY for drivers — riders should never see new_ride offer modals
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-    const startHeartbeat = () => {
+    const startHeartbeat = async () => {
       if (heartbeatTimer) return;
+      // Check if user is a driver before starting heartbeat
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) return;
+        const { data: roles } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', session.user.id);
+        const isDriver = roles?.some(r => r.role === 'driver');
+        if (!isDriver) {
+          console.log('[GlobalGuard] 🚫 Not a driver — skipping heartbeat');
+          return;
+        }
+      } catch { return; }
+
       heartbeatTimer = setInterval(async () => {
-        if (!mountedRef.current || openRef.current) return; // Don't poll if modal already showing
+        if (!mountedRef.current || openRef.current) return;
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (!session?.user?.id) return;
@@ -200,10 +215,29 @@ export function GlobalRideOfferGuard() {
             .limit(1);
 
           const foundId = unread?.[0]?.ride_id;
-          if (foundId && !dismissedRidesRef.current.has(foundId)) {
-            console.log('[GlobalGuard] 💓 Heartbeat found ride:', foundId);
-            handleNewRide(foundId);
+          if (!foundId || dismissedRidesRef.current.has(foundId)) return;
+
+          // Verify the ride is still searching before triggering
+          const { data: rideData } = await supabase
+            .from('rides')
+            .select('status')
+            .eq('id', foundId)
+            .maybeSingle();
+
+          if (rideData?.status !== 'searching') {
+            // Stale notification — mark as read and skip
+            dismissedRidesRef.current.add(foundId);
+            await supabase
+              .from('notifications')
+              .update({ is_read: true })
+              .eq('ride_id', foundId)
+              .eq('user_id', session.user.id)
+              .eq('type', 'new_ride');
+            return;
           }
+
+          console.log('[GlobalGuard] 💓 Heartbeat found active ride:', foundId);
+          handleNewRide(foundId);
         } catch {}
       }, 5000);
     };
