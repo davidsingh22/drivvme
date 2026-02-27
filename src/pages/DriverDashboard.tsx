@@ -159,6 +159,23 @@ const DriverDashboard = () => {
   // Sync GPS position to local state for map
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
   
+  // GPS error → non-blocking dismissible toast (never blocks UI)
+  const lastGpsToastRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!gpsError) { lastGpsToastRef.current = null; return; }
+    const key = `${gpsError.code}`;
+    if (key === lastGpsToastRef.current) return;
+    lastGpsToastRef.current = key;
+    if (currentRide || newRideAlertOpen) return;
+    toast({
+      title: gpsError.code === 1 ? (language === 'fr' ? 'GPS refusé' : 'GPS Permission Denied')
+        : gpsError.code === 2 ? (language === 'fr' ? 'Signal GPS perdu' : 'GPS Signal Lost')
+        : (language === 'fr' ? 'GPS lent' : 'GPS Timeout'),
+      description: language === 'fr' ? 'Appuyez sur Réessayer dans les paramètres' : 'Location access needed for tracking',
+      variant: 'destructive',
+    });
+  }, [gpsError?.code, currentRide, newRideAlertOpen]);
+
   const alertStartTimeRef = useRef<number | null>(null);
 
   // Helper function for distance calculation (must be defined before any hooks that call it)
@@ -1440,42 +1457,14 @@ const DriverDashboard = () => {
           {/* Dark overlay for readability */}
           <div className="absolute inset-0 bg-gradient-to-b from-background/90 via-background/85 to-background/95" />
           
-          {/* Content container - relative to appear above background */}
-          <div className="relative z-10 flex flex-col flex-1 overflow-hidden">
-            {/* Banner stack — completely hidden during active ride or ride offer ("Clean Slate" mode) */}
-            <div className="pt-4" style={(currentRide || newRideAlertOpen) ? { display: 'none' } : undefined}>
-              <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
-              
-              {/* GPS Status Indicator */}
-              {(isOnline || currentRide) && (
-                <DriverGPSStatusIndicator
-                  onForceSend={gpsForceWriteWithFeedback}
-                  isStreaming={isGPSStreaming}
-                  isConnected={isGPSConnected}
-                  position={gpsPosition}
-                  secondsSinceLastUpdate={gpsSecondsSinceLastUpdate}
-                  secondsSinceDbSync={gpsSecondsSinceDbSync}
-                  secondsSinceLastGpsFix={gpsSecondsSinceLastGpsFix}
-                  retryCount={gpsRetryCount}
-                  onRetry={retryGPS}
-                  rideId={currentRide?.id ?? null}
-                  lastDbWriteError={gpsLastDbWriteError}
-                  dbWriteRetryCount={gpsDbWriteRetryCount}
-                  isDbSyncing={gpsIsDbSyncing}
-                  authStatus={gpsAuthStatus}
-                  historyWriteCount={gpsHistoryWriteCount}
-                />
-              )}
-              
-              {/* GPS Error Banner */}
-              {!newRideAlertOpen && (
-                <DriverGPSErrorBanner 
-                  error={gpsError} 
-                  retryCount={gpsRetryCount} 
-                  onRetry={retryGPS} 
-                />
-              )}
-            </div>
+           {/* Content container - relative to appear above background */}
+           <div className="relative z-10 flex flex-col flex-1 overflow-hidden">
+             {/* Banner stack — ONLY shown when idle (no active ride, no ride offer) */}
+             {!currentRide && !newRideAlertOpen && (
+               <div className="pt-4">
+                 <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={false} />
+               </div>
+             )}
 
             <div className="p-4 flex-1 overflow-y-auto pb-8">
 
