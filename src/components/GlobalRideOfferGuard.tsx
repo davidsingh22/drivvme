@@ -224,6 +224,21 @@ export function GlobalRideOfferGuard() {
 
     setupRealtime();
 
+    // Source 9: Median native bridge — OneSignal push opened/received inside native wrapper
+    (window as any).median_onesignal_info = (info: any) => {
+      if (!mountedRef.current) return;
+      const rId = info?.additionalData?.ride_id;
+      if (rId) {
+        console.log('[GlobalGuard] 📱 Median native push:', rId);
+        forceInjectRide(rId);
+        handleNewRide(rId);
+        broadcastNewRide(rId);
+      }
+    };
+
+    // Also register via gonative_onesignal_info (legacy bridge name)
+    (window as any).gonative_onesignal_info = (window as any).median_onesignal_info;
+
     return () => {
       unsub1();
       unsub2();
