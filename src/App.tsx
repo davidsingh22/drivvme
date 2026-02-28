@@ -11,11 +11,9 @@ import { supabase } from "@/integrations/supabase/client";
 import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
-import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
-import { initMedianOneSignalAuthLink } from "@/lib/medianOneSignalAuthLink";
 import { initCaptureOneSignalId } from "@/lib/captureOneSignalId";
 
 // Lazy-load all non-landing routes for faster initial page load
@@ -268,36 +266,11 @@ const App = () => {
 
   useEffect(() => {
     initOneSignalAuthLink();
-    initMedianOneSignalAuthLink();
     initCaptureOneSignalId();
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const handleNativeOneSignalInfo = (info: any) => {
-        try {
-          const rideId = info?.additionalData?.ride_id;
-          if (!rideId) return;
-          localStorage.setItem('pendingRideFromPush', rideId);
-          localStorage.setItem('last_notified_ride', rideId);
-          console.log('[NativeBridge] 📱 Stored pending ride from native listener:', rideId);
-        } catch (e) {
-          console.error('[NativeBridge] median_onesignal_info error:', e);
-        }
-      };
-
-      (window as any).median_onesignal_info = handleNativeOneSignalInfo;
-      (window as any).gonative_onesignal_info = handleNativeOneSignalInfo;
-      console.log('[NativeBridge] ✅ median_onesignal_info listener registered');
-    }, 500);
-
-    return () => window.clearTimeout(timer);
   }, []);
 
   return (
     <>
-      {/* Ride modal renders OUTSIDE all providers — nothing can block it */}
-      <GlobalRideOfferGuard />
       <QueryClientProvider client={queryClient}>
         <LanguageProvider>
           <AuthProvider>
