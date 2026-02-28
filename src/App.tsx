@@ -272,6 +272,28 @@ const App = () => {
     initCaptureOneSignalId();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const handleNativeOneSignalInfo = (info: any) => {
+        try {
+          const rideId = info?.additionalData?.ride_id;
+          if (!rideId) return;
+          localStorage.setItem('pendingRideFromPush', rideId);
+          localStorage.setItem('last_notified_ride', rideId);
+          console.log('[NativeBridge] 📱 Stored pending ride from native listener:', rideId);
+        } catch (e) {
+          console.error('[NativeBridge] median_onesignal_info error:', e);
+        }
+      };
+
+      (window as any).median_onesignal_info = handleNativeOneSignalInfo;
+      (window as any).gonative_onesignal_info = handleNativeOneSignalInfo;
+      console.log('[NativeBridge] ✅ median_onesignal_info listener registered');
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, []);
+
   return (
     <>
       {/* Ride modal renders OUTSIDE all providers — nothing can block it */}

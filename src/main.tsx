@@ -14,23 +14,7 @@ try {
   }
 } catch { /* ignore */ }
 
-// === EARLY Median native bridge — available before React mounts ===
-if (!(window as any).median_onesignal_info) {
-  (window as any).median_onesignal_info = (info: any) => {
-    try {
-      const rideId = info?.additionalData?.ride_id;
-      if (rideId) {
-        console.log('[FastPath] 📱 Median native push (pre-React):', rideId);
-        localStorage.setItem('pendingRideFromPush', rideId);
-        localStorage.setItem('last_notified_ride', rideId);
-        window.dispatchEvent(new Event('refresh_ride_status'));
-      }
-    } catch (e) {
-      console.error('[FastPath] median_onesignal_info error:', e);
-    }
-  };
-  (window as any).gonative_onesignal_info = (window as any).median_onesignal_info;
-}
+// Native bridge listener is registered in App.tsx after UI boot (safe zone).
 
 // Prefetch mapbox token immediately on app load for faster map rendering
 import { prefetchMapboxToken } from "@/hooks/useMapboxToken";

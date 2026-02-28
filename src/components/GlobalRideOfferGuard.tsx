@@ -224,37 +224,8 @@ export function GlobalRideOfferGuard() {
 
     setupRealtime();
 
-    // Source 9: Median native bridge — overwrites pre-React version with UI-ready handler
-    (window as any).median_onesignal_info = (info: any) => {
-      try {
-        const rId = info?.additionalData?.ride_id;
-        if (rId) {
-          console.log('[GlobalGuard] 📱 Median native push:', rId);
-          localStorage.setItem('pendingRideFromPush', rId);
-          localStorage.setItem('last_notified_ride', rId);
-          window.dispatchEvent(new Event('refresh_ride_status'));
-        }
-      } catch (e) {
-        console.error('[GlobalGuard] median_onesignal_info error:', e);
-      }
-    };
-    (window as any).gonative_onesignal_info = (window as any).median_onesignal_info;
-
-    // Source 10: Custom event listener — safely bridges native push to React state
-    const handleRefreshRide = () => {
-      try {
-        if (!mountedRef.current) return;
-        const rId = localStorage.getItem('pendingRideFromPush');
-        if (rId) {
-          console.log('[GlobalGuard] 🔄 refresh_ride_status event:', rId);
-          handleNewRide(rId);
-          broadcastNewRide(rId);
-        }
-      } catch (e) {
-        console.error('[GlobalGuard] refresh_ride_status error:', e);
-      }
-    };
-    window.addEventListener('refresh_ride_status', handleRefreshRide);
+    // Native bridge listener is registered in App.tsx (safe zone)
+    // and this guard reacts via the existing localStorage polling path.
 
     return () => {
       unsub1();
@@ -268,7 +239,7 @@ export function GlobalRideOfferGuard() {
       window.removeEventListener('focus', handleVisibility);
       subscription.unsubscribe();
       if (realtimeChannel) supabase.removeChannel(realtimeChannel);
-      window.removeEventListener('refresh_ride_status', handleRefreshRide);
+      
     };
   }, [handleNewRide]);
 
