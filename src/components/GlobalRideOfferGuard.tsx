@@ -40,36 +40,17 @@ function readPendingRideId(): string | null {
 
 /** Force-clear all stale state, then set new ride */
 function forceInjectRide(rideId: string) {
-  clearAllRideMemory();
+  try {
+    localStorage.removeItem('pendingRideFromPush');
+    localStorage.removeItem('last_notified_ride');
+    delete (window as any).__FAST_PATH_RIDE_ID;
+  } catch {}
   try {
     localStorage.setItem('pendingRideFromPush', rideId);
     localStorage.setItem('last_notified_ride', rideId);
   } catch {}
   setPendingRideFromNotification(rideId);
 }
-
-/** Nuclear reset — clears every ride-related artifact from the client */
-function clearAllRideMemory() {
-  try {
-    localStorage.removeItem('pendingRideFromPush');
-    localStorage.removeItem('last_notified_ride');
-    delete (window as any).__FAST_PATH_RIDE_ID;
-  } catch {}
-
-  // Kill BroadcastChannel cache
-  try {
-    const ch = new BroadcastChannel('drivveme_ride_updates');
-    ch.close();
-  } catch {}
-
-  // Wipe OneSignal notification cache (best-effort)
-  try {
-    const OS = (window as any).OneSignal;
-    if (OS?.Notifications?.clearAll) OS.Notifications.clearAll();
-  } catch {}
-}
-
-export { clearAllRideMemory };
 
 export function GlobalRideOfferGuard() {
   // Immediately check for a pending ride — no useEffect delay
@@ -113,8 +94,6 @@ export function GlobalRideOfferGuard() {
   }, [open]);
 
   // === PERSISTENT LISTENERS ===
-  const lastPolledRef = useRef<string | null>(null);
-
   useEffect(() => {
     // Source 1: Global store listener (push click)
     const unsub1 = onPendingRide((id) => handleNewRide(id));
@@ -146,29 +125,7 @@ export function GlobalRideOfferGuard() {
     const t2 = setTimeout(setupForegroundListener, 3000);
     const t3 = setTimeout(setupForegroundListener, 6000);
 
-    // Source 4: Cross-tab storage event (fires when OTHER tabs write localStorage)
-    const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'pendingRideFromPush' && e.newValue && mountedRef.current) {
-        console.log('[GlobalGuard] 📦 Storage event (cross-tab):', e.newValue);
-        handleNewRide(e.newValue);
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-
-    // Source 5: Same-tab localStorage poll (storage event does NOT fire for same-tab writes)
-    const pollInterval = setInterval(() => {
-      if (!mountedRef.current) return;
-      const id = localStorage.getItem('pendingRideFromPush');
-      if (id && id !== lastPolledRef.current) {
-        lastPolledRef.current = id;
-        console.log('[GlobalGuard] 🔄 Poll detected new ride:', id);
-        handleNewRide(id);
-      } else if (!id) {
-        lastPolledRef.current = null;
-      }
-    }, 400);
-
-    // Source 6: Visibility change — re-check on app resume
+    // Source 4: Visibility change — re-check on app resume
     const handleVisibility = () => {
       if (document.visibilityState === 'visible' && mountedRef.current) {
         const id = readPendingRideId();
@@ -178,7 +135,7 @@ export function GlobalRideOfferGuard() {
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleVisibility);
 
-    // Source 7: Auth state — re-check on SIGNED_IN
+    // Source 5: Auth state — re-check on SIGNED_IN
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' && mountedRef.current) {
         const id = readPendingRideId();
@@ -186,56 +143,15 @@ export function GlobalRideOfferGuard() {
       }
     });
 
-    // Source 8: Supabase Realtime — listen for new_ride notifications inserted for this driver
-    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
-
-    const setupRealtime = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const userId = session?.user?.id;
-        if (!userId || !mountedRef.current) return;
-
-        realtimeChannel = supabase
-          .channel('global-guard-rides')
-          .on(
-            'postgres_changes',
-            {
-              event: 'INSERT',
-              schema: 'public',
-              table: 'notifications',
-              filter: `user_id=eq.${userId}`,
-            },
-            (payload: any) => {
-              if (!mountedRef.current) return;
-              const row = payload.new;
-              if (row?.type === 'new_ride' && row?.ride_id) {
-                console.log('[GlobalGuard] 📡 Realtime notification INSERT:', row.ride_id);
-                handleNewRide(row.ride_id);
-              }
-            }
-          )
-          .subscribe((status) => {
-            console.log('[GlobalGuard] 📡 Realtime channel status:', status);
-          });
-      } catch (e) {
-        console.log('[GlobalGuard] Realtime setup error:', e);
-      }
-    };
-
-    setupRealtime();
-
     return () => {
       unsub1();
       unsub2();
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
-      window.removeEventListener('storage', handleStorage);
-      clearInterval(pollInterval);
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('focus', handleVisibility);
       subscription.unsubscribe();
-      if (realtimeChannel) supabase.removeChannel(realtimeChannel);
     };
   }, [handleNewRide]);
 
@@ -315,7 +231,11 @@ export function GlobalRideOfferGuard() {
   }, [rideId]);
 
   const cleanup = useCallback(() => {
-    clearAllRideMemory();
+    try {
+      localStorage.removeItem('pendingRideFromPush');
+      localStorage.removeItem('last_notified_ride');
+      delete (window as any).__FAST_PATH_RIDE_ID;
+    } catch {}
     setOpen(false);
     setRide(null);
     setRideId(null);
