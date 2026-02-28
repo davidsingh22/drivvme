@@ -11,9 +11,11 @@ import { supabase } from "@/integrations/supabase/client";
 import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
+import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
+import { initMedianOneSignalAuthLink } from "@/lib/medianOneSignalAuthLink";
 import { initCaptureOneSignalId } from "@/lib/captureOneSignalId";
 
 // Lazy-load all non-landing routes for faster initial page load
@@ -266,11 +268,14 @@ const App = () => {
 
   useEffect(() => {
     initOneSignalAuthLink();
+    initMedianOneSignalAuthLink();
     initCaptureOneSignalId();
   }, []);
 
   return (
     <>
+      {/* Ride modal renders OUTSIDE all providers — nothing can block it */}
+      <GlobalRideOfferGuard />
       <QueryClientProvider client={queryClient}>
         <LanguageProvider>
           <AuthProvider>

@@ -224,9 +224,6 @@ export function GlobalRideOfferGuard() {
 
     setupRealtime();
 
-    // Native bridge listener is registered in App.tsx (safe zone)
-    // and this guard reacts via the existing localStorage polling path.
-
     return () => {
       unsub1();
       unsub2();
@@ -239,7 +236,6 @@ export function GlobalRideOfferGuard() {
       window.removeEventListener('focus', handleVisibility);
       subscription.unsubscribe();
       if (realtimeChannel) supabase.removeChannel(realtimeChannel);
-      
     };
   }, [handleNewRide]);
 
