@@ -17,15 +17,16 @@ try {
 // === EARLY Median native bridge — available before React mounts ===
 if (!(window as any).median_onesignal_info) {
   (window as any).median_onesignal_info = (info: any) => {
-    const rideId = info?.additionalData?.ride_id;
-    if (rideId) {
-      console.log('[FastPath] 📱 Median native push (pre-React):', rideId);
-      try {
+    try {
+      const rideId = info?.additionalData?.ride_id;
+      if (rideId) {
+        console.log('[FastPath] 📱 Median native push (pre-React):', rideId);
         localStorage.setItem('pendingRideFromPush', rideId);
         localStorage.setItem('last_notified_ride', rideId);
-      } catch {}
-      setPendingRideFromNotification(rideId);
-      (window as any).__FAST_PATH_RIDE_ID = rideId;
+        window.dispatchEvent(new Event('refresh_ride_status'));
+      }
+    } catch (e) {
+      console.error('[FastPath] median_onesignal_info error:', e);
     }
   };
   (window as any).gonative_onesignal_info = (window as any).median_onesignal_info;
