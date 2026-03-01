@@ -64,20 +64,39 @@ export function GlobalRideOfferGuard() {
   const [open, setOpen] = useState<boolean>(() => !!readPendingRideId());
 
   const lastHandledRef = useRef<string | null>(null);
+  const lastSettledRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
   const foregroundListenerRef = useRef(false);
   const fetchCancelRef = useRef<(() => void) | null>(null);
+  const openRef = useRef(open);
+  const activeRideIdRef = useRef<string | null>(rideId);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    activeRideIdRef.current = rideId;
+  }, [rideId]);
+
   /** Core handler: receives a new ride_id from ANY source */
   const handleNewRide = useCallback((id: string) => {
-    if (!mountedRef.current) return;
-    if (id === lastHandledRef.current && open) return; // same ride, already showing
-    
+    if (!mountedRef.current || !id) return;
+
+    if (id === lastSettledRef.current) {
+      console.log('[GlobalGuard] ♻️ Ignoring settled ride replay:', id);
+      return;
+    }
+
+    if (id === lastHandledRef.current && openRef.current) {
+      return; // same ride already visible
+    }
+
     console.log('[GlobalGuard] 🆕 New ride event:', id);
     lastHandledRef.current = id;
 
@@ -87,11 +106,36 @@ export function GlobalRideOfferGuard() {
     // Force-clear + set
     forceInjectRide(id);
 
+    const replacingRide =
+      !!openRef.current &&
+      !!activeRideIdRef.current &&
+      activeRideIdRef.current !== id;
+
     // Reset all state for the new ride
     setRide(null);
+
+    if (replacingRide) {
+      setOpen(false);
+      openRef.current = false;
+      setRideId(null);
+      activeRideIdRef.current = null;
+
+      // Force remount for stale-state resistant transition
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        setRideId(id);
+        activeRideIdRef.current = id;
+        setOpen(true);
+        openRef.current = true;
+      }, 0);
+      return;
+    }
+
     setRideId(id);
+    activeRideIdRef.current = id;
     setOpen(true);
-  }, [open]);
+    openRef.current = true;
+  }, []);
 
   // === PERSISTENT LISTENERS ===
   useEffect(() => {
@@ -231,17 +275,24 @@ export function GlobalRideOfferGuard() {
   }, [rideId]);
 
   const cleanup = useCallback(() => {
+    const settledRideId = activeRideIdRef.current || rideId || lastHandledRef.current;
+    if (settledRideId) {
+      lastSettledRef.current = settledRideId;
+    }
+
     try {
       localStorage.removeItem('pendingRideFromPush');
       localStorage.removeItem('last_notified_ride');
       delete (window as any).__FAST_PATH_RIDE_ID;
     } catch {}
+
     setOpen(false);
+    openRef.current = false;
     setRide(null);
     setRideId(null);
-    lastHandledRef.current = null;
+    activeRideIdRef.current = null;
     fetchCancelRef.current = null;
-  }, []);
+  }, [rideId]);
 
   const handleAccept = useCallback(async () => {
     const targetId = rideId;
