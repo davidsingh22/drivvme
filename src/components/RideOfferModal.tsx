@@ -4,6 +4,7 @@ import { MapPin, Navigation, Clock, DollarSign, Zap, Trophy, X, Shield, Car } fr
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { formatCurrency } from '@/lib/pricing';
 import { calculatePlatformFee, calculateDriverEarnings } from '@/lib/platformFees';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -74,21 +75,25 @@ export function RideOfferModal({
     );
   }, [driverLocation, ride?.pickup_lat, ride?.pickup_lng]);
 
-  // Reset timer when modal actually appears — countdown starts from NOW, not from DB creation time.
+  // Detect skeleton/loading state: fare === 0 means data hasn't arrived yet
+  const isLoading = !ride || ride.estimated_fare === 0;
+
+  // Reset timer when modal actually appears WITH real data — countdown starts from NOW, not from DB creation time.
   // The parent always passes countdownSeconds=25 (full), regardless of notification age.
   // The system only rejects rides older than 90s, so the driver always gets a fresh 25s visual timer.
+  // IMPORTANT: countdown only starts once real data is hydrated (isLoading === false)
   useEffect(() => {
-    if (open && ride) {
-      console.log('[RideOfferModal] ⏱️ Modal opened — starting fresh', countdownSeconds, 's countdown NOW');
+    if (open && ride && !isLoading) {
+      console.log('[RideOfferModal] ⏱️ Modal hydrated — starting fresh', countdownSeconds, 's countdown NOW');
       setTimeLeft(countdownSeconds);
       setShowUberShimmer(true);
       tapGuardRef.current = false; // reset tap guard for new offer
     }
-  }, [open, ride?.id, countdownSeconds]);
+  }, [open, ride?.id, isLoading, countdownSeconds]);
 
-  // Countdown timer — use ref for onDecline to avoid restarting interval on every render
+  // Countdown timer — only runs after real data is hydrated
   useEffect(() => {
-    if (!open) return;
+    if (!open || isLoading) return;
 
     timerRef.current = window.setInterval(() => {
       setTimeLeft((prev) => {
@@ -104,7 +109,7 @@ export function RideOfferModal({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [open]);
+  }, [open, isLoading]);
 
   // Uber shimmer only twice then remove class
   useEffect(() => {
@@ -116,10 +121,10 @@ export function RideOfferModal({
   if (!ride) return null;
 
   // Log when modal JSX is actually mounted/rendered (not just state set)
-  console.log('[RideOfferModal] JSX rendered — open:', open, 'ride:', ride?.id);
+  console.log('[RideOfferModal] JSX rendered — open:', open, 'ride:', ride?.id, 'isLoading:', isLoading);
 
   const handleAccept = () => {
-    if (tapGuardRef.current) return;
+    if (tapGuardRef.current || isLoading) return; // block accept while loading
     tapGuardRef.current = true;
     onAcceptRef.current();
     setTimeout(() => { tapGuardRef.current = false; }, 1000);
@@ -132,7 +137,7 @@ export function RideOfferModal({
     setTimeout(() => { tapGuardRef.current = false; }, 1000);
   };
 
-  const fare = ride.estimated_fare;
+  const fare = ride?.estimated_fare ?? 0;
   const platformFee = calculatePlatformFee(fare);
   const driverEarnings = calculateDriverEarnings(fare);
   
@@ -176,11 +181,13 @@ export function RideOfferModal({
                   <span className="text-xl font-semibold text-primary">Drivveme</span>
                 </div>
                 <div className={`px-4 py-2 rounded-full font-bold text-lg ${
-                  timeLeft <= 10 
-                    ? 'bg-destructive/20 border border-destructive/50 text-destructive animate-pulse' 
-                    : 'bg-white/10 border border-white/10 text-white'
+                  isLoading
+                    ? 'bg-white/10 border border-white/10 text-white/50'
+                    : timeLeft <= 10 
+                      ? 'bg-destructive/20 border border-destructive/50 text-destructive animate-pulse' 
+                      : 'bg-white/10 border border-white/10 text-white'
                 }`}>
-                  {timeLeft}s
+                  {isLoading ? '…' : `${timeLeft}s`}
                 </div>
               </div>
 
@@ -229,7 +236,10 @@ export function RideOfferModal({
                     <div className="mt-1 h-3 w-3 rounded-full bg-success flex-shrink-0" />
                     <div>
                       <p className="text-white/60 text-xs mb-0.5">{language === 'fr' ? 'Ramassage' : 'Pickup'}</p>
-                      <p className="text-white font-medium line-clamp-2">{ride.pickup_address}</p>
+                      {isLoading 
+                        ? <Skeleton className="h-5 w-48 bg-white/10" />
+                        : <p className="text-white font-medium line-clamp-2">{ride?.pickup_address}</p>
+                      }
                     </div>
                   </div>
                 </div>
@@ -242,41 +252,67 @@ export function RideOfferModal({
                       <Car className="h-4 w-4 text-primary" />
                       Drivveme
                     </div>
-                    <div className="mt-2 text-3xl font-extrabold text-success">
-                      ${driverEarnings.toFixed(2)}
-                    </div>
-                    <div className="text-success text-sm font-medium">
-                      {language === 'fr' ? 'Vous gagnez' : 'You earn'}
-                    </div>
+                    {isLoading ? (
+                      <>
+                        <Skeleton className="h-9 w-24 mt-2 bg-white/10" />
+                        <Skeleton className="h-4 w-16 mt-1 bg-white/10" />
+                      </>
+                    ) : (
+                      <>
+                        <div className="mt-2 text-3xl font-extrabold text-success">
+                          ${driverEarnings.toFixed(2)}
+                        </div>
+                        <div className="text-success text-sm font-medium">
+                          {language === 'fr' ? 'Vous gagnez' : 'You earn'}
+                        </div>
+                      </>
+                    )}
                   </div>
 
                   {/* Uber Box - animated white border */}
                   <div className={`animated-border-white ${showUberShimmer ? 'uber-shimmer' : ''} p-4`}>
                     <div className="text-white/70 text-sm">Uber</div>
-                    <div className="mt-2 text-xl font-bold text-white">
-                      {language === 'fr' ? 'Seulement' : 'Only'} ${uberEstimatedEarnings.toFixed(2)} <span className="text-white/60 text-sm">est</span>
-                    </div>
-                    <div className="text-sm mt-1">
-                      <span className="uber-fee-glow">
-                        {language === 'fr' 
-                          ? `Uber prend ~$${uberEstimatedCut.toFixed(2)} est`
-                          : `Uber typically takes ~$${uberEstimatedCut.toFixed(2)} est`
-                        }
-                      </span>
-                    </div>
+                    {isLoading ? (
+                      <>
+                        <Skeleton className="h-6 w-28 mt-2 bg-white/10" />
+                        <Skeleton className="h-4 w-32 mt-1 bg-white/10" />
+                      </>
+                    ) : (
+                      <>
+                        <div className="mt-2 text-xl font-bold text-white">
+                          {language === 'fr' ? 'Seulement' : 'Only'} ${uberEstimatedEarnings.toFixed(2)} <span className="text-white/60 text-sm">est</span>
+                        </div>
+                        <div className="text-sm mt-1">
+                          <span className="uber-fee-glow">
+                            {language === 'fr' 
+                              ? `Uber prend ~$${uberEstimatedCut.toFixed(2)} est`
+                              : `Uber typically takes ~$${uberEstimatedCut.toFixed(2)} est`
+                            }
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
                 {/* Accept Button — multiple event handlers for reliable mobile taps */}
                 <button
                   type="button"
+                  disabled={isLoading}
                   onClick={(e) => { e.stopPropagation(); handleAccept(); }}
                   onTouchStartCapture={(e) => { e.stopPropagation(); }}
                   onTouchEndCapture={(e) => { e.preventDefault(); e.stopPropagation(); handleAccept(); }}
-                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 active:scale-95 text-white rounded-xl relative z-[60] touch-manipulation select-none cursor-pointer"
+                  className={`w-full h-14 text-lg font-bold text-white rounded-xl relative z-[60] touch-manipulation select-none cursor-pointer ${
+                    isLoading 
+                      ? 'bg-success/50 cursor-wait' 
+                      : 'accept-pulse bg-success hover:bg-success/90 active:scale-95'
+                  }`}
                   style={{ WebkitTapHighlightColor: 'transparent', WebkitUserSelect: 'none' } as React.CSSProperties}
                 >
-                  {language === 'fr' ? 'Accepter la course' : 'Accept Ride'}
+                  {isLoading 
+                    ? (language === 'fr' ? 'Chargement…' : 'Loading…')
+                    : (language === 'fr' ? 'Accepter la course' : 'Accept Ride')
+                  }
                 </button>
 
                 {/* Priority Driver Reward */}
