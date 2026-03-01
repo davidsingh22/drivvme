@@ -104,10 +104,11 @@ const DriverDashboard = () => {
   // Cache the full ride data when alert opens so it persists even if ride is taken/cancelled
   const [cachedAlertRide, setCachedAlertRide] = useState<RideRequest | null>(null);
   
-  // Refs to avoid stale closures in the realtime listener
+  // Refs to avoid stale closures in realtime/notification listeners
   const currentRideRef = useRef<RideRequest | null>(null);
   const newRideAlertOpenRef = useRef(false);
   const newRideAlertRideIdRef = useRef<string | null>(null);
+  const lastHandledOfferIdRef = useRef<string | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
@@ -443,12 +444,39 @@ const DriverDashboard = () => {
     }
     let cancelled = false;
 
+    const wasAlreadyHandled = (candidateId?: string | null) =>
+      !!candidateId && candidateId === lastHandledOfferIdRef.current;
+
+    const isCurrentlyDisplayed = (candidateId?: string | null) =>
+      !!candidateId && !!newRideAlertOpenRef.current && newRideAlertRideIdRef.current === candidateId;
+
     /**
      * Show a ride offer from a ride_id (used by both recovery query and global store).
      * Returns true if successfully showed the modal.
      */
     const showOfferForRide = async (rideId: string): Promise<boolean> => {
-      if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return false;
+      if (cancelled || !rideId || currentRideRef.current) return false;
+      if (wasAlreadyHandled(rideId)) {
+        console.log('[Recovery] ⛔ Ignoring already-handled ride:', rideId);
+        return false;
+      }
+      if (isCurrentlyDisplayed(rideId)) return false;
+
+      const replacingOpenRide =
+        !!newRideAlertOpenRef.current &&
+        !!newRideAlertRideIdRef.current &&
+        newRideAlertRideIdRef.current !== rideId;
+
+      if (replacingOpenRide) {
+        console.log('[Recovery] 🔄 Force-remounting modal for new ride:', rideId);
+        setNewRideAlertOpen(false);
+        setCachedAlertRide(null);
+        setNewRideAlertRideId(null);
+        newRideAlertOpenRef.current = false;
+        newRideAlertRideIdRef.current = null;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (cancelled || currentRideRef.current) return false;
+      }
 
       const { data: ride, error: rideError } = await supabase
         .from('rides')
@@ -461,7 +489,7 @@ const DriverDashboard = () => {
         console.log('[Recovery] Ride not in searching status for', rideId);
         return false;
       }
-      if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return false;
+      if (cancelled || currentRideRef.current || wasAlreadyHandled(ride.id) || isCurrentlyDisplayed(ride.id)) return false;
 
       // Only reject if ride is truly expired (>90s). Visual countdown always starts fresh at 25s.
       const notifAge = (Date.now() - new Date(ride.requested_at || ride.created_at).getTime()) / 1000;
@@ -475,7 +503,9 @@ const DriverDashboard = () => {
       setRecoveredCountdown(null); // null = use full default countdown
       setCachedAlertRide(ride);
       setNewRideAlertRideId(ride.id);
+      newRideAlertRideIdRef.current = ride.id;
       setNewRideAlertOpen(true);
+      newRideAlertOpenRef.current = true;
       // Auto-dismiss reconnecting overlay so the modal is visible immediately
       setShowReconnect(false);
       alertStartTimeRef.current = Date.now() - (notifAge * 1000);
@@ -490,23 +520,35 @@ const DriverDashboard = () => {
       if (cancelled) return;
 
       const hasCurrentRide = !!currentRideRef.current;
-      const hasAlertOpen = !!newRideAlertOpenRef.current;
-      if (hasCurrentRide || hasAlertOpen) {
-        console.log(`[Recovery] ⏭️ Skipping (attempt ${attempt}) — currentRide:`, hasCurrentRide, 'alertOpen:', hasAlertOpen);
+      if (hasCurrentRide) {
+        console.log(`[Recovery] ⏭️ Skipping (attempt ${attempt}) — active ride in progress`);
         return;
       }
 
       try {
-        // STEP 0: Check localStorage signal FIRST (works before auth hydrates)
+        // STEP 0: Check localStorage / fast-path signal FIRST (works before auth hydrates)
+        let lsRideId: string | null = null;
         try {
-          const lsRideId = localStorage.getItem('pendingRideFromPush');
-          if (lsRideId && !currentRideRef.current && !newRideAlertOpenRef.current) {
-            console.log(`[Recovery] (attempt ${attempt}) 📱 Found localStorage signal:`, lsRideId);
-            localStorage.removeItem('pendingRideFromPush');
-            // Try to consume from global store too
-            consumePendingRide();
+          lsRideId = localStorage.getItem('pendingRideFromPush') || (window as any).__FAST_PATH_RIDE_ID || null;
+          if (lsRideId) {
+            if (wasAlreadyHandled(lsRideId)) {
+              console.log(`[Recovery] (attempt ${attempt}) ♻️ Ignoring stale local ride signal:`, lsRideId);
+              localStorage.removeItem('pendingRideFromPush');
+              if (localStorage.getItem('last_notified_ride') === lsRideId) {
+                localStorage.removeItem('last_notified_ride');
+              }
+              if ((window as any).__FAST_PATH_RIDE_ID === lsRideId) {
+                delete (window as any).__FAST_PATH_RIDE_ID;
+              }
+            } else if (!isCurrentlyDisplayed(lsRideId)) {
+              console.log(`[Recovery] (attempt ${attempt}) 📱 Found local signal:`, lsRideId);
+              const shown = await showOfferForRide(lsRideId);
+              if (shown) return;
+            }
           }
-        } catch { /* ignore localStorage errors */ }
+        } catch {
+          // ignore localStorage errors
+        }
 
         // SOFT AUTH: Try to get session but NEVER block — query anyway with ride_id
         let activeSession: any = null;
@@ -524,24 +566,26 @@ const DriverDashboard = () => {
 
         // If we have a ride_id from localStorage, try direct fetch WITHOUT needing userId
         const lsDirectId = localStorage.getItem('pendingRideFromPush') || (window as any).__FAST_PATH_RIDE_ID;
-        if (!effectiveUserId && lsDirectId) {
+        if (!effectiveUserId && lsDirectId && !wasAlreadyHandled(lsDirectId) && !isCurrentlyDisplayed(lsDirectId)) {
           console.log(`[Recovery] (attempt ${attempt}) 🚀 No auth yet — direct ride fetch for:`, lsDirectId);
-          const shown = await showOfferForRide(lsDirectId);
-          if (shown) return;
-          // Don't give up — auth may arrive on next attempt
+          await showOfferForRide(lsDirectId);
           return;
         }
         if (!effectiveUserId) {
-          console.log(`[Recovery] (attempt ${attempt}) No auth + no ride_id — waiting for next tick`);
+          console.log(`[Recovery] (attempt ${attempt}) No auth + no fresh ride_id — waiting for next tick`);
           return;
         }
 
-        // STEP 2: Check global pending ride store (from OneSignal click before mount)
+        // STEP 2: Check global pending ride store (from push click before mount)
         const globalRideId = consumePendingRide();
         if (globalRideId) {
-          console.log(`[Recovery] (attempt ${attempt}) 🌐 Found global pending ride:`, globalRideId);
-          const shown = await showOfferForRide(globalRideId);
-          if (shown) return;
+          if (wasAlreadyHandled(globalRideId)) {
+            console.log(`[Recovery] (attempt ${attempt}) ♻️ Ignoring handled global ride:`, globalRideId);
+          } else {
+            console.log(`[Recovery] (attempt ${attempt}) 🌐 Found global pending ride:`, globalRideId);
+            const shown = await showOfferForRide(globalRideId);
+            if (shown) return;
+          }
         }
 
         // STEP 3: Query unread notifications
@@ -566,7 +610,22 @@ const DriverDashboard = () => {
           console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications found`);
           return;
         }
-        if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return;
+
+        if (wasAlreadyHandled(pending.ride_id)) {
+          console.log(`[Recovery] (attempt ${attempt}) ♻️ Skipping handled notification ride:`, pending.ride_id);
+          await supabase
+            .from('notifications')
+            .update({ is_read: true })
+            .eq('ride_id', pending.ride_id)
+            .eq('user_id', effectiveUserId)
+            .eq('type', 'new_ride');
+          return;
+        }
+
+        if (isCurrentlyDisplayed(pending.ride_id)) {
+          console.log(`[Recovery] (attempt ${attempt}) ⏭️ Ride already displayed:`, pending.ride_id);
+          return;
+        }
 
         const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
         console.log(`[Recovery] (attempt ${attempt}) 📋 Found notification — ride:`, pending.ride_id, 'age:', Math.round(notifAge), 's');
@@ -754,9 +813,36 @@ const DriverDashboard = () => {
             }
 
             if (notif.type !== 'new_ride' || !notif.ride_id) return;
-            if (currentRideRef.current || newRideAlertOpenRef.current) {
-              console.log('[Realtime] ⏭️ Already busy — currentRide:', !!currentRideRef.current, 'alertOpen:', !!newRideAlertOpenRef.current);
+
+            if (notif.ride_id === lastHandledOfferIdRef.current) {
+              console.log('[Realtime] ♻️ Ignoring already-handled ride:', notif.ride_id);
               return;
+            }
+
+            if (currentRideRef.current) {
+              console.log('[Realtime] ⏭️ Active ride in progress — ignoring new offer');
+              return;
+            }
+
+            if (newRideAlertOpenRef.current && newRideAlertRideIdRef.current === notif.ride_id) {
+              console.log('[Realtime] ⏭️ Same ride already open:', notif.ride_id);
+              return;
+            }
+
+            const replacingOpenRide =
+              !!newRideAlertOpenRef.current &&
+              !!newRideAlertRideIdRef.current &&
+              newRideAlertRideIdRef.current !== notif.ride_id;
+
+            if (replacingOpenRide) {
+              console.log('[Realtime] 🔄 Force-remounting modal for new ride:', notif.ride_id);
+              setNewRideAlertOpen(false);
+              setCachedAlertRide(null);
+              setNewRideAlertRideId(null);
+              newRideAlertOpenRef.current = false;
+              newRideAlertRideIdRef.current = null;
+              await new Promise((resolve) => setTimeout(resolve, 0));
+              if (currentRideRef.current) return;
             }
 
             // Fetch the ride details
@@ -773,10 +859,12 @@ const DriverDashboard = () => {
             }
 
             console.log('[Realtime] 🔔 Showing ride offer from realtime:', ride.id);
-              
+
             setCachedAlertRide(ride);
             setNewRideAlertRideId(ride.id);
+            newRideAlertRideIdRef.current = ride.id;
             setNewRideAlertOpen(true);
+            newRideAlertOpenRef.current = true;
             setShowReconnect(false); // Auto-dismiss reconnecting overlay
             setRecoveredCountdown(null); // fresh offer = full countdown
             alertStartTimeRef.current = Date.now();
@@ -1057,10 +1145,13 @@ const DriverDashboard = () => {
     }
 
     // Stop the beep immediately and clear cached ride
-    const acceptedRideId = newRideAlertRideId; // capture before clearing
+    const acceptedRideId = ride.id;
+    clearPendingRideMemory(acceptedRideId);
     setNewRideAlertOpen(false);
     setCachedAlertRide(null);
     setNewRideAlertRideId(null);
+    newRideAlertOpenRef.current = false;
+    newRideAlertRideIdRef.current = null;
     setRecoveredCountdown(null);
     setBusyAction('accept');
 
@@ -1341,9 +1432,25 @@ const DriverDashboard = () => {
   const currentRideFee = currentRide ? calculatePlatformFee(currentRideFareForFee) : 0;
   const driverEarnings = currentRide ? currentRideFareForFee - currentRideFee : 0;
 
+  const clearPendingRideMemory = useCallback((handledRideId?: string | null) => {
+    if (handledRideId) {
+      lastHandledOfferIdRef.current = handledRideId;
+    }
+
+    try {
+      localStorage.removeItem('pendingRideFromPush');
+      localStorage.removeItem('last_notified_ride');
+      delete (window as any).__FAST_PATH_RIDE_ID;
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
   // Shared cleanup function for accept/decline/timeout
   const cleanupOffer = (markRead: boolean = true) => {
-    const rideId = newRideAlertRideId;
+    const rideId = newRideAlertRideIdRef.current || newRideAlertRideId;
+    clearPendingRideMemory(rideId);
+
     // Clear BOTH state AND refs immediately to prevent race conditions
     setNewRideAlertOpen(false);
     setCachedAlertRide(null);
@@ -1352,6 +1459,7 @@ const DriverDashboard = () => {
     newRideAlertRideIdRef.current = null;
     alertStartTimeRef.current = null;
     setRecoveredCountdown(null);
+
     if (markRead && rideId && user) {
       supabase
         .from('notifications')
@@ -1382,7 +1490,10 @@ const DriverDashboard = () => {
         onDecline={() => cleanupOffer(true)}
         onAccept={() => {
           setRecoveredCountdown(null);
-          if (cachedAlertRide) acceptRide(cachedAlertRide);
+          const rideToAccept = cachedAlertRide;
+          if (!rideToAccept) return;
+          cleanupOffer(false);
+          acceptRide(rideToAccept);
         }}
       />
     </div>
