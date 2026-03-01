@@ -109,10 +109,24 @@ export default function AdminDriversLive() {
     }
   }, [authLoading, session, isAdmin, navigate]);
 
-  // Load initial online drivers with names
+  // Load initial online drivers with names — auto-clean stale ghost sessions
   const loadOnlineDrivers = useCallback(async () => {
     setIsLoading(true);
     try {
+      // First, auto-clean: set drivers offline if no GPS update in 10+ minutes
+      const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await supabase
+        .from("driver_locations")
+        .update({ is_online: false, updated_at: new Date().toISOString() })
+        .eq("is_online", true)
+        .lt("updated_at", staleThreshold);
+      // Also sync driver_profiles
+      await supabase
+        .from("driver_profiles")
+        .update({ is_online: false, updated_at: new Date().toISOString() })
+        .eq("is_online", true)
+        .lt("updated_at", staleThreshold);
+
       const { data, error } = await supabase
         .from("driver_locations")
         .select("*")
