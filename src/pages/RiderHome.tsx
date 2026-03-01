@@ -1,7 +1,8 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Car } from 'lucide-react';
+import { Car, Shield } from 'lucide-react';
 import { useEffect, useRef, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
@@ -9,6 +10,7 @@ import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 const RiderHome = () => {
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const gpsStarted = useRef(false);
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
@@ -185,6 +187,26 @@ const RiderHome = () => {
             Sign Out
           </button>
         </div>
+
+        {/* Admin shortcut — only visible to admin users */}
+        {isAdmin && (
+          <motion.button
+            onClick={() => navigate('/admin')}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white/90 hover:text-white transition-colors"
+            style={{
+              background: 'rgba(255,255,255,0.1)',
+              backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.15)',
+            }}
+            whileTap={{ scale: 0.95 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+          >
+            <Shield className="h-4 w-4" />
+            Admin Dashboard
+          </motion.button>
+        )}
       </motion.div>
     </div>
   );
