@@ -508,27 +508,31 @@ const DriverDashboard = () => {
           }
         } catch { /* ignore localStorage errors */ }
 
-        // AUTH-GATE: Force session refresh, but HARD-STOP if no session available.
-        // This prevents querying with a null user_id which returns zero results.
+        // SOFT AUTH: Try to get session but NEVER block — query anyway with ride_id
         let activeSession: any = null;
         try {
           const { data: { session: freshSession } } = await supabase.auth.getSession();
           activeSession = freshSession;
           if (!freshSession) {
-            console.log(`[Recovery] (attempt ${attempt}) ⚠️ Auth Status: No Session — attempting refresh…`);
             const { data: refreshed } = await supabase.auth.refreshSession();
             activeSession = refreshed?.session;
           }
-        } catch (e) {
-          console.warn(`[Recovery] (attempt ${attempt}) Session check error:`, e);
-        }
+        } catch {}
 
         const effectiveUserId = activeSession?.user?.id;
-        console.log(`[Recovery] Checking for ride. Auth Status: ${effectiveUserId ? 'Authenticated (uid: ' + effectiveUserId + ')' : 'No Session'} (attempt ${attempt})`);
+        console.log(`[Recovery] (attempt ${attempt}) Auth: ${effectiveUserId ? 'uid=' + effectiveUserId : 'NO SESSION — proceeding anyway'}`);
 
-        // HARD AUTH-GATE: Do not query the database without a valid user ID.
+        // If we have a ride_id from localStorage, try direct fetch WITHOUT needing userId
+        const lsDirectId = localStorage.getItem('pendingRideFromPush') || (window as any).__FAST_PATH_RIDE_ID;
+        if (!effectiveUserId && lsDirectId) {
+          console.log(`[Recovery] (attempt ${attempt}) 🚀 No auth yet — direct ride fetch for:`, lsDirectId);
+          const shown = await showOfferForRide(lsDirectId);
+          if (shown) return;
+          // Don't give up — auth may arrive on next attempt
+          return;
+        }
         if (!effectiveUserId) {
-          console.log(`[Recovery] ❌ (attempt ${attempt}) No authenticated user — skipping DB query, will retry on next ladder step or SIGNED_IN event`);
+          console.log(`[Recovery] (attempt ${attempt}) No auth + no ride_id — waiting for next tick`);
           return;
         }
 
@@ -595,18 +599,19 @@ const DriverDashboard = () => {
       }
     };
 
-    // ===== RETRY LADDER: 500ms intervals for first 5s (10 attempts) =====
+    // ===== RETRY LADDER: High-frequency burst in first 3s =====
     console.log('[Recovery] 🚀 Effect mounted. userId:', userId || '(pending auth)');
+    const BURST_SCHEDULE = [0, 500, 1500, 3000]; // 4 knocks in 3s
     const runLadder = () => {
       const timers: ReturnType<typeof setTimeout>[] = [];
-      for (let i = 0; i < 10; i++) {
-        timers.push(setTimeout(() => checkPendingOffers(i), i * 500));
-      }
+      BURST_SCHEDULE.forEach((ms, i) => {
+        timers.push(setTimeout(() => checkPendingOffers(i), ms));
+      });
       return timers;
     };
 
-    // Only run initial ladder if we already have a userId
-    const initialTimers = userId ? runLadder() : [];
+    // ALWAYS run the ladder — even without userId (auth-free path uses ride_id directly)
+    const initialTimers = runLadder();
 
     // Poll every 3 seconds as safety net — start immediately if authenticated,
     // otherwise the onAuthStateChange SIGNED_IN handler will start it.
