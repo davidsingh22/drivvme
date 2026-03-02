@@ -46,7 +46,7 @@ interface OnlineRider {
   };
 }
 
-const ONLINE_THRESHOLD_MINUTES = 5;
+const STALE_THRESHOLD_MINUTES = 30; // visual badge only, not a filter
 
 const LiveRidersMap = () => {
   const { user, isLoading: authLoading, roles } = useAuth();
@@ -104,13 +104,11 @@ const LiveRidersMap = () => {
     try {
       setIsLoading(true);
       
-      const thresholdTime = new Date(Date.now() - ONLINE_THRESHOLD_MINUTES * 60 * 1000).toISOString();
-      
+      // Show ALL riders marked as online, regardless of last_seen_at
       const { data: locations, error: locError } = await supabase
         .from('rider_locations')
         .select('*')
-        .eq('is_online', true)
-        .gte('last_seen_at', thresholdTime);
+        .eq('is_online', true);
 
       if (locError) throw locError;
 
