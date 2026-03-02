@@ -667,6 +667,27 @@ const RideBooking = () => {
       setStep('input');
       // Clean the URL without triggering a re-render
       window.history.replaceState({}, document.title, '/ride');
+
+      // ── Immediately create a REQUESTED ride_request so admins see the rider woke up ──
+      if (user?.id) {
+        const riderName = profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : (user.email || '');
+        supabase.from('ride_requests' as any).insert({
+          rider_id: user.id,
+          rider_name: riderName,
+          pickup_text: 'Selecting…',
+          pickup_lat: 0,
+          pickup_lng: 0,
+          dropoff_text: 'Selecting…',
+          dropoff_lat: 0,
+          dropoff_lng: 0,
+          status: 'REQUESTED',
+        } as any).select('id').single().then(({ data }: any) => {
+          if (data) {
+            rideRequestIdRef.current = data.id;
+            console.log('[RideBooking] ride_request REQUESTED created:', data.id);
+          }
+        });
+      }
     }
   }, []); // only on mount
 
@@ -1414,25 +1435,41 @@ const RideBooking = () => {
 
       // ── NOTE: We show payment UI AFTER ride creation so PaymentForm has a valid rideId ──
 
-      // ── RIDE REQUEST TRACKING: Insert ride_requests record for admin visibility ──
+      // ── RIDE REQUEST TRACKING: Update existing ride_request with locations, or insert if missing ──
       try {
         const riderName = profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : (user.email || '');
-        const { data: rr } = await supabase.from('ride_requests' as any).insert({
-          rider_id: user.id,
-          rider_name: riderName,
-          pickup_text: pickup.address,
-          pickup_lat: pickup.lat,
-          pickup_lng: pickup.lng,
-          dropoff_text: dropoff.address,
-          dropoff_lat: dropoff.lat,
-          dropoff_lng: dropoff.lng,
-          estimated_fare: fareEstimate.total,
-          estimated_minutes: Math.round(durationMinutes),
-          status: 'REQUESTED',
-        } as any).select('id').single();
-        if (rr) rideRequestIdRef.current = (rr as any).id;
+        if (rideRequestIdRef.current) {
+          // Update the early-created record with actual pickup/dropoff details
+          await supabase.from('ride_requests' as any).update({
+            pickup_text: pickup.address,
+            pickup_lat: pickup.lat,
+            pickup_lng: pickup.lng,
+            dropoff_text: dropoff.address,
+            dropoff_lat: dropoff.lat,
+            dropoff_lng: dropoff.lng,
+            estimated_fare: fareEstimate.total,
+            estimated_minutes: Math.round(durationMinutes),
+            status: 'SEARCHING_DRIVER',
+          } as any).eq('id', rideRequestIdRef.current);
+        } else {
+          // Fallback: create if early insert didn't happen
+          const { data: rr } = await supabase.from('ride_requests' as any).insert({
+            rider_id: user.id,
+            rider_name: riderName,
+            pickup_text: pickup.address,
+            pickup_lat: pickup.lat,
+            pickup_lng: pickup.lng,
+            dropoff_text: dropoff.address,
+            dropoff_lat: dropoff.lat,
+            dropoff_lng: dropoff.lng,
+            estimated_fare: fareEstimate.total,
+            estimated_minutes: Math.round(durationMinutes),
+            status: 'SEARCHING_DRIVER',
+          } as any).select('id').single();
+          if (rr) rideRequestIdRef.current = (rr as any).id;
+        }
       } catch (e) {
-        console.warn('ride_requests insert failed (non-blocking)', e);
+        console.warn('ride_requests update failed (non-blocking)', e);
       }
 
       // ── RIDE CREATION via raw fetch (bypasses Supabase client internals) ──
