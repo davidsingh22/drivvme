@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      active_sessions: {
+        Row: {
+          id: string
+          is_booking: boolean
+          rider_name: string | null
+          started_at: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          is_booking?: boolean
+          rider_name?: string | null
+          started_at?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          is_booking?: boolean
+          rider_name?: string | null
+          started_at?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       custom_locations: {
         Row: {
           address: string
