@@ -668,23 +668,29 @@ const RideBooking = () => {
       // Clean the URL without triggering a re-render
       window.history.replaceState({}, document.title, '/ride');
 
-      // ── Immediately create a REQUESTED ride_request so admins see the rider woke up ──
+      // ── Immediately create a BOOK_CLICKED ride_request so admins see the rider woke up ──
       if (user?.id) {
         const riderName = profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : (user.email || '');
+        // Use warm GPS if available for initial coords
+        let initLat = 0, initLng = 0;
+        try {
+          const warm = JSON.parse(localStorage.getItem('drivveme_gps_warm') || '{}');
+          if (warm.lat && warm.lng) { initLat = warm.lat; initLng = warm.lng; }
+        } catch {}
         supabase.from('ride_requests' as any).insert({
           rider_id: user.id,
           rider_name: riderName,
-          pickup_text: 'Selecting…',
-          pickup_lat: 0,
-          pickup_lng: 0,
+          pickup_text: initLat ? 'Detecting…' : 'Selecting…',
+          pickup_lat: initLat,
+          pickup_lng: initLng,
           dropoff_text: 'Selecting…',
           dropoff_lat: 0,
           dropoff_lng: 0,
-          status: 'REQUESTED',
+          status: 'BOOK_CLICKED',
         } as any).select('id').single().then(({ data }: any) => {
           if (data) {
             rideRequestIdRef.current = data.id;
-            console.log('[RideBooking] ride_request REQUESTED created:', data.id);
+            console.log('[RideBooking] ride_request BOOK_CLICKED created:', data.id);
           }
         });
       }
