@@ -1,16 +1,16 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeft, RefreshCw, Search, Clock, CheckCircle, XCircle, AlertTriangle, Users } from "lucide-react";
+import { ArrowLeft, RefreshCw, Search, Clock, CheckCircle, XCircle, AlertTriangle, Users, Zap } from "lucide-react";
 import { format } from "date-fns";
 
 interface RideRequest {
@@ -34,13 +34,16 @@ interface RideRequest {
 }
 
 const STATUS_OPTIONS = [
-  "ALL", "REQUESTED", "SEARCHING_DRIVER", "OFFER_SENT", "DRIVER_ACCEPTED",
+  "ALL", "BOOK_CLICKED", "REQUESTED", "SEARCHING_DRIVER", "OFFER_SENT", "DRIVER_ACCEPTED",
   "DRIVER_EN_ROUTE", "DRIVER_ARRIVED", "RIDE_STARTED", "RIDE_COMPLETED",
-  "CANCELLED_BY_RIDER", "CANCELLED_BY_DRIVER", "EXPIRED"
+  "CANCELLED_BY_RIDER", "CANCELLED_BY_DRIVER", "EXPIRED", "ABANDONED"
 ];
+
+const PENDING_STATUSES = ["BOOK_CLICKED", "REQUESTED", "SEARCHING_DRIVER", "OFFER_SENT"];
 
 const statusColor = (status: string) => {
   switch (status) {
+    case "BOOK_CLICKED": return "bg-violet-500/20 text-violet-400 border-violet-500/30";
     case "REQUESTED": return "bg-blue-500/20 text-blue-400 border-blue-500/30";
     case "SEARCHING_DRIVER": return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
     case "OFFER_SENT": return "bg-orange-500/20 text-orange-400 border-orange-500/30";
@@ -52,6 +55,7 @@ const statusColor = (status: string) => {
     case "CANCELLED_BY_RIDER":
     case "CANCELLED_BY_DRIVER": return "bg-red-500/20 text-red-400 border-red-500/30";
     case "EXPIRED": return "bg-gray-500/20 text-gray-400 border-gray-500/30";
+    case "ABANDONED": return "bg-gray-500/20 text-gray-400 border-gray-500/30 line-through";
     default: return "bg-muted text-muted-foreground";
   }
 };
@@ -70,6 +74,7 @@ const AdminRideRequests = () => {
   // Counters
   const [last5Min, setLast5Min] = useState(0);
   const [pendingCount, setPendingCount] = useState(0);
+  const [bookClickedCount, setBookClickedCount] = useState(0);
   const [acceptedToday, setAcceptedToday] = useState(0);
   const [completedToday, setCompletedToday] = useState(0);
   const [cancelledToday, setCancelledToday] = useState(0);
@@ -96,7 +101,8 @@ const AdminRideRequests = () => {
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
     setLast5Min(rows.filter(r => new Date(r.created_at) >= fiveMinAgo).length);
-    setPendingCount(rows.filter(r => ["REQUESTED", "SEARCHING_DRIVER", "OFFER_SENT"].includes(r.status)).length);
+    setPendingCount(rows.filter(r => PENDING_STATUSES.includes(r.status)).length);
+    setBookClickedCount(rows.filter(r => r.status === "BOOK_CLICKED").length);
     setAcceptedToday(rows.filter(r => r.status === "DRIVER_ACCEPTED" && new Date(r.created_at) >= todayStart).length);
     setCompletedToday(rows.filter(r => r.status === "RIDE_COMPLETED" && new Date(r.created_at) >= todayStart).length);
     setCancelledToday(rows.filter(r => ["CANCELLED_BY_RIDER", "CANCELLED_BY_DRIVER"].includes(r.status) && new Date(r.created_at) >= todayStart).length);
@@ -118,6 +124,23 @@ const AdminRideRequests = () => {
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [fetchRequests]);
+
+  // ── Cleanup: Mark BOOK_CLICKED requests as ABANDONED after 2 minutes ──
+  const cleanupRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    const cleanup = async () => {
+      const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      await supabase
+        .from("ride_requests" as any)
+        .update({ status: "ABANDONED" } as any)
+        .eq("status", "BOOK_CLICKED")
+        .lt("updated_at", twoMinAgo);
+    };
+    // Run immediately then every 30s
+    cleanup();
+    cleanupRef.current = setInterval(cleanup, 30_000);
+    return () => { if (cleanupRef.current) clearInterval(cleanupRef.current); };
+  }, []);
 
   const filtered = requests.filter(r => {
     if (statusFilter !== "ALL" && r.status !== statusFilter) return false;
@@ -143,7 +166,11 @@ const AdminRideRequests = () => {
         </div>
 
         {/* Counter Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <Card><CardContent className="p-4 flex items-center gap-3">
+            <Zap className="h-5 w-5 text-violet-400" />
+            <div><p className="text-xs text-muted-foreground">Book Clicked</p><p className="text-xl font-bold">{bookClickedCount}</p></div>
+          </CardContent></Card>
           <Card><CardContent className="p-4 flex items-center gap-3">
             <Clock className="h-5 w-5 text-blue-400" />
             <div><p className="text-xs text-muted-foreground">Last 5 min</p><p className="text-xl font-bold">{last5Min}</p></div>
@@ -225,7 +252,7 @@ const AdminRideRequests = () => {
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={statusColor(r.status)}>
-                          {r.status.replace(/_/g, " ")}
+                          {r.status === "BOOK_CLICKED" ? "⚡ BOOK CLICKED" : r.status.replace(/_/g, " ")}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm">{r.driver_name || r.driver_id?.slice(0, 8) || "—"}</TableCell>
@@ -250,9 +277,15 @@ const AdminRideRequests = () => {
                 {/* Status big badge */}
                 <div className="flex justify-center">
                   <Badge variant="outline" className={`text-lg px-4 py-2 ${statusColor(selectedRequest.status)}`}>
-                    {selectedRequest.status.replace(/_/g, " ")}
+                    {selectedRequest.status === "BOOK_CLICKED" ? "⚡ BOOK CLICKED" : selectedRequest.status.replace(/_/g, " ")}
                   </Badge>
                 </div>
+
+                {selectedRequest.status === "BOOK_CLICKED" && (
+                  <div className="text-center text-sm text-violet-400 animate-pulse">
+                    Rider just tapped "Book a Ride" — selecting locations…
+                  </div>
+                )}
 
                 {/* Rider */}
                 <div className="space-y-1">
@@ -266,12 +299,16 @@ const AdminRideRequests = () => {
                   <div className="p-3 rounded-lg bg-muted/50">
                     <p className="text-xs text-muted-foreground uppercase">Pickup</p>
                     <p className="text-sm font-medium">{selectedRequest.pickup_text}</p>
-                    <p className="text-xs text-muted-foreground">{selectedRequest.pickup_lat.toFixed(5)}, {selectedRequest.pickup_lng.toFixed(5)}</p>
+                    {selectedRequest.pickup_lat !== 0 && (
+                      <p className="text-xs text-muted-foreground">{selectedRequest.pickup_lat.toFixed(5)}, {selectedRequest.pickup_lng.toFixed(5)}</p>
+                    )}
                   </div>
                   <div className="p-3 rounded-lg bg-muted/50">
                     <p className="text-xs text-muted-foreground uppercase">Dropoff</p>
                     <p className="text-sm font-medium">{selectedRequest.dropoff_text}</p>
-                    <p className="text-xs text-muted-foreground">{selectedRequest.dropoff_lat.toFixed(5)}, {selectedRequest.dropoff_lng.toFixed(5)}</p>
+                    {selectedRequest.dropoff_lat !== 0 && (
+                      <p className="text-xs text-muted-foreground">{selectedRequest.dropoff_lat.toFixed(5)}, {selectedRequest.dropoff_lng.toFixed(5)}</p>
+                    )}
                   </div>
                 </div>
 
