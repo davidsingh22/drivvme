@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Car, Shield } from 'lucide-react';
 import { useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
@@ -10,7 +11,7 @@ import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 const RiderHome = () => {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user, profile } = useAuth();
   const gpsStarted = useRef(false);
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
@@ -92,6 +93,43 @@ const RiderHome = () => {
       window.removeEventListener('focus', handleVisibilityChange);
     };
   }, [handleVisibilityChange]);
+
+  // Track active booking session for admin alerts
+  useEffect(() => {
+    if (!user) return;
+    const riderName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || 'Unknown';
+
+    // Upsert session as is_booking = true
+    supabase
+      .from('active_sessions' as any)
+      .upsert(
+        { user_id: user.id, is_booking: true, rider_name: riderName, started_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' }
+      )
+      .then(() => console.log('[RiderHome] Booking session started'));
+
+    // Cleanup: set is_booking = false when leaving
+    const cleanup = () => {
+      // Use navigator.sendBeacon for reliability on page close
+      const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/active_sessions?user_id=eq.${user.id}`;
+      const body = JSON.stringify({ is_booking: false, updated_at: new Date().toISOString() });
+      const sent = navigator.sendBeacon?.(
+        url,
+        new Blob([body], { type: 'application/json' })
+      );
+      if (!sent) {
+        // Fallback
+        supabase.from('active_sessions' as any).update({ is_booking: false, updated_at: new Date().toISOString() }).eq('user_id', user.id);
+      }
+    };
+
+    window.addEventListener('beforeunload', cleanup);
+    return () => {
+      window.removeEventListener('beforeunload', cleanup);
+      // React unmount cleanup (navigating away)
+      supabase.from('active_sessions' as any).update({ is_booking: false, updated_at: new Date().toISOString() }).eq('user_id', user.id);
+    };
+  }, [user, profile]);
 
   return (
     <div className="min-h-screen w-full relative overflow-hidden flex flex-col items-center justify-between">
