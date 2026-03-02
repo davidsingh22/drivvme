@@ -176,11 +176,9 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     const handleVisibilityChange = () => {
       if (!isMountedRef.current) return;
       
-      if (document.visibilityState === 'hidden') {
-        setTimeout(() => {
-          if (document.visibilityState === 'hidden') markOffline();
-        }, OFFLINE_TIMEOUT_MS);
-      } else {
+      // When app comes back to foreground, immediately refresh location
+      // Do NOT mark offline on background — user is still "in the app"
+      if (document.visibilityState === 'visible') {
         if (lastPositionRef.current) {
           updateLocation(lastPositionRef.current);
         } else {
