@@ -186,6 +186,7 @@ const RideBooking = () => {
   const [followDriver, setFollowDriver] = useState(true);
   const paymentGateCheckedRef = useRef<string | null>(null);
   const rideCreatedRef = useRef(false);
+  const rideRequestIdRef = useRef<string | null>(null);
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
@@ -765,11 +766,22 @@ const RideBooking = () => {
       setCurrentRide(updatedRide);
       updateRide(updatedRide); // Persist to localStorage
 
+      // Sync ride_request status (non-blocking)
+      const syncRideRequestStatus = (newStatus: string, driverId?: string, driverName?: string) => {
+        if (rideRequestIdRef.current) {
+          const update: any = { status: newStatus };
+          if (driverId) update.driver_id = driverId;
+          if (driverName) update.driver_name = driverName;
+          void supabase.from('ride_requests' as any).update(update).eq('id', rideRequestIdRef.current).then(() => {});
+        }
+      };
+
       // Update step based on status
       switch (updatedRide.status) {
         case 'driver_assigned':
           setStep('matched');
           fetchDriverInfo(updatedRide.driver_id);
+          syncRideRequestStatus('DRIVER_ACCEPTED', updatedRide.driver_id);
           // Store driver ID as backup for cancellation reliability
           if (updatedRide.driver_id) {
             localStorage.setItem(`drivvme_last_accepted_driver_${updatedRide.id}`, updatedRide.driver_id);
@@ -782,6 +794,7 @@ const RideBooking = () => {
           break;
         case 'driver_en_route':
           setStep('arriving');
+          syncRideRequestStatus('DRIVER_EN_ROUTE');
           if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Driver on the way',
@@ -790,6 +803,7 @@ const RideBooking = () => {
           break;
         case 'arrived':
           setStep('arrived');
+          syncRideRequestStatus('DRIVER_ARRIVED');
           if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Driver has arrived!',
@@ -798,6 +812,7 @@ const RideBooking = () => {
           break;
         case 'in_progress':
           setStep('inProgress');
+          syncRideRequestStatus('RIDE_STARTED');
           if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Ride started',
@@ -806,6 +821,7 @@ const RideBooking = () => {
           break;
         case 'completed':
           setStep('completed');
+          syncRideRequestStatus('RIDE_COMPLETED');
           clearRide(); // Clear from localStorage
           // Save the dropoff destination for future suggestions
           if (dropoff && user?.id) {
@@ -813,6 +829,7 @@ const RideBooking = () => {
           }
           break;
         case 'cancelled':
+          syncRideRequestStatus(updatedRide.cancelled_by === updatedRide.rider_id ? 'CANCELLED_BY_RIDER' : 'CANCELLED_BY_DRIVER');
           toast({
             title: t('booking.cancelled'),
             variant: 'destructive'
@@ -1397,6 +1414,27 @@ const RideBooking = () => {
 
       // ── NOTE: We show payment UI AFTER ride creation so PaymentForm has a valid rideId ──
 
+      // ── RIDE REQUEST TRACKING: Insert ride_requests record for admin visibility ──
+      try {
+        const riderName = profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}`.trim() : (user.email || '');
+        const { data: rr } = await supabase.from('ride_requests' as any).insert({
+          rider_id: user.id,
+          rider_name: riderName,
+          pickup_text: pickup.address,
+          pickup_lat: pickup.lat,
+          pickup_lng: pickup.lng,
+          dropoff_text: dropoff.address,
+          dropoff_lat: dropoff.lat,
+          dropoff_lng: dropoff.lng,
+          estimated_fare: fareEstimate.total,
+          estimated_minutes: Math.round(durationMinutes),
+          status: 'REQUESTED',
+        } as any).select('id').single();
+        if (rr) rideRequestIdRef.current = (rr as any).id;
+      } catch (e) {
+        console.warn('ride_requests insert failed (non-blocking)', e);
+      }
+
       // ── RIDE CREATION via raw fetch (bypasses Supabase client internals) ──
       console.log(ts(), 'STEP_2_CREATING_RIDE');
       const rideStatus = skipPayment ? 'searching' : 'pending_payment';
@@ -1465,6 +1503,14 @@ const RideBooking = () => {
       setCurrentRide(ride as any);
       updateRide(ride as any);
 
+      // Link ride_request to the created ride
+      if (rideRequestIdRef.current) {
+        void supabase.from('ride_requests' as any).update({
+          ride_id: ride.id,
+          status: skipPayment ? 'SEARCHING_DRIVER' : 'REQUESTED',
+        } as any).eq('id', rideRequestIdRef.current).then(() => {});
+      }
+
       // Non-blocking notification
       void supabase.from('notifications').insert({
         user_id: user.id, ride_id: ride.id, type: 'ride_booked',
@@ -1524,6 +1570,10 @@ const RideBooking = () => {
       } catch (e) {
         console.error('Failed to update ride status to searching', e);
       }
+    }
+    // Sync ride_request to SEARCHING_DRIVER
+    if (rideRequestIdRef.current) {
+      void supabase.from('ride_requests' as any).update({ status: 'SEARCHING_DRIVER' } as any).eq('id', rideRequestIdRef.current).then(() => {});
     }
     setStep('searching');
     toast({

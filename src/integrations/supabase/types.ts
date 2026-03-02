@@ -546,6 +546,74 @@ export type Database = {
         }
         Relationships: []
       }
+      ride_requests: {
+        Row: {
+          created_at: string
+          driver_id: string | null
+          driver_name: string | null
+          dropoff_lat: number
+          dropoff_lng: number
+          dropoff_text: string
+          estimated_fare: number | null
+          estimated_minutes: number | null
+          id: string
+          pickup_lat: number
+          pickup_lng: number
+          pickup_text: string
+          ride_id: string | null
+          rider_id: string
+          rider_name: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          driver_id?: string | null
+          driver_name?: string | null
+          dropoff_lat: number
+          dropoff_lng: number
+          dropoff_text: string
+          estimated_fare?: number | null
+          estimated_minutes?: number | null
+          id?: string
+          pickup_lat: number
+          pickup_lng: number
+          pickup_text: string
+          ride_id?: string | null
+          rider_id: string
+          rider_name?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          driver_id?: string | null
+          driver_name?: string | null
+          dropoff_lat?: number
+          dropoff_lng?: number
+          dropoff_text?: string
+          estimated_fare?: number | null
+          estimated_minutes?: number | null
+          id?: string
+          pickup_lat?: number
+          pickup_lng?: number
+          pickup_text?: string
+          ride_id?: string | null
+          rider_id?: string
+          rider_name?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ride_requests_ride_id_fkey"
+            columns: ["ride_id"]
+            isOneToOne: false
+            referencedRelation: "rides"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rider_agreements: {
         Row: {
           agrees_to_disclosure: boolean
