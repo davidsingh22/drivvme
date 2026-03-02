@@ -33,7 +33,6 @@ interface OnlineRider {
   accuracy: number | null;
   last_seen_at: string;
   is_online: boolean;
-  is_booking: boolean;
   profile?: {
     first_name: string | null;
     last_name: string | null;
@@ -105,26 +104,17 @@ const LiveRidersMap = () => {
     try {
       setIsLoading(true);
       
+      // Show riders who are marked online AND had a heartbeat in the last 5 minutes
+      // This filters out stale entries from crashed/force-closed apps
       const recentThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
-      const [locRes, sessRes] = await Promise.all([
-        supabase
-          .from('rider_locations')
-          .select('*')
-          .eq('is_online', true)
-          .gte('last_seen_at', recentThreshold),
-        supabase
-          .from('active_sessions')
-          .select('user_id, is_booking')
-          .eq('is_booking', true),
-      ]);
+      const { data: locations, error: locError } = await supabase
+        .from('rider_locations')
+        .select('*')
+        .eq('is_online', true)
+        .gte('last_seen_at', recentThreshold);
 
-      if (locRes.error) throw locRes.error;
-      const locations = locRes.data;
-
-      const bookingUserIds = new Set(
-        (sessRes.data || []).map(s => s.user_id)
-      );
+      if (locError) throw locError;
 
       if (!locations || locations.length === 0) {
         setRiders([]);
@@ -134,22 +124,22 @@ const LiveRidersMap = () => {
 
       const userIds = locations.map(l => l.user_id);
 
-      const [profRes, statsRes] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('user_id, first_name, last_name, email, phone_number, avatar_url')
-          .in('user_id', userIds),
-        supabase
-          .from('rides')
-          .select('rider_id, actual_fare, estimated_fare, status')
-          .in('rider_id', userIds),
-      ]);
+      const { data: profiles, error: profError } = await supabase
+        .from('profiles')
+        .select('user_id, first_name, last_name, email, phone_number, avatar_url')
+        .in('user_id', userIds);
 
-      if (profRes.error) throw profRes.error;
-      if (statsRes.error) throw statsRes.error;
+      if (profError) throw profError;
+
+      const { data: rideStats, error: statsError } = await supabase
+        .from('rides')
+        .select('rider_id, actual_fare, estimated_fare, status')
+        .in('rider_id', userIds);
+
+      if (statsError) throw statsError;
 
       const statsMap: Record<string, { total_rides: number; total_spent: number }> = {};
-      statsRes.data?.forEach(ride => {
+      rideStats?.forEach(ride => {
         if (!ride.rider_id) return;
         if (!statsMap[ride.rider_id]) {
           statsMap[ride.rider_id] = { total_rides: 0, total_spent: 0 };
@@ -161,7 +151,7 @@ const LiveRidersMap = () => {
       });
 
       const profilesMap: Record<string, any> = {};
-      profRes.data?.forEach(p => {
+      profiles?.forEach(p => {
         profilesMap[p.user_id] = p;
       });
 
@@ -172,7 +162,6 @@ const LiveRidersMap = () => {
         accuracy: loc.accuracy,
         last_seen_at: loc.last_seen_at,
         is_online: loc.is_online,
-        is_booking: bookingUserIds.has(loc.user_id),
         profile: profilesMap[loc.user_id] || null,
         stats: statsMap[loc.user_id] || { total_rides: 0, total_spent: 0 }
       }));
@@ -276,11 +265,6 @@ const LiveRidersMap = () => {
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'rider_locations' },
-          () => fetchOnlineRiders()
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'active_sessions' },
           () => fetchOnlineRiders()
         )
         .subscribe();
@@ -419,11 +403,6 @@ const LiveRidersMap = () => {
                                   <Radio className="w-2 h-2 mr-1 text-primary" />
                                   Online
                                 </Badge>
-                                {rider.is_booking && (
-                                  <Badge variant="default" className="text-xs bg-orange-500 hover:bg-orange-600 ml-1">
-                                    📍 Booking
-                                  </Badge>
-                                )}
                               </div>
                             </div>
                           </TableCell>
