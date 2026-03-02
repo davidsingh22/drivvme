@@ -866,11 +866,7 @@ const AdminDashboard = () => {
             <h1 className="text-3xl font-bold text-foreground">Admin Dashboard</h1>
             <p className="text-muted-foreground">Manage users, payments, and refunds</p>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <Button onClick={() => navigate('/admin/ride-requests')} variant="outline" className="gap-2">
-              <Radio className="w-4 h-4" />
-              Ride Requests
-            </Button>
+          <div className="flex gap-2">
             <Button onClick={() => navigate('/admin/riders-live')} variant="outline" className="gap-2">
               <User className="w-4 h-4" />
               Live Riders

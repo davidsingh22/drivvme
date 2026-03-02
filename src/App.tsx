@@ -33,7 +33,6 @@ const AdminDriverDocuments = lazy(() => import("./pages/AdminDriverDocuments"));
 const AdminDriverDocumentDetail = lazy(() => import("./pages/AdminDriverDocumentDetail"));
 const LiveDriversMap = lazy(() => import("@/pages/admin/LiveDriversMap"));
 const LiveRidersMap = lazy(() => import("@/pages/admin/LiveRidersMap"));
-const AdminRideRequests = lazy(() => import("@/pages/admin/AdminRideRequests"));
 const DriverLive = lazy(() => import("./pages/DriverLive"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Debug = lazy(() => import("./pages/Debug"));
@@ -212,7 +211,6 @@ const AppRoutes = () => {
         <Route path="/admin/riders-live" element={<LiveRidersMap />} />
         <Route path="/admin/driver-documents" element={<AdminDriverDocuments />} />
         <Route path="/admin/driver-documents/:driverId" element={<AdminDriverDocumentDetail />} />
-        <Route path="/admin/ride-requests" element={<AdminRideRequests />} />
         <Route path="/driver-live" element={<DriverLive />} />
         <Route path="/debug" element={<Debug />} />
         <Route path="*" element={<NotFound />} />
