@@ -176,14 +176,17 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     const handleVisibilityChange = () => {
       if (!isMountedRef.current) return;
       
+      if (document.visibilityState === 'hidden') {
+        // Preserve online status when app goes to background
+        markOnlineWithoutLocation();
+        return;
+      }
+
       // When app comes back to foreground, immediately refresh location
-      // Do NOT mark offline on background — user is still "in the app"
-      if (document.visibilityState === 'visible') {
-        if (lastPositionRef.current) {
-          updateLocation(lastPositionRef.current);
-        } else {
-          markOnlineWithoutLocation();
-        }
+      if (lastPositionRef.current) {
+        updateLocation(lastPositionRef.current);
+      } else {
+        markOnlineWithoutLocation();
       }
     };
 

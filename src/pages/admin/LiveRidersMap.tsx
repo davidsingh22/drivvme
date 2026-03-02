@@ -104,13 +104,11 @@ const LiveRidersMap = () => {
     try {
       setIsLoading(true);
       
-      // Show riders who had activity in the last 10 minutes (app open or backgrounded)
-      const recentThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      
+      // Show riders marked online (includes users with app in foreground/background)
       const { data: locations, error: locError } = await supabase
         .from('rider_locations')
         .select('*')
-        .gte('last_seen_at', recentThreshold);
+        .eq('is_online', true);
 
       if (locError) throw locError;
 
