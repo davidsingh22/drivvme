@@ -200,9 +200,6 @@ const AdminDashboard = () => {
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [isAssigningDriver, setIsAssigningDriver] = useState(false);
 
-  // Rider booking alerts
-  const [bookingAlerts, setBookingAlerts] = useState<Array<{ user_id: string; rider_name: string | null; started_at: string }>>([]);
-
   const isAdmin = roles.includes('admin' as any);
 
   useEffect(() => {
@@ -253,35 +250,6 @@ const AdminDashboard = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user, isAdmin]);
-
-  // Rider booking alerts: fetch initial + realtime
-  useEffect(() => {
-    if (!user || !isAdmin) return;
-
-    // Initial fetch
-    const fetchBookingAlerts = async () => {
-      const { data } = await supabase
-        .from('active_sessions' as any)
-        .select('user_id, rider_name, started_at')
-        .eq('is_booking', true);
-      if (data) setBookingAlerts(data as any);
-    };
-    fetchBookingAlerts();
-
-    const channel = supabase
-      .channel('booking-alerts-realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'active_sessions' },
-        () => {
-          // Re-fetch on any change
-          fetchBookingAlerts();
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
   }, [user, isAdmin]);
 
   const fetchCustomLocations = async () => {
@@ -985,40 +953,6 @@ const AdminDashboard = () => {
             </CardHeader>
           </Card>
         </div>
-
-        {/* Rider Booking Alert */}
-        <Card className={`mb-8 border-2 ${bookingAlerts.length > 0 ? 'border-orange-500 bg-orange-500/5' : 'border-muted'}`}>
-          <CardHeader className="pb-2">
-            <div className="flex items-center gap-2">
-              <Bell className={`w-5 h-5 ${bookingAlerts.length > 0 ? 'text-orange-500 animate-bounce' : 'text-muted-foreground'}`} />
-              <CardTitle className="text-lg">Rider Alert</CardTitle>
-              {bookingAlerts.length > 0 && (
-                <Badge className="bg-orange-500 text-white ml-2">{bookingAlerts.length} active</Badge>
-              )}
-            </div>
-            <CardDescription>Real-time alerts when riders open the Book a Ride page</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {bookingAlerts.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No riders currently booking</p>
-            ) : (
-              <div className="space-y-2">
-                {bookingAlerts.map((alert) => (
-                  <div key={alert.user_id} className="flex items-center gap-3 p-2 rounded-lg bg-orange-500/10">
-                    <span className="relative flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-orange-500"></span>
-                    </span>
-                    <span className="font-medium text-sm">{alert.rider_name || 'Unknown Rider'}</span>
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      opened at {format(new Date(alert.started_at), 'HH:mm:ss')}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
 
         {/* Main Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
