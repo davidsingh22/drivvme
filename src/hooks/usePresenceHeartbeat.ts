@@ -33,7 +33,7 @@ export function usePresenceHeartbeat() {
 
     const upsertPresence = async () => {
       try {
-        const { error } = await supabase.from('presence' as any).upsert(
+        const { error } = await supabase.from('presence').upsert(
           {
             user_id: user.id,
             role,
@@ -54,7 +54,7 @@ export function usePresenceHeartbeat() {
       if (signedInLoggedRef.current === user.id) return;
       signedInLoggedRef.current = user.id;
       try {
-        const { error } = await supabase.from('activity_events' as any).insert({
+        const { error } = await supabase.from('activity_events').insert({
           user_id: user.id,
           role,
           event_type: 'SIGNED_IN',
