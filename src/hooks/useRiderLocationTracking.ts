@@ -2,8 +2,8 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
-const UPDATE_INTERVAL_MS = 10000;
-const RETRY_DELAY_MS = 5000;
+const UPDATE_INTERVAL_MS = 5000; // 5s heartbeat for native diagnosis
+const RETRY_DELAY_MS = 3000;
 
 function detectSource(): 'web' | 'ios' | 'android' {
   const ua = (navigator.userAgent || '').toLowerCase();
@@ -108,6 +108,10 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
       if (error) {
         console.error('[RiderLocation:WRITE] ❌ DB error:', error.code, error.message, error.details);
+        // Native-visible alert so testers can see the failure on-screen
+        try {
+          window.alert(`GPS Update Failed\n\nCode: ${error.code}\nMessage: ${error.message}\nDetails: ${error.details || 'none'}`);
+        } catch (_) { /* alert may be blocked in some contexts */ }
       } else {
         console.log('[RiderLocation:WRITE] ✅ Success at', nowIso);
         if (isMountedRef.current) {
@@ -218,6 +222,10 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         (error) => {
           if (!isMountedRef.current) return;
           console.warn(`[RiderLocation:GPS] ❌ Error code=${error.code} msg=${error.message} retry=${retryCount}`);
+          // Native-visible alert for GPS permission/hardware failures
+          try {
+            window.alert(`GPS Error\n\nCode: ${error.code}\nMessage: ${error.message}\nRetry: ${retryCount}`);
+          } catch (_) {}
 
           if (error.code === 1 || retryCount >= 3) {
             console.log('[RiderLocation:GPS] Giving up on GPS, using fallback');

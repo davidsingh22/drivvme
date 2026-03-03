@@ -134,11 +134,12 @@ export default function LiveMonitor() {
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
 
+    // Query both last_seen_at AND updated_at so we catch native apps that only update one
     const [riderRes, driverRes] = await Promise.all([
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
-        .gte('last_seen_at', cutoff),
+        .or(`last_seen_at.gte.${cutoff},updated_at.gte.${cutoff}`),
       supabase
         .from('driver_locations')
         .select('user_id, updated_at')
