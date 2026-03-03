@@ -661,7 +661,7 @@ export default function LiveMonitor() {
           <Card className="p-4">
             <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
               <Users className="h-5 w-5 text-primary" />
-              Rider Activity Feed
+              Riders Live Activity Feed
               <Badge variant="secondary" className="ml-auto">
                 {feed.filter((e) => e.feedRole === 'rider' || e.feedRole === 'both').length}
               </Badge>
@@ -693,7 +693,7 @@ export default function LiveMonitor() {
           <Card className="p-4">
             <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
               <Car className="h-5 w-5 text-primary" />
-              Driver Activity Feed
+              Drivers Live Activity Feed
               <Badge variant="secondary" className="ml-auto">
                 {feed.filter((e) => e.feedRole === 'driver' || e.feedRole === 'both').length}
               </Badge>
