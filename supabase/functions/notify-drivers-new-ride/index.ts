@@ -372,29 +372,34 @@ serve(async (req) => {
       });
     }
 
-    // Filter drivers by proximity to pickup location
-    // Exclusive test driver bypasses distance filter — receives rides from anywhere
+    // Sequential waterfall: only notify the SINGLE closest driver
+    // The escalation hook will handle notifying the next driver after 25s timeout
     let nearbyDrivers = onlineDrivers;
     
     if (pickupLat && pickupLng) {
-      nearbyDrivers = onlineDrivers.filter(driver => {
-        // Include drivers without location data (they might have just gone online)
-        if (!driver.current_lat || !driver.current_lng) {
-          return true;
-        }
-        
-        const distance = calculateDistanceKm(
-          pickupLat, 
-          pickupLng, 
-          driver.current_lat, 
-          driver.current_lng
-        );
-        
-        console.log(`Driver ${driver.user_id} is ${distance.toFixed(2)}km from pickup`);
-        return distance <= maxDistanceKm;
-      });
+      // Calculate distance for each driver and sort by closest
+      const driversWithDistance = onlineDrivers
+        .filter(driver => driver.current_lat && driver.current_lng)
+        .map(driver => ({
+          ...driver,
+          distance: calculateDistanceKm(
+            pickupLat, 
+            pickupLng, 
+            driver.current_lat!, 
+            driver.current_lng!
+          ),
+        }))
+        .filter(d => d.distance <= maxDistanceKm)
+        .sort((a, b) => a.distance - b.distance);
       
-      console.log(`Filtered to ${nearbyDrivers.length} nearby drivers within ${maxDistanceKm}km`);
+      // Only take the single closest driver
+      nearbyDrivers = driversWithDistance.slice(0, 1);
+      
+      console.log(`Sequential waterfall: picked ${nearbyDrivers.length} closest driver out of ${driversWithDistance.length} eligible (within ${maxDistanceKm}km)`);
+      if (nearbyDrivers.length > 0) {
+        const picked = nearbyDrivers[0] as typeof driversWithDistance[0];
+        console.log(`Closest driver: ${picked.user_id} at ${picked.distance.toFixed(2)}km`);
+      }
     }
 
     if (nearbyDrivers.length === 0) {
@@ -426,7 +431,17 @@ serve(async (req) => {
 
     console.log("Found driver subscriptions:", subscriptions?.length || 0);
 
-    // Create in-app notifications for all nearby drivers (even without push subscriptions)
+    // Update ride with the notified driver so escalation hook excludes them
+    await supabase
+      .from("rides")
+      .update({ 
+        notification_tier: 1,
+        last_notification_at: new Date().toISOString(),
+        notified_driver_ids: driverUserIds,
+      })
+      .eq("id", rideId);
+
+    // Create in-app notification for the single closest driver
     const inAppNotifications = nearbyDrivers.map(driver => ({
       user_id: driver.user_id,
       ride_id: rideId,
