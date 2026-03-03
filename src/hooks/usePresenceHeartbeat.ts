@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 
 const HEARTBEAT_INTERVAL_MS = 20_000; // 20 seconds
 
@@ -33,15 +34,10 @@ export function usePresenceHeartbeat() {
 
     const upsertPresence = async () => {
       try {
-        // Check if session is still valid before upserting
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (!sessionData.session) {
-          console.warn('[Presence] Session expired, attempting refresh');
-          const { error: refreshError } = await supabase.auth.refreshSession();
-          if (refreshError) {
-            console.error('[Presence] Session refresh failed:', refreshError.message);
-            return;
-          }
+        const token = await getValidAccessToken().catch(() => null);
+        if (!token) {
+          console.warn('[Presence] No valid session token for heartbeat');
+          return;
         }
 
         const { error } = await supabase.from('presence').upsert(
@@ -88,14 +84,10 @@ export function usePresenceHeartbeat() {
     // Visibility change: recover session + send heartbeat on return
     const handleVisibility = async () => {
       if (document.visibilityState === 'visible') {
-        try {
-          const { data } = await supabase.auth.getSession();
-          if (!data.session) {
-            console.warn('[Presence] No session on visibility resume, attempting refresh');
-            await supabase.auth.refreshSession();
-          }
-        } catch (e) {
-          console.error('[Presence] Session recovery failed:', e);
+        const token = await getValidAccessToken().catch(() => null);
+        if (!token) {
+          console.warn('[Presence] Session recovery failed on visibility resume');
+          return;
         }
       }
       upsertPresence();
