@@ -195,6 +195,23 @@ async function getAccessToken(): Promise<string> {
   return tokenData.access_token;
 }
 
+function resolveFirebaseProjectId(): string | null {
+  const serviceAccountJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
+  if (serviceAccountJson) {
+    try {
+      const serviceAccount = JSON.parse(serviceAccountJson);
+      if (typeof serviceAccount.project_id === "string" && serviceAccount.project_id.trim()) {
+        return serviceAccount.project_id.trim();
+      }
+    } catch (error) {
+      console.warn("Failed to parse FIREBASE_SERVICE_ACCOUNT while resolving project id:", error);
+    }
+  }
+
+  const envProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
+  return envProjectId?.trim() || null;
+}
+
 // Send OneSignal notification to specific drivers using player_ids + tag fallback
 async function sendOneSignalDriverAlert(
   rideId: string,
@@ -282,7 +299,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
+    const firebaseProjectId = resolveFirebaseProjectId();
 
     // Parse input
     let rawInput: unknown;
@@ -422,69 +439,129 @@ serve(async (req) => {
       return { enabled: true, escalatedTiers };
     };
 
-    // Get all online drivers with their current location
-    const { data: onlineDrivers, error: driverError } = await supabase
+    // Build signed-in driver pool from presence heartbeat (active in last 5 minutes)
+    const signedInCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: activePresence, error: presenceError } = await supabase
+      .from("presence")
+      .select("user_id, role, last_seen_at")
+      .gte("last_seen_at", signedInCutoff);
+
+    if (presenceError) {
+      console.error("Error fetching active presence:", presenceError);
+      return new Response(JSON.stringify({ error: "Failed to fetch signed-in drivers" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const signedInDriverPresence = (activePresence ?? []).filter(
+      (row) => row.user_id && String(row.role ?? "").toLowerCase() === "driver"
+    );
+    const signedInDriverIds = [...new Set(signedInDriverPresence.map((row) => row.user_id))];
+
+    const { data: onlineFallbackProfiles, error: onlineFallbackError } = await supabase
       .from("driver_profiles")
-      .select("user_id, current_lat, current_lng")
+      .select("user_id")
       .eq("is_online", true);
 
-    if (driverError) {
-      console.error("Error fetching online drivers:", driverError);
+    if (onlineFallbackError) {
+      console.error("Error fetching online driver fallback set:", onlineFallbackError);
       return new Response(JSON.stringify({ error: "Failed to fetch drivers" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    console.log("Found online drivers:", onlineDrivers?.length || 0);
+    const candidateDriverIds = [
+      ...new Set([
+        ...signedInDriverIds,
+        ...(onlineFallbackProfiles ?? []).map((row) => row.user_id),
+      ]),
+    ];
 
-    if (!onlineDrivers || onlineDrivers.length === 0) {
-      return new Response(JSON.stringify({ 
-        message: "No online drivers found", 
+    if (candidateDriverIds.length === 0) {
+      return new Response(JSON.stringify({
+        message: "No signed-in or online drivers found",
         sent: 0,
         nearbyDrivers: 0,
-        totalOnline: 0 
+        totalSignedIn: 0,
+        totalOnline: 0,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Sequential waterfall: only notify the SINGLE closest driver
-    // The escalation hook will handle notifying the next driver after 25s timeout
-    let nearbyDrivers = onlineDrivers;
-    
-    if (pickupLat && pickupLng) {
-      // Calculate distance for each driver and sort by closest
-      const driversWithDistance = onlineDrivers
-        .filter(driver => driver.current_lat && driver.current_lng)
-        .map(driver => ({
+    const { data: candidateDriverProfiles, error: driverError } = await supabase
+      .from("driver_profiles")
+      .select("user_id, is_online, current_lat, current_lng")
+      .in("user_id", candidateDriverIds);
+
+    if (driverError) {
+      console.error("Error fetching driver profiles:", driverError);
+      return new Response(JSON.stringify({ error: "Failed to fetch drivers" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const profileByUser = new Map((candidateDriverProfiles ?? []).map((profile) => [profile.user_id, profile]));
+    const presenceByUser = new Map(signedInDriverPresence.map((row) => [row.user_id, row.last_seen_at]));
+
+    const signedInDrivers = candidateDriverIds.map((userId) => {
+      const profile = profileByUser.get(userId);
+      return {
+        user_id: userId,
+        is_online: !!profile?.is_online,
+        current_lat: profile?.current_lat ?? null,
+        current_lng: profile?.current_lng ?? null,
+        last_seen_at: presenceByUser.get(userId) ?? new Date(0).toISOString(),
+      };
+    });
+
+    console.log("Found signed-in drivers:", signedInDriverIds.length, "| online fallback drivers:", onlineFallbackProfiles?.length || 0, "| candidate drivers:", signedInDrivers.length);
+
+    // Sequential waterfall: notify ONE driver at a time.
+    // Ranking: in-radius with location -> online -> closest -> freshest signed-in session.
+    const canUsePickup = typeof pickupLat === "number" && typeof pickupLng === "number";
+
+    const rankedDrivers = signedInDrivers
+      .map((driver) => {
+        let distance = Number.POSITIVE_INFINITY;
+        if (canUsePickup && typeof driver.current_lat === "number" && typeof driver.current_lng === "number") {
+          distance = calculateDistanceKm(pickupLat!, pickupLng!, driver.current_lat, driver.current_lng);
+        }
+
+        const inRadius = Number.isFinite(distance) && distance <= maxDistanceKm;
+
+        return {
           ...driver,
-          distance: calculateDistanceKm(
-            pickupLat, 
-            pickupLng, 
-            driver.current_lat!, 
-            driver.current_lng!
-          ),
-        }))
-        .filter(d => d.distance <= maxDistanceKm)
-        .sort((a, b) => a.distance - b.distance);
-      
-      // Only take the single closest driver
-      nearbyDrivers = driversWithDistance.slice(0, 1);
-      
-      console.log(`Sequential waterfall: picked ${nearbyDrivers.length} closest driver out of ${driversWithDistance.length} eligible (within ${maxDistanceKm}km)`);
-      if (nearbyDrivers.length > 0) {
-        const picked = nearbyDrivers[0] as typeof driversWithDistance[0];
-        console.log(`Closest driver: ${picked.user_id} at ${picked.distance.toFixed(2)}km`);
-      }
+          distance,
+          in_radius: inRadius,
+        };
+      })
+      .sort((a, b) => {
+        if (a.in_radius !== b.in_radius) return a.in_radius ? -1 : 1;
+        if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
+        if (a.distance !== b.distance) return a.distance - b.distance;
+        return new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime();
+      });
+
+    // Only take the single best signed-in driver
+    const nearbyDrivers = rankedDrivers.slice(0, 1);
+
+    console.log(`Sequential waterfall: picked ${nearbyDrivers.length} driver out of ${signedInDrivers.length} signed-in candidates`);
+    if (nearbyDrivers.length > 0) {
+      const picked = nearbyDrivers[0];
+      const distanceLabel = Number.isFinite(picked.distance) ? `${picked.distance.toFixed(2)}km` : "no-gps";
+      console.log(`Picked driver: ${picked.user_id} at ${distanceLabel} (online=${picked.is_online})`);
     }
 
     if (nearbyDrivers.length === 0) {
-      return new Response(JSON.stringify({ 
-        message: "No nearby drivers found", 
+      return new Response(JSON.stringify({
+        message: "No signed-in drivers available",
         sent: 0,
         nearbyDrivers: 0,
-        totalOnline: onlineDrivers.length 
+        totalSignedIn: signedInDrivers.length,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -545,24 +622,9 @@ serve(async (req) => {
         sent: 0,
         inAppNotifications: inAppNotifications.length,
         nearbyDrivers: nearbyDrivers.length,
-        totalOnline: onlineDrivers.length,
+        totalSignedIn: signedInDrivers.length,
         escalation,
       }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Get FCM access token
-    let accessToken: string;
-    try {
-      accessToken = await getAccessToken();
-    } catch (error) {
-      console.error("Failed to get FCM access token:", error);
-      return new Response(JSON.stringify({ 
-        error: "FCM authentication failed",
-        inAppNotifications: inAppNotifications.length 
-      }), {
-        status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -574,7 +636,19 @@ serve(async (req) => {
 
     const results: Array<{ id: string; success: boolean; reason?: string; status?: number }> = [];
 
-    // Send push notifications in parallel for faster delivery
+    let accessToken = "";
+    if (firebaseProjectId) {
+      try {
+        accessToken = await getAccessToken();
+      } catch (error) {
+        console.error("Failed to get FCM access token (continuing with in-app + OneSignal):", error);
+      }
+    } else {
+      console.error("Missing Firebase project id, skipping FCM delivery");
+    }
+
+    if (accessToken) {
+      // Send push notifications in parallel for faster delivery
     const pushPromises = subscriptions.map(async (sub) => {
       try {
         // FCM token is stored in p256dh field
@@ -661,6 +735,7 @@ serve(async (req) => {
 
     const pushResults = await Promise.all(pushPromises);
     results.push(...pushResults);
+    }
 
     const sent = results.filter((r) => r.success).length;
 
@@ -674,7 +749,7 @@ serve(async (req) => {
       sent, 
       total: results.length, 
       nearbyDrivers: nearbyDrivers.length,
-      totalOnline: onlineDrivers.length,
+      totalSignedIn: signedInDrivers.length,
       inAppNotifications: inAppNotifications.length,
       oneSignal: oneSignalResult,
       escalation,
