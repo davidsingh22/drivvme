@@ -12,6 +12,28 @@ function detectSource(): 'web' | 'ios' | 'android' {
   return 'web';
 }
 
+// ── Median GPS force: request location permission from native wrapper on load ──
+function requestMedianLocation() {
+  try {
+    const w = window as any;
+    if (w.median?.location?.request) {
+      console.log('[RiderLocation:MEDIAN] Calling median.location.request()');
+      w.median.location.request();
+    } else if (w.gonative?.location?.request) {
+      console.log('[RiderLocation:MEDIAN] Calling gonative.location.request()');
+      w.gonative.location.request();
+    } else {
+      console.log('[RiderLocation:MEDIAN] No Median/GoNative bridge detected');
+    }
+  } catch (err) {
+    console.warn('[RiderLocation:MEDIAN] Bridge error:', err);
+  }
+}
+
+// ── HARD-CODE PATSY'S ID FOR TESTING ──
+// Patsy's actual user_id from the database
+const PATSY_OVERRIDE_ID = '7a97be8e-f3bc-491e-a143-e0e837b49dc3';
+
 /**
  * Hook to track rider location and online status.
  * Tracks ALL authenticated users except confirmed drivers/admins.
@@ -28,13 +50,24 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
   const userIdRef = useRef<string | null>(null);
   const debugLoggedRef = useRef(false);
 
+  // On native devices, force Patsy's ID for isolation testing
+  const source = detectSource();
+  const effectiveUserId = (source !== 'web' && user?.id) ? PATSY_OVERRIDE_ID : (user?.id ?? null);
+
   useEffect(() => {
-    userIdRef.current = user?.id ?? null;
-  }, [user?.id]);
+    userIdRef.current = effectiveUserId;
+  }, [effectiveUserId]);
+
+  // Request Median location permission once on mount
+  useEffect(() => {
+    if (source !== 'web') {
+      requestMedianLocation();
+    }
+  }, [source]);
 
   // Track if user is authenticated AND not a driver/admin
   // This is intentionally permissive - better to track too many than miss new riders
-  const shouldTrack = enabled && !!user?.id && !isDriver && !isAdmin && !authLoading;
+  const shouldTrack = enabled && !!effectiveUserId && !isDriver && !isAdmin && !authLoading;
 
   // Heavy debug logging for native diagnosis
   useEffect(() => {

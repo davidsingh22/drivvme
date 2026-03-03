@@ -1112,6 +1112,10 @@ export type Database = {
         Args: { p_ride_id: string; p_user_id: string }
         Returns: boolean
       }
+      debug_rider_locations_public_writes_enabled: {
+        Args: never
+        Returns: boolean
+      }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["user_role"]
