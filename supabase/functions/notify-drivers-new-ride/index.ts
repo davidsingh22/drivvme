@@ -439,11 +439,13 @@ serve(async (req) => {
       return { enabled: true, escalatedTiers };
     };
 
-    // Build signed-in driver pool from presence heartbeat (active in last 5 minutes)
+    // Build signed-in driver pool ONLY from presence heartbeat (active in last 5 minutes)
+    // This is the single source of truth for "online" — no stale driver_profiles.is_online fallback
     const signedInCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const { data: activePresence, error: presenceError } = await supabase
       .from("presence")
       .select("user_id, role, last_seen_at")
+      .eq("role", "DRIVER")
       .gte("last_seen_at", signedInCutoff);
 
     if (presenceError) {
@@ -454,38 +456,14 @@ serve(async (req) => {
       });
     }
 
-    const signedInDriverPresence = (activePresence ?? []).filter(
-      (row) => row.user_id && String(row.role ?? "").toLowerCase() === "driver"
-    );
-    const signedInDriverIds = [...new Set(signedInDriverPresence.map((row) => row.user_id))];
+    const signedInDriverIds = [...new Set((activePresence ?? []).filter(r => r.user_id).map(r => r.user_id))];
 
-    const { data: onlineFallbackProfiles, error: onlineFallbackError } = await supabase
-      .from("driver_profiles")
-      .select("user_id")
-      .eq("is_online", true);
-
-    if (onlineFallbackError) {
-      console.error("Error fetching online driver fallback set:", onlineFallbackError);
-      return new Response(JSON.stringify({ error: "Failed to fetch drivers" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const candidateDriverIds = [
-      ...new Set([
-        ...signedInDriverIds,
-        ...(onlineFallbackProfiles ?? []).map((row) => row.user_id),
-      ]),
-    ];
-
-    if (candidateDriverIds.length === 0) {
+    if (signedInDriverIds.length === 0) {
       return new Response(JSON.stringify({
-        message: "No signed-in or online drivers found",
+        message: "No signed-in drivers found",
         sent: 0,
         nearbyDrivers: 0,
         totalSignedIn: 0,
-        totalOnline: 0,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -494,7 +472,7 @@ serve(async (req) => {
     const { data: candidateDriverProfiles, error: driverError } = await supabase
       .from("driver_profiles")
       .select("user_id, is_online, current_lat, current_lng")
-      .in("user_id", candidateDriverIds);
+      .in("user_id", signedInDriverIds);
 
     if (driverError) {
       console.error("Error fetching driver profiles:", driverError);
@@ -505,20 +483,20 @@ serve(async (req) => {
     }
 
     const profileByUser = new Map((candidateDriverProfiles ?? []).map((profile) => [profile.user_id, profile]));
-    const presenceByUser = new Map(signedInDriverPresence.map((row) => [row.user_id, row.last_seen_at]));
+    const presenceByUser = new Map((activePresence ?? []).map((row) => [row.user_id, row.last_seen_at]));
 
-    const signedInDrivers = candidateDriverIds.map((userId) => {
+    const signedInDrivers = signedInDriverIds.map((userId) => {
       const profile = profileByUser.get(userId);
       return {
         user_id: userId,
-        is_online: !!profile?.is_online,
+        is_online: true, // they have active presence = they are online
         current_lat: profile?.current_lat ?? null,
         current_lng: profile?.current_lng ?? null,
         last_seen_at: presenceByUser.get(userId) ?? new Date(0).toISOString(),
       };
     });
 
-    console.log("Found signed-in drivers:", signedInDriverIds.length, "| online fallback drivers:", onlineFallbackProfiles?.length || 0, "| candidate drivers:", signedInDrivers.length);
+    console.log("Found signed-in drivers (presence-only):", signedInDriverIds.length, "| candidate drivers:", signedInDrivers.length);
 
     // Sequential waterfall: notify ONE driver at a time.
     // Ranking: in-radius with location -> online -> closest -> freshest signed-in session.
