@@ -94,7 +94,7 @@ interface RideActivityRow {
   status: string;
 }
 
-const ONLINE_THRESHOLD_MS = 5 * 60_000;
+const ONLINE_THRESHOLD_MS = 2 * 60_000;
 const LOCATION_FEED_COOLDOWN_MS = 45_000;
 const ACTIVE_RIDER_RIDE_STATUSES = ['searching', 'pending_payment', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'] as const;
 const BOOKING_SUCCESS_STATUSES = new Set(['confirmed', 'paid']);
@@ -133,27 +133,6 @@ export default function LiveMonitor() {
   const feedIdsRef = useRef(new Set<string>());
   const profileNameRef = useRef(new Map<string, string>());
   const locationFeedCooldownRef = useRef(new Map<string, number>());
-  const roleByUserRef = useRef(new Map<string, 'rider' | 'driver'>());
-
-  const resolveRoleByUserId = useCallback(async (userId: string): Promise<'rider' | 'driver'> => {
-    const cached = roleByUserRef.current.get(userId);
-    if (cached) return cached;
-
-    const { data, error } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('LiveMonitor: failed to resolve role', { userId, error });
-      return 'rider';
-    }
-
-    const resolved: 'rider' | 'driver' = data?.role === 'driver' ? 'driver' : 'rider';
-    roleByUserRef.current.set(userId, resolved);
-    return resolved;
-  }, []);
 
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/login', { replace: true });
@@ -250,9 +229,7 @@ export default function LiveMonitor() {
     // Build a set of driver user_ids from user_roles for accurate classification
     const driverRoleSet = new Set<string>();
     (rolesRes.data || []).forEach((r: any) => {
-      const normalizedRole: 'rider' | 'driver' = r.role === 'driver' ? 'driver' : 'rider';
-      roleByUserRef.current.set(r.user_id, normalizedRole);
-      if (normalizedRole === 'driver') driverRoleSet.add(r.user_id);
+      if (r.role === 'driver') driverRoleSet.add(r.user_id);
     });
 
     const riderRows = (riderRes.data || []) as RiderLocationRow[];
@@ -295,11 +272,9 @@ export default function LiveMonitor() {
       if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
         allUsersLatest.set(row.user_id, ts);
       }
-
-      const normalizedPresenceRole = String(row.role || '').toLowerCase();
-      if (normalizedPresenceRole === 'driver') {
+      // If presence says DRIVER, add to driver role set too
+      if (row.role === 'DRIVER') {
         driverRoleSet.add(row.user_id);
-        roleByUserRef.current.set(row.user_id, 'driver');
       }
     });
 
@@ -332,7 +307,7 @@ export default function LiveMonitor() {
   const loadInitialFeed = useCallback(async () => {
     const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
 
-    const [ridesRes, riderLocRes, driverLocRes, rolesRes] = await Promise.all([
+    const [ridesRes, riderLocRes, driverLocRes] = await Promise.all([
       supabase
         .from('rides')
         .select('id, rider_id, status, pickup_address, dropoff_address, estimated_fare, created_at, updated_at')
@@ -351,14 +326,7 @@ export default function LiveMonitor() {
         .gte('updated_at', tenMinAgo)
         .order('updated_at', { ascending: false })
         .limit(40),
-      supabase
-        .from('user_roles')
-        .select('user_id, role'),
     ]);
-
-    if (rolesRes.error) {
-      console.error('LiveMonitor: failed loading user roles for activity feed', rolesRes.error);
-    }
 
     const riderIds = [
       ...(ridesRes.data || []).map((r) => r.rider_id).filter(Boolean) as string[],
@@ -366,21 +334,11 @@ export default function LiveMonitor() {
       ...((driverLocRes.data || []).map((d) => d.user_id)),
     ];
 
-    const roleByUser = new Map<string, 'rider' | 'driver'>();
-    (rolesRes.data || []).forEach((r: any) => {
-      const normalizedRole: 'rider' | 'driver' = r.role === 'driver' ? 'driver' : 'rider';
-      roleByUser.set(r.user_id, normalizedRole);
-      roleByUserRef.current.set(r.user_id, normalizedRole);
-    });
-
     await upsertProfileNames(riderIds);
 
     const items: FeedItem[] = [];
 
     ((riderLocRes.data || []) as RiderLocationRow[]).forEach((row) => {
-      const role = roleByUser.get(row.user_id) || roleByUserRef.current.get(row.user_id) || 'rider';
-      if (role !== 'rider') return;
-
       const seenAt = row.last_seen_at || row.updated_at;
       items.push({
         id: `loc-rider-${row.user_id}-${seenAt}`,
@@ -393,9 +351,6 @@ export default function LiveMonitor() {
     });
 
     ((driverLocRes.data || []) as DriverLocationRow[]).forEach((row) => {
-      const role = roleByUser.get(row.user_id) || roleByUserRef.current.get(row.user_id) || 'rider';
-      if (role !== 'driver') return;
-
       items.push({
         id: `loc-driver-${row.user_id}-${row.updated_at}`,
         icon: '🚕',
@@ -576,14 +531,11 @@ export default function LiveMonitor() {
 
     const riderLocCh = supabase
       .channel('admin-rider-locs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_locations' }, async (payload: any) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_locations' }, (payload: any) => {
         const row = payload.new as RiderLocationRow | undefined;
         if (row?.user_id) {
-          const role = await resolveRoleByUserId(row.user_id);
-          if (role === 'rider') {
-            const seenAt = row.last_seen_at || row.updated_at || new Date().toISOString();
-            void maybePushLocationFeed('rider', row.user_id, seenAt);
-          }
+          const seenAt = row.last_seen_at || row.updated_at || new Date().toISOString();
+          void maybePushLocationFeed('rider', row.user_id, seenAt);
         }
         void loadOnlineUsers();
       })
@@ -591,14 +543,11 @@ export default function LiveMonitor() {
 
     const driverLocCh = supabase
       .channel('admin-driver-locs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_locations' }, async (payload: any) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_locations' }, (payload: any) => {
         const row = payload.new as DriverLocationRow | undefined;
         if (row?.user_id) {
-          const role = await resolveRoleByUserId(row.user_id);
-          if (role === 'driver') {
-            const seenAt = row.updated_at || new Date().toISOString();
-            void maybePushLocationFeed('driver', row.user_id, seenAt);
-          }
+          const seenAt = row.updated_at || new Date().toISOString();
+          void maybePushLocationFeed('driver', row.user_id, seenAt);
         }
         void loadOnlineUsers();
       })
@@ -613,7 +562,7 @@ export default function LiveMonitor() {
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
     };
-  }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
+  }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, upsertProfileNames]);
 
   if (authLoading || !isAdmin) {
     return (
