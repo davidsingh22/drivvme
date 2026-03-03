@@ -3,8 +3,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 const UPDATE_INTERVAL_MS = 10000;
-const OFFLINE_TIMEOUT_MS = 30000;
 const RETRY_DELAY_MS = 5000;
+
+function detectSource(): 'web' | 'ios' | 'android' {
+  const ua = (navigator.userAgent || '').toLowerCase();
+  if (ua.includes('android')) return 'android';
+  if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'ios';
+  return 'web';
+}
 
 /**
  * Hook to track rider location and online status.
@@ -13,7 +19,7 @@ const RETRY_DELAY_MS = 5000;
 export const useRiderLocationTracking = (enabled: boolean = true) => {
   const { user, isDriver, isAdmin } = useAuth();
   const [isTracking, setIsTracking] = useState(false);
-  
+
   const watchIdRef = useRef<number | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -29,11 +35,42 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
   // This is intentionally permissive - better to track too many than miss new riders
   const shouldTrack = enabled && !!user?.id && !isDriver && !isAdmin;
 
+  const syncPresenceHeartbeat = useCallback(async (lastSeenAt: string) => {
+    const userId = userIdRef.current;
+    if (!userId) return;
+
+    const fullName = [user?.user_metadata?.first_name, user?.user_metadata?.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    const displayName = fullName || user?.email || userId;
+
+    const { error } = await supabase
+      .from('presence')
+      .upsert(
+        {
+          user_id: userId,
+          role: 'RIDER',
+          display_name: displayName,
+          source: detectSource(),
+          last_seen_at: lastSeenAt,
+          updated_at: lastSeenAt,
+        },
+        { onConflict: 'user_id' }
+      );
+
+    if (error) {
+      console.error('[Presence] Rider sync error:', error.message);
+    }
+  }, [user?.email, user?.user_metadata?.first_name, user?.user_metadata?.last_name]);
+
   const updateLocation = useCallback(async (position: GeolocationPosition) => {
     const userId = userIdRef.current;
     if (!userId || !isMountedRef.current) return;
 
     try {
+      const nowIso = new Date().toISOString();
       const { error } = await supabase
         .from('rider_locations')
         .upsert({
@@ -42,8 +79,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
           lng: position.coords.longitude,
           accuracy: position.coords.accuracy,
           is_online: true,
-          last_seen_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          last_seen_at: nowIso,
+          updated_at: nowIso,
         }, {
           onConflict: 'user_id'
         });
@@ -52,17 +89,20 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         console.error('[RiderLocation] Update error:', error);
       } else if (isMountedRef.current) {
         setIsTracking(true);
+        void syncPresenceHeartbeat(nowIso);
       }
     } catch (err) {
       console.error('[RiderLocation] Failed to update:', err);
     }
-  }, []);
+  }, [syncPresenceHeartbeat]);
 
   const markOnlineWithoutLocation = useCallback(async () => {
     const userId = userIdRef.current;
     if (!userId || !isMountedRef.current) return;
 
     try {
+      const nowIso = new Date().toISOString();
+
       // First try to just update is_online without overwriting coords
       const { data: existing } = await supabase
         .from('rider_locations')
@@ -76,8 +116,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
           .from('rider_locations')
           .update({
             is_online: true,
-            last_seen_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+            last_seen_at: nowIso,
+            updated_at: nowIso,
           })
           .eq('user_id', userId);
       } else {
@@ -90,18 +130,19 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
             lng: -73.5673,
             accuracy: 10000,
             is_online: true,
-            last_seen_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
+            last_seen_at: nowIso,
+            updated_at: nowIso,
           });
       }
-      
+
       if (isMountedRef.current) {
         setIsTracking(true);
+        void syncPresenceHeartbeat(nowIso);
       }
     } catch (err) {
       console.error('[RiderLocation] Failed to mark online:', err);
     }
-  }, []);
+  }, [syncPresenceHeartbeat]);
 
   const markOffline = useCallback(async () => {
     const userId = userIdRef.current;
@@ -110,7 +151,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     try {
       await supabase
         .from('rider_locations')
-        .update({ 
+        .update({
           is_online: false,
           updated_at: new Date().toISOString()
         })
@@ -126,6 +167,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     if (!shouldTrack) return;
 
     console.log('[RiderLocation] Starting tracking for:', user?.id);
+    void syncPresenceHeartbeat(new Date().toISOString());
 
     if (!navigator.geolocation) {
       markOnlineWithoutLocation();
@@ -143,7 +185,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         },
         (error) => {
           if (!isMountedRef.current) return;
-          
+
           if (error.code === 1 || retryCount >= 3) {
             markOnlineWithoutLocation();
           } else {
@@ -175,7 +217,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     const handleVisibilityChange = () => {
       if (!isMountedRef.current) return;
-      
+
       if (document.visibilityState === 'hidden') {
         // Preserve online status when app goes to background
         markOnlineWithoutLocation();
@@ -207,16 +249,20 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         retryTimeoutRef.current = null;
       }
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      void syncPresenceHeartbeat(new Date().toISOString());
       markOffline();
     };
-  }, [shouldTrack, user?.id, updateLocation, markOffline, markOnlineWithoutLocation]);
+  }, [shouldTrack, user?.id, updateLocation, markOffline, markOnlineWithoutLocation, syncPresenceHeartbeat]);
 
   useEffect(() => {
     if (!user?.id) return;
-    const handleBeforeUnload = () => markOffline();
+    const handleBeforeUnload = () => {
+      void syncPresenceHeartbeat(new Date().toISOString());
+      markOffline();
+    };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [user?.id, markOffline]);
+  }, [user?.id, markOffline, syncPresenceHeartbeat]);
 
   return { isTracking };
 };
