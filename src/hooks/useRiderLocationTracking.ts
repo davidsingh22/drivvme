@@ -77,6 +77,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
   const { user, isDriver, isAdmin, authLoading } = useAuth();
   const [isTracking, setIsTracking] = useState(false);
 
+  const source = detectSource();
   const effectiveUserId = user?.id ?? null;
 
   const watchIdRef = useRef<number | null>(null);
