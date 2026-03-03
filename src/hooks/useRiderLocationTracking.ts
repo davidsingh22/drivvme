@@ -17,7 +17,7 @@ function detectSource(): 'web' | 'ios' | 'android' {
  * Tracks ALL authenticated users except confirmed drivers/admins.
  */
 export const useRiderLocationTracking = (enabled: boolean = true) => {
-  const { user, isDriver, isAdmin } = useAuth();
+  const { user, isDriver, isAdmin, authLoading } = useAuth();
   const [isTracking, setIsTracking] = useState(false);
 
   const watchIdRef = useRef<number | null>(null);
@@ -26,6 +26,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
   const lastPositionRef = useRef<GeolocationPosition | null>(null);
   const isMountedRef = useRef(true);
   const userIdRef = useRef<string | null>(null);
+  const debugLoggedRef = useRef(false);
 
   useEffect(() => {
     userIdRef.current = user?.id ?? null;
@@ -33,7 +34,25 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
   // Track if user is authenticated AND not a driver/admin
   // This is intentionally permissive - better to track too many than miss new riders
-  const shouldTrack = enabled && !!user?.id && !isDriver && !isAdmin;
+  const shouldTrack = enabled && !!user?.id && !isDriver && !isAdmin && !authLoading;
+
+  // Heavy debug logging for native diagnosis
+  useEffect(() => {
+    const source = detectSource();
+    if (source !== 'web' || !debugLoggedRef.current) {
+      debugLoggedRef.current = true;
+      console.log('[RiderLocation:DEBUG] ──────────────────────');
+      console.log('[RiderLocation:DEBUG] source:', source);
+      console.log('[RiderLocation:DEBUG] enabled:', enabled);
+      console.log('[RiderLocation:DEBUG] user?.id:', user?.id ?? 'NULL');
+      console.log('[RiderLocation:DEBUG] isDriver:', isDriver);
+      console.log('[RiderLocation:DEBUG] isAdmin:', isAdmin);
+      console.log('[RiderLocation:DEBUG] authLoading:', authLoading);
+      console.log('[RiderLocation:DEBUG] shouldTrack:', shouldTrack);
+      console.log('[RiderLocation:DEBUG] navigator.geolocation?', !!navigator.geolocation);
+      console.log('[RiderLocation:DEBUG] ──────────────────────');
+    }
+  }, [enabled, user?.id, isDriver, isAdmin, authLoading, shouldTrack]);
 
   const syncPresenceHeartbeat = useCallback(async (lastSeenAt: string) => {
     const userId = userIdRef.current;
@@ -71,6 +90,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     try {
       const nowIso = new Date().toISOString();
+      console.log(`[RiderLocation:WRITE] Upserting lat=${position.coords.latitude.toFixed(4)} lng=${position.coords.longitude.toFixed(4)} acc=${position.coords.accuracy?.toFixed(0)} for ${userId.slice(0, 8)}`);
+
       const { error } = await supabase
         .from('rider_locations')
         .upsert({
@@ -86,13 +107,16 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         });
 
       if (error) {
-        console.error('[RiderLocation] Update error:', error);
-      } else if (isMountedRef.current) {
-        setIsTracking(true);
-        void syncPresenceHeartbeat(nowIso);
+        console.error('[RiderLocation:WRITE] ❌ DB error:', error.code, error.message, error.details);
+      } else {
+        console.log('[RiderLocation:WRITE] ✅ Success at', nowIso);
+        if (isMountedRef.current) {
+          setIsTracking(true);
+          void syncPresenceHeartbeat(nowIso);
+        }
       }
     } catch (err) {
-      console.error('[RiderLocation] Failed to update:', err);
+      console.error('[RiderLocation:WRITE] ❌ Exception:', err);
     }
   }, [syncPresenceHeartbeat]);
 
@@ -102,6 +126,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     try {
       const nowIso = new Date().toISOString();
+      console.log(`[RiderLocation:FALLBACK] markOnlineWithoutLocation for ${userId.slice(0, 8)} at ${nowIso}`);
 
       // First try to just update is_online without overwriting coords
       const { data: existing } = await supabase
@@ -164,12 +189,16 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
   useEffect(() => {
     isMountedRef.current = true;
 
-    if (!shouldTrack) return;
+    if (!shouldTrack) {
+      console.log('[RiderLocation:GUARD] ⛔ NOT tracking — shouldTrack=false, enabled=', enabled, 'user=', user?.id?.slice(0,8), 'isDriver=', isDriver, 'isAdmin=', isAdmin, 'authLoading=', authLoading);
+      return;
+    }
 
-    console.log('[RiderLocation] Starting tracking for:', user?.id);
+    console.log('[RiderLocation:START] ✅ Starting tracking for:', user?.id, 'source:', detectSource());
     void syncPresenceHeartbeat(new Date().toISOString());
 
     if (!navigator.geolocation) {
+      console.warn('[RiderLocation:START] ⚠️ No geolocation API — falling back');
       markOnlineWithoutLocation();
       return;
     }
@@ -177,16 +206,21 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     const attemptGetPosition = (retryCount: number = 0) => {
       if (!isMountedRef.current) return;
 
+      console.log(`[RiderLocation:GPS] getCurrentPosition attempt #${retryCount}`);
+
       navigator.geolocation.getCurrentPosition(
         (position) => {
           if (!isMountedRef.current) return;
+          console.log(`[RiderLocation:GPS] ✅ Got position: ${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`);
           lastPositionRef.current = position;
           updateLocation(position);
         },
         (error) => {
           if (!isMountedRef.current) return;
+          console.warn(`[RiderLocation:GPS] ❌ Error code=${error.code} msg=${error.message} retry=${retryCount}`);
 
           if (error.code === 1 || retryCount >= 3) {
+            console.log('[RiderLocation:GPS] Giving up on GPS, using fallback');
             markOnlineWithoutLocation();
           } else {
             retryTimeoutRef.current = setTimeout(() => {
