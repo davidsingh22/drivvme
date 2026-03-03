@@ -14,6 +14,66 @@ export type Database = {
   }
   public: {
     Tables: {
+      active_sessions: {
+        Row: {
+          id: string
+          is_booking: boolean
+          rider_name: string | null
+          started_at: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          is_booking?: boolean
+          rider_name?: string | null
+          started_at?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          is_booking?: boolean
+          rider_name?: string | null
+          started_at?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      activity_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          message: string
+          meta: Json | null
+          role: string
+          source: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          message: string
+          meta?: Json | null
+          role?: string
+          source?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          message?: string
+          meta?: Json | null
+          role?: string
+          source?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       custom_locations: {
         Row: {
           address: string
@@ -328,6 +388,36 @@ export type Database = {
           },
         ]
       }
+      presence: {
+        Row: {
+          display_name: string | null
+          id: string
+          last_seen_at: string
+          role: string
+          source: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          display_name?: string | null
+          id?: string
+          last_seen_at?: string
+          role?: string
+          source?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          display_name?: string | null
+          id?: string
+          last_seen_at?: string
+          role?: string
+          source?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -545,6 +635,74 @@ export type Database = {
           sender_user_id?: string | null
         }
         Relationships: []
+      }
+      ride_requests: {
+        Row: {
+          created_at: string
+          driver_id: string | null
+          driver_name: string | null
+          dropoff_lat: number
+          dropoff_lng: number
+          dropoff_text: string
+          estimated_fare: number | null
+          estimated_minutes: number | null
+          id: string
+          pickup_lat: number
+          pickup_lng: number
+          pickup_text: string
+          ride_id: string | null
+          rider_id: string
+          rider_name: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          driver_id?: string | null
+          driver_name?: string | null
+          dropoff_lat: number
+          dropoff_lng: number
+          dropoff_text: string
+          estimated_fare?: number | null
+          estimated_minutes?: number | null
+          id?: string
+          pickup_lat: number
+          pickup_lng: number
+          pickup_text: string
+          ride_id?: string | null
+          rider_id: string
+          rider_name?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          driver_id?: string | null
+          driver_name?: string | null
+          dropoff_lat?: number
+          dropoff_lng?: number
+          dropoff_text?: string
+          estimated_fare?: number | null
+          estimated_minutes?: number | null
+          id?: string
+          pickup_lat?: number
+          pickup_lng?: number
+          pickup_text?: string
+          ride_id?: string | null
+          rider_id?: string
+          rider_name?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ride_requests_ride_id_fkey"
+            columns: ["ride_id"]
+            isOneToOne: false
+            referencedRelation: "rides"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       rider_agreements: {
         Row: {
@@ -952,6 +1110,10 @@ export type Database = {
       }
       can_send_ride_message: {
         Args: { p_ride_id: string; p_user_id: string }
+        Returns: boolean
+      }
+      debug_rider_locations_public_writes_enabled: {
+        Args: never
         Returns: boolean
       }
       has_role: {
