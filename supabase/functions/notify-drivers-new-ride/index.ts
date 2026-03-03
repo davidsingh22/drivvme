@@ -345,6 +345,83 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey!);
 
+    // Server-side escalation watchdog: if current driver misses the offer,
+    // automatically move to the next closest driver every 25s.
+    const runServerEscalation = async () => {
+      if (!isTrigger) {
+        return { enabled: false, escalatedTiers: [] as number[] };
+      }
+
+      const escalatedTiers: number[] = [];
+
+      for (let i = 0; i < 3; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25000));
+
+        const { data: latestRide, error: latestRideError } = await supabase
+          .from("rides")
+          .select("status, driver_id, notification_tier, notified_driver_ids, pickup_lat, pickup_lng, pickup_address, dropoff_address, estimated_fare")
+          .eq("id", rideId)
+          .maybeSingle();
+
+        if (latestRideError || !latestRide) {
+          console.error("[Waterfall] Failed to load ride state:", latestRideError);
+          break;
+        }
+
+        if (latestRide.driver_id || latestRide.status !== "searching") {
+          console.log(`[Waterfall] Stopping escalation for ride ${rideId} - status=${latestRide.status}, driver_id=${latestRide.driver_id}`);
+          break;
+        }
+
+        const nextTier = (latestRide.notification_tier ?? 1) + 1;
+        if (nextTier > 4) {
+          console.log(`[Waterfall] Max tier reached for ride ${rideId}`);
+          break;
+        }
+
+        const tierPickupLat = Number(latestRide.pickup_lat ?? pickupLat);
+        const tierPickupLng = Number(latestRide.pickup_lng ?? pickupLng);
+
+        if (!Number.isFinite(tierPickupLat) || !Number.isFinite(tierPickupLng)) {
+          console.error("[Waterfall] Missing pickup coordinates, stopping escalation", { rideId, tierPickupLat, tierPickupLng });
+          break;
+        }
+
+        const tierPayload = {
+          rideId,
+          pickupAddress: latestRide.pickup_address ?? pickupAddress,
+          dropoffAddress: latestRide.dropoff_address ?? dropoffAddress,
+          estimatedFare: Number(latestRide.estimated_fare ?? estimatedFare ?? 0),
+          pickupLat: tierPickupLat,
+          pickupLng: tierPickupLng,
+          tier: nextTier,
+          excludeDriverIds: (latestRide.notified_driver_ids ?? []) as string[],
+        };
+
+        console.log(`[Waterfall] Escalating ride ${rideId} to tier ${nextTier}`);
+
+        const tierResponse = await fetch(`${supabaseUrl}/functions/v1/notify-drivers-tiered`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          body: JSON.stringify(tierPayload),
+        });
+
+        const tierResult = await tierResponse.json().catch(() => null);
+        console.log(`[Waterfall] Tier ${nextTier} response (${tierResponse.status}):`, JSON.stringify(tierResult));
+
+        if (!tierResponse.ok) {
+          break;
+        }
+
+        escalatedTiers.push(nextTier);
+      }
+
+      return { enabled: true, escalatedTiers };
+    };
+
     // Get all online drivers with their current location
     const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
@@ -461,12 +538,15 @@ serve(async (req) => {
     }
 
     if (!subscriptions || subscriptions.length === 0) {
+      const escalation = await runServerEscalation();
+
       return new Response(JSON.stringify({ 
         message: "No driver push subscriptions found, in-app notifications sent", 
         sent: 0,
         inAppNotifications: inAppNotifications.length,
         nearbyDrivers: nearbyDrivers.length,
-        totalOnline: onlineDrivers.length 
+        totalOnline: onlineDrivers.length,
+        escalation,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -588,6 +668,8 @@ serve(async (req) => {
     const oneSignalResult = await sendOneSignalDriverAlert(rideId, pickupAddress, driverUserIds);
     console.log("OneSignal driver alert:", oneSignalResult);
 
+    const escalation = await runServerEscalation();
+
     return new Response(JSON.stringify({ 
       sent, 
       total: results.length, 
@@ -595,6 +677,7 @@ serve(async (req) => {
       totalOnline: onlineDrivers.length,
       inAppNotifications: inAppNotifications.length,
       oneSignal: oneSignalResult,
+      escalation,
       results 
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
