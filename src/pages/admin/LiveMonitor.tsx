@@ -134,8 +134,7 @@ export default function LiveMonitor() {
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
 
-    // Query both last_seen_at AND updated_at so we catch native apps that only update one
-    const [riderRes, driverRes] = await Promise.all([
+    const [riderRes, driverRes, rolesRes] = await Promise.all([
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
@@ -144,6 +143,9 @@ export default function LiveMonitor() {
         .from('driver_locations')
         .select('user_id, updated_at')
         .gte('updated_at', cutoff),
+      supabase
+        .from('user_roles')
+        .select('user_id, role'),
     ]);
 
     if (riderRes.error || driverRes.error) {
@@ -153,49 +155,58 @@ export default function LiveMonitor() {
       });
     }
 
+    // Build a set of driver user_ids from user_roles for accurate classification
+    const driverRoleSet = new Set<string>();
+    (rolesRes.data || []).forEach((r: any) => {
+      if (r.role === 'driver') driverRoleSet.add(r.user_id);
+    });
+
     const riderRows = (riderRes.data || []) as RiderLocationRow[];
     const driverRows = (driverRes.data || []) as DriverLocationRow[];
 
-    const riderLatest = new Map<string, string>();
+    // Collect latest timestamps per user across both tables
+    const allUsersLatest = new Map<string, string>();
+
     riderRows.forEach((row) => {
       const ts = row.last_seen_at || row.updated_at;
-      const prev = riderLatest.get(row.user_id);
+      const prev = allUsersLatest.get(row.user_id);
       if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        riderLatest.set(row.user_id, ts);
+        allUsersLatest.set(row.user_id, ts);
       }
     });
 
-    const driverLatest = new Map<string, string>();
     driverRows.forEach((row) => {
       const ts = row.updated_at;
-      const prev = driverLatest.get(row.user_id);
+      const prev = allUsersLatest.get(row.user_id);
       if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        driverLatest.set(row.user_id, ts);
+        allUsersLatest.set(row.user_id, ts);
       }
     });
 
-    const allUserIds = [...riderLatest.keys(), ...driverLatest.keys()];
+    const allUserIds = [...allUsersLatest.keys()];
     await upsertProfileNames(allUserIds);
 
-    setOnlineRiders(
-      [...riderLatest.entries()].map(([user_id, last_seen_at]) => ({
-        user_id,
-        display_name: getCachedName(user_id),
-        source: 'native',
-        last_seen_at,
-        role: 'rider' as const,
-      }))
-    );
+    const riders: OnlineUser[] = [];
+    const drivers: OnlineUser[] = [];
 
-    setOnlineDrivers(
-      [...driverLatest.entries()].map(([user_id, last_seen_at]) => ({
+    allUsersLatest.forEach((last_seen_at, user_id) => {
+      const isDriver = driverRoleSet.has(user_id);
+      const entry: OnlineUser = {
         user_id,
         display_name: getCachedName(user_id),
         source: 'native',
         last_seen_at,
-        role: 'driver' as const,
-      }))
-    );
+        role: isDriver ? 'driver' : 'rider',
+      };
+      if (isDriver) {
+        drivers.push(entry);
+      } else {
+        riders.push(entry);
+      }
+    });
+
+    setOnlineRiders(riders);
+    setOnlineDrivers(drivers);
   }, [getCachedName, upsertProfileNames]);
 
   const loadInitialFeed = useCallback(async () => {
@@ -425,23 +436,53 @@ export default function LiveMonitor() {
           </Card>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid md:grid-cols-3 gap-6">
           <Card className="p-4">
-            <h2 className="text-lg font-semibold mb-3">Online Users</h2>
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Online Riders
+              <Badge variant="secondary" className="ml-auto">{onlineRiders.length}</Badge>
+            </h2>
             {loading ? (
               <div className="animate-pulse text-muted-foreground text-sm">Loading…</div>
-            ) : onlineRiders.length === 0 && onlineDrivers.length === 0 ? (
-              <div className="text-muted-foreground text-sm">No users online</div>
+            ) : onlineRiders.length === 0 ? (
+              <div className="text-muted-foreground text-sm">No riders online</div>
             ) : (
               <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {[...onlineRiders, ...onlineDrivers]
+                {onlineRiders
                   .sort((a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime())
                   .map((u) => (
-                    <div key={`${u.role}-${u.user_id}`} className="flex items-center justify-between p-2 rounded-lg border border-border">
+                    <div key={`rider-${u.user_id}`} className="flex items-center justify-between p-2 rounded-lg border border-border">
                       <div className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-primary" />
-                        <span className="text-sm font-medium truncate max-w-[160px]">{u.display_name || u.user_id.slice(0, 8)}</span>
-                        <Badge variant="outline" className="text-xs capitalize">{u.role}</Badge>
+                        <span className="h-2.5 w-2.5 rounded-full bg-green-500" />
+                        <span className="text-sm font-medium truncate max-w-[140px]">{u.display_name || u.user_id.slice(0, 8)}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">{timeAgo(u.last_seen_at)}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </Card>
+
+          <Card className="p-4">
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Car className="h-5 w-5 text-primary" />
+              Online Drivers
+              <Badge variant="secondary" className="ml-auto">{onlineDrivers.length}</Badge>
+            </h2>
+            {loading ? (
+              <div className="animate-pulse text-muted-foreground text-sm">Loading…</div>
+            ) : onlineDrivers.length === 0 ? (
+              <div className="text-muted-foreground text-sm">No drivers online</div>
+            ) : (
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {onlineDrivers
+                  .sort((a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime())
+                  .map((u) => (
+                    <div key={`driver-${u.user_id}`} className="flex items-center justify-between p-2 rounded-lg border border-border">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full bg-blue-500" />
+                        <span className="text-sm font-medium truncate max-w-[140px]">{u.display_name || u.user_id.slice(0, 8)}</span>
                       </div>
                       <span className="text-xs text-muted-foreground">{timeAgo(u.last_seen_at)}</span>
                     </div>
