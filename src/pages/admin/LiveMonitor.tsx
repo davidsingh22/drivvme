@@ -195,7 +195,7 @@ export default function LiveMonitor() {
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
 
-    const [riderRes, driverRes, rolesRes, activeRidesRes] = await Promise.all([
+    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes] = await Promise.all([
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
@@ -212,6 +212,10 @@ export default function LiveMonitor() {
         .select('rider_id, updated_at, status')
         .gte('updated_at', cutoff)
         .in('status', [...ACTIVE_RIDER_RIDE_STATUSES]),
+      supabase
+        .from('presence')
+        .select('user_id, last_seen_at, role')
+        .gte('last_seen_at', cutoff),
     ]);
 
     if (riderRes.error || driverRes.error || activeRidesRes.error) {
@@ -231,8 +235,9 @@ export default function LiveMonitor() {
     const riderRows = (riderRes.data || []) as RiderLocationRow[];
     const driverRows = (driverRes.data || []) as DriverLocationRow[];
     const rideActivityRows = (activeRidesRes.data || []) as RideActivityRow[];
+    const presenceRows = (presenceRes.data || []) as { user_id: string; last_seen_at: string; role: string }[];
 
-    // Collect latest timestamps per user across both tables
+    // Collect latest timestamps per user across all sources
     const allUsersLatest = new Map<string, string>();
 
     riderRows.forEach((row) => {
@@ -257,6 +262,19 @@ export default function LiveMonitor() {
       const prev = allUsersLatest.get(row.rider_id);
       if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
         allUsersLatest.set(row.rider_id, ts);
+      }
+    });
+
+    // Also consider presence heartbeat as an online signal
+    presenceRows.forEach((row) => {
+      const ts = row.last_seen_at;
+      const prev = allUsersLatest.get(row.user_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        allUsersLatest.set(row.user_id, ts);
+      }
+      // If presence says DRIVER, add to driver role set too
+      if (row.role === 'DRIVER') {
+        driverRoleSet.add(row.user_id);
       }
     });
 
