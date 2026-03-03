@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Car, Shield } from 'lucide-react';
 import { useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { logActivity } from '@/lib/activityEvents';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
@@ -10,7 +11,7 @@ import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 const RiderHome = () => {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user, profile } = useAuth();
   const gpsStarted = useRef(false);
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
@@ -136,7 +137,19 @@ const RiderHome = () => {
 
         {/* Glowing Book a Ride button — NEVER disabled, GPS is non-blocking */}
         <motion.button
-          onClick={() => navigate('/ride?new=1')}
+          onClick={() => {
+            if (user?.id) {
+              const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user.email || user.id;
+              const gpsWarm = (() => { try { return JSON.parse(localStorage.getItem('drivveme_gps_warm') || '{}'); } catch { return {}; } })();
+              logActivity({
+                userId: user.id,
+                eventType: 'BOOK_RIDE_CLICKED',
+                message: `${displayName} tapped Book a Ride`,
+                meta: gpsWarm.lat ? { lat: gpsWarm.lat, lng: gpsWarm.lng } : undefined,
+              });
+            }
+            navigate('/ride?new=1');
+          }}
           className="relative group flex items-center gap-3 px-10 py-5 rounded-2xl font-display font-bold text-xl text-white overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, hsl(270 80% 45%), hsl(280 90% 35%))',

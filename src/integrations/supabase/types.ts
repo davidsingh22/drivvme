@@ -41,6 +41,39 @@ export type Database = {
         }
         Relationships: []
       }
+      activity_events: {
+        Row: {
+          created_at: string
+          event_type: string
+          id: string
+          message: string
+          meta: Json | null
+          role: string
+          source: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          event_type: string
+          id?: string
+          message: string
+          meta?: Json | null
+          role?: string
+          source?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          event_type?: string
+          id?: string
+          message?: string
+          meta?: Json | null
+          role?: string
+          source?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       custom_locations: {
         Row: {
           address: string
@@ -354,6 +387,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      presence: {
+        Row: {
+          display_name: string | null
+          id: string
+          last_seen_at: string
+          role: string
+          source: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          display_name?: string | null
+          id?: string
+          last_seen_at?: string
+          role?: string
+          source?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          display_name?: string | null
+          id?: string
+          last_seen_at?: string
+          role?: string
+          source?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       profiles: {
         Row: {
