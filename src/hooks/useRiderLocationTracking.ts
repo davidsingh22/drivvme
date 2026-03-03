@@ -336,8 +336,21 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         }
       }, UPDATE_INTERVAL_MS);
 
-      const handleVisibilityChange = () => {
+      const handleVisibilityChange = async () => {
         if (!isMountedRef.current) return;
+
+        if (document.visibilityState === 'visible') {
+          // Recover auth session on iOS when app returns from background
+          try {
+            const { data } = await supabase.auth.getSession();
+            if (!data.session) {
+              console.warn('[RiderLocation] No session on visibility resume, attempting refresh');
+              await supabase.auth.refreshSession();
+            }
+          } catch (e) {
+            console.error('[RiderLocation] Session recovery failed:', e);
+          }
+        }
 
         if (document.visibilityState === 'hidden') {
           void markOnlineWithoutLocation();

@@ -33,6 +33,17 @@ export function usePresenceHeartbeat() {
 
     const upsertPresence = async () => {
       try {
+        // Check if session is still valid before upserting
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session) {
+          console.warn('[Presence] Session expired, attempting refresh');
+          const { error: refreshError } = await supabase.auth.refreshSession();
+          if (refreshError) {
+            console.error('[Presence] Session refresh failed:', refreshError.message);
+            return;
+          }
+        }
+
         const { error } = await supabase.from('presence').upsert(
           {
             user_id: user.id,
@@ -74,8 +85,19 @@ export function usePresenceHeartbeat() {
     // Heartbeat
     intervalRef.current = setInterval(upsertPresence, HEARTBEAT_INTERVAL_MS);
 
-    // Visibility change: send heartbeat on background and on return
-    const handleVisibility = () => {
+    // Visibility change: recover session + send heartbeat on return
+    const handleVisibility = async () => {
+      if (document.visibilityState === 'visible') {
+        try {
+          const { data } = await supabase.auth.getSession();
+          if (!data.session) {
+            console.warn('[Presence] No session on visibility resume, attempting refresh');
+            await supabase.auth.refreshSession();
+          }
+        } catch (e) {
+          console.error('[Presence] Session recovery failed:', e);
+        }
+      }
       upsertPresence();
     };
     document.addEventListener('visibilitychange', handleVisibility);
