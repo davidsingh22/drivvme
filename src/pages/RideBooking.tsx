@@ -36,6 +36,7 @@ import rideBg from '@/assets/drivveme-ride-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
+import { logActivity } from '@/lib/activityEvents';
 import { useOneSignalRiderPrompt } from '@/hooks/useOneSignalRiderPrompt';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
@@ -1353,6 +1354,15 @@ const RideBooking = () => {
     // ── One-click lock — prevent double-submit ──
     if (isSubmitting) return;
     if (!user || !pickup || !dropoff || !fareEstimate) return;
+
+    // Fire-and-forget: log BOOKING_CONFIRMED activity event
+    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user.email || user.id;
+    logActivity({
+      userId: user.id,
+      eventType: 'BOOKING_CONFIRMED',
+      message: `${displayName} confirmed booking`,
+      meta: { pickup: pickup.address, dropoff: dropoff.address, fare: fareEstimate.total },
+    });
 
     const ts = () => `[${new Date().toISOString()}]`;
 
