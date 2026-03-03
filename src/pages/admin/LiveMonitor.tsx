@@ -36,8 +36,15 @@ interface DriverLocationRow {
   updated_at: string;
 }
 
+interface RideActivityRow {
+  rider_id: string | null;
+  updated_at: string;
+  status: string;
+}
+
 const ONLINE_THRESHOLD_MS = 2 * 60_000;
 const LOCATION_FEED_COOLDOWN_MS = 45_000;
+const ACTIVE_RIDER_RIDE_STATUSES = ['searching', 'pending_payment', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'] as const;
 const BOOKING_SUCCESS_STATUSES = new Set(['confirmed', 'paid']);
 
 const RIDE_STATUS_LABELS: Record<string, { icon: string; label: string }> = {
@@ -134,7 +141,7 @@ export default function LiveMonitor() {
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
 
-    const [riderRes, driverRes, rolesRes] = await Promise.all([
+    const [riderRes, driverRes, rolesRes, activeRidesRes] = await Promise.all([
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
@@ -146,12 +153,18 @@ export default function LiveMonitor() {
       supabase
         .from('user_roles')
         .select('user_id, role'),
+      supabase
+        .from('rides')
+        .select('rider_id, updated_at, status')
+        .gte('updated_at', cutoff)
+        .in('status', [...ACTIVE_RIDER_RIDE_STATUSES]),
     ]);
 
-    if (riderRes.error || driverRes.error) {
-      console.error('LiveMonitor: failed loading location tables', {
+    if (riderRes.error || driverRes.error || activeRidesRes.error) {
+      console.error('LiveMonitor: failed loading online presence sources', {
         riderError: riderRes.error,
         driverError: driverRes.error,
+        rideActivityError: activeRidesRes.error,
       });
     }
 
@@ -163,6 +176,7 @@ export default function LiveMonitor() {
 
     const riderRows = (riderRes.data || []) as RiderLocationRow[];
     const driverRows = (driverRes.data || []) as DriverLocationRow[];
+    const rideActivityRows = (activeRidesRes.data || []) as RideActivityRow[];
 
     // Collect latest timestamps per user across both tables
     const allUsersLatest = new Map<string, string>();
@@ -180,6 +194,15 @@ export default function LiveMonitor() {
       const prev = allUsersLatest.get(row.user_id);
       if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
         allUsersLatest.set(row.user_id, ts);
+      }
+    });
+
+    rideActivityRows.forEach((row) => {
+      if (!row.rider_id) return;
+      const ts = row.updated_at;
+      const prev = allUsersLatest.get(row.rider_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        allUsersLatest.set(row.rider_id, ts);
       }
     });
 
