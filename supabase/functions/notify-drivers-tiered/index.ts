@@ -323,6 +323,50 @@ serve(async (req) => {
       }
     }
 
+    // Read latest ride state for idempotent tier progression
+    const { data: latestRide, error: latestRideError } = await supabase
+      .from("rides")
+      .select("status, driver_id, notification_tier, notified_driver_ids")
+      .eq("id", rideId)
+      .maybeSingle();
+
+    if (latestRideError || !latestRide) {
+      console.error("Failed to fetch ride state:", latestRideError);
+      return new Response(
+        JSON.stringify({ error: "Failed to fetch ride state" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    if (latestRide.driver_id || latestRide.status !== "searching") {
+      return new Response(JSON.stringify({
+        message: "Ride is no longer searching, skipping escalation",
+        tier,
+        sent: 0,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const currentTier = latestRide.notification_tier ?? 0;
+    if (tier > 1 && currentTier >= tier) {
+      return new Response(JSON.stringify({
+        message: `Tier ${tier} already processed, skipping duplicate escalation`,
+        tier,
+        currentTier,
+        sent: 0,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const mergedExcludedDriverIds = [
+      ...new Set([
+        ...excludeDriverIds,
+        ...((latestRide.notified_driver_ids ?? []) as string[]),
+      ]),
+    ];
+
     // Tier configuration — closest-driver-first: only 1 driver per tier
     const tierConfig = {
       1: { maxDistanceKm: 3, maxEta: 10, maxDrivers: 1, description: "3km radius, closest driver" },
@@ -378,7 +422,7 @@ serve(async (req) => {
 
     // Filter and sort drivers by distance
     const driversWithDistance: DriverWithDistance[] = onlineDrivers
-      .filter(driver => !excludeDriverIds.includes(driver.user_id))
+      .filter(driver => !mergedExcludedDriverIds.includes(driver.user_id))
       .map(driver => {
         // For busy drivers, use their dropoff location instead
         const dropoffLocation = busyDriverDropoffs.get(driver.user_id);
@@ -448,7 +492,7 @@ serve(async (req) => {
       .update({ 
         notification_tier: tier,
         last_notification_at: new Date().toISOString(),
-        notified_driver_ids: [...new Set([...excludeDriverIds, ...driverUserIds])],
+        notified_driver_ids: [...new Set([...mergedExcludedDriverIds, ...driverUserIds])],
       })
       .eq("id", rideId);
 
