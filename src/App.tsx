@@ -12,7 +12,6 @@ import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
-import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
@@ -34,7 +33,6 @@ const AdminDriverDocuments = lazy(() => import("./pages/AdminDriverDocuments"));
 const AdminDriverDocumentDetail = lazy(() => import("./pages/AdminDriverDocumentDetail"));
 const LiveDriversMap = lazy(() => import("@/pages/admin/LiveDriversMap"));
 const LiveRidersMap = lazy(() => import("@/pages/admin/LiveRidersMap"));
-const LiveMonitor = lazy(() => import("@/pages/admin/LiveMonitor"));
 const DriverLive = lazy(() => import("./pages/DriverLive"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Debug = lazy(() => import("./pages/Debug"));
@@ -109,12 +107,6 @@ const RiderLocationTracker = () => {
   return null;
 };
 
-// Global presence heartbeat for all authenticated users
-const PresenceTracker = () => {
-  usePresenceHeartbeat();
-  return null;
-};
-
 // /driver is a driver screen. Riders should always be redirected to /ride.
 const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
@@ -186,7 +178,6 @@ const AppRoutes = () => {
         <DriverFloatingGPSButton />
       </Suspense>
       <RiderLocationTracker />
-      <PresenceTracker />
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -218,7 +209,6 @@ const AppRoutes = () => {
         <Route path="/admin/ride-locations" element={<AdminRideLocations />} />
         <Route path="/admin/drivers-live" element={<LiveDriversMap />} />
         <Route path="/admin/riders-live" element={<LiveRidersMap />} />
-        <Route path="/admin/live" element={<LiveMonitor />} />
         <Route path="/admin/driver-documents" element={<AdminDriverDocuments />} />
         <Route path="/admin/driver-documents/:driverId" element={<AdminDriverDocumentDetail />} />
         <Route path="/driver-live" element={<DriverLive />} />
