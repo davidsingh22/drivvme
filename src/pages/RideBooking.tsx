@@ -1606,38 +1606,73 @@ const RideBooking = () => {
     console.log('[Cancel] rideId:', rideId, 'driverId:', targetDriverId);
     toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
 
-    // ── CRITICAL: Use raw fetch with keepalive so requests survive page navigation ──
-    let token = '';
-    try { token = await getValidAccessToken(); } catch { /* use empty, will fail gracefully */ }
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
-      'Authorization': `Bearer ${token}`,
-      'Prefer': 'return=minimal',
-    };
-
-    // 1) Update ride status — keepalive ensures it completes even after unmount
+    // ── 1) Update ride status — AWAIT to ensure it completes ──
+    let dbUpdated = false;
+    
+    // Primary: use Supabase client (handles auth automatically)
     try {
-      fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({
-          status: 'cancelled',
+      const { error } = await withTimeout(
+        supabase.from('rides').update({
+          status: 'cancelled' as any,
           cancelled_at: new Date().toISOString(),
           cancelled_by: userId,
           cancellation_reason: 'Cancelled by rider',
-        }),
-        keepalive: true,
-      }).then(r => console.log('[Cancel] Ride DB updated:', r.status)).catch(e => console.warn('[Cancel] Ride update err:', e));
-    } catch (e) { console.warn('[Cancel] Ride fetch err:', e); }
+        }).eq('id', rideId),
+        5000
+      );
+      if (!error) {
+        dbUpdated = true;
+        console.log('[Cancel] Ride DB updated via Supabase client');
+      } else {
+        console.warn('[Cancel] Supabase client error:', error.message);
+      }
+    } catch (e: any) {
+      console.warn('[Cancel] Supabase client timeout/error:', e.message);
+    }
 
-    // 2) Notify driver via MULTIPLE channels for reliability
+    // Fallback: raw fetch with keepalive if Supabase client failed
+    if (!dbUpdated) {
+      let token = '';
+      try { token = await getValidAccessToken(); } catch { /* fallback */ }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'apikey': ANON_KEY,
+        'Authorization': `Bearer ${token}`,
+        'Prefer': 'return=minimal',
+      };
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({
+            status: 'cancelled',
+            cancelled_at: new Date().toISOString(),
+            cancelled_by: userId,
+            cancellation_reason: 'Cancelled by rider',
+          }),
+          keepalive: true,
+        });
+        dbUpdated = res.ok;
+        console.log('[Cancel] Ride DB fallback:', res.status);
+      } catch (e) { console.warn('[Cancel] Ride fetch fallback err:', e); }
+    }
+
+    // ── 2) Notify driver via MULTIPLE channels for reliability ──
+    // Get a fresh token for notification calls
+    let token = '';
+    try { token = await getValidAccessToken(); } catch { /* use empty */ }
+    const notifHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'apikey': ANON_KEY,
+      'Authorization': `Bearer ${token}`,
+    };
+
     if (targetDriverId) {
-      // 2a) ride-status-push — battle-tested, does proper driver lookup & player ID resolution
+      // 2a) ride-status-push
       try {
         fetch(`${SUPABASE_URL}/functions/v1/ride-status-push`, {
           method: 'POST',
-          headers: { ...headers, 'Prefer': '' },
+          headers: notifHeaders,
           body: JSON.stringify({
             ride_id: rideId,
             rider_id: userId,
@@ -1649,11 +1684,11 @@ const RideBooking = () => {
         }).then(r => console.log('[Cancel] ride-status-push:', r.status)).catch(e => console.warn('[Cancel] ride-status-push err:', e));
       } catch (e) { console.warn('[Cancel] ride-status-push fetch err:', e); }
 
-      // 2b) Tag-based push (most reliable fallback — works even if external ID not set)
+      // 2b) Tag-based push
       try {
         fetch(`${SUPABASE_URL}/functions/v1/send-onesignal-notification`, {
           method: 'POST',
-          headers: { ...headers, 'Prefer': '' },
+          headers: notifHeaders,
           body: JSON.stringify({
             tagUids: [targetDriverId],
             title: 'Ride Cancelled ❌',
@@ -1664,11 +1699,11 @@ const RideBooking = () => {
         }).then(r => console.log('[Cancel] Tag push sent:', r.status)).catch(e => console.warn('[Cancel] Tag push err:', e));
       } catch (e) { console.warn('[Cancel] Tag push fetch err:', e); }
 
-      // 3) DB notification (keepalive) — driver's realtime listener picks this up
+      // 3) DB notification — driver's realtime listener picks this up
       try {
         fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
           method: 'POST',
-          headers: { ...headers, 'Prefer': 'return=minimal' },
+          headers: { ...notifHeaders, 'Prefer': 'return=minimal' },
           body: JSON.stringify({
             user_id: targetDriverId,
             ride_id: rideId,
@@ -1687,17 +1722,17 @@ const RideBooking = () => {
     try {
       fetch(`${SUPABASE_URL}/rest/v1/notifications?ride_id=eq.${rideId}&type=eq.new_ride`, {
         method: 'DELETE',
-        headers,
+        headers: { ...notifHeaders, 'Prefer': 'return=minimal' },
         keepalive: true,
       }).catch(() => {});
     } catch { /* ignore */ }
 
-    // One click = exit after 1.5s — requests already in flight with keepalive
+    // Exit after brief delay — critical DB update already awaited above
     window.setTimeout(() => {
       setIsCancelling(false);
       resetBooking();
       window.location.href = '/rider-home';
-    }, 1500);
+    }, 1000);
   };
   const resetBooking = () => {
     setStep('input');
@@ -2057,6 +2092,16 @@ const RideBooking = () => {
                 {language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
               </span>
             </div>
+
+            {/* Quick Destinations — show recent rides right on the booking card */}
+            <QuickDestinations onSelectDestination={(dest) => {
+              handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+            }} />
+
+            {/* Recent Destinations */}
+            <RecentDestinations onSelectDestination={(dest) => {
+              handleDropoffChange(dest.address, { lat: dest.lat, lng: dest.lng });
+            }} />
 
             {/* Get Estimate Button - shows when destination is selected */}
             {dropoffAddress && pickup && (
