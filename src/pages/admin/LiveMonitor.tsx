@@ -9,8 +9,6 @@ import { ArrowLeft, Users, Zap, CheckCircle, Car } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
 
-/* ─── types ─── */
-
 interface OnlineUser {
   user_id: string;
   display_name: string | null;
@@ -27,12 +25,25 @@ interface FeedItem {
   created_at: string;
 }
 
-/* ─── constants ─── */
+interface RiderLocationRow {
+  user_id: string;
+  last_seen_at: string;
+  updated_at: string;
+}
 
-const ONLINE_THRESHOLD_MS = 2 * 60_000; // 2 minutes for all platforms
+interface DriverLocationRow {
+  user_id: string;
+  updated_at: string;
+}
+
+const ONLINE_THRESHOLD_MS = 2 * 60_000;
+const LOCATION_FEED_COOLDOWN_MS = 45_000;
+const BOOKING_SUCCESS_STATUSES = new Set(['confirmed', 'paid']);
 
 const RIDE_STATUS_LABELS: Record<string, { icon: string; label: string }> = {
-  searching: { icon: '🔍', label: 'Searching for driver' },
+  searching: { icon: '⚡', label: 'Rider is booking' },
+  confirmed: { icon: '✅', label: 'Booking Successful' },
+  paid: { icon: '✅', label: 'Booking Successful' },
   pending_payment: { icon: '💳', label: 'Pending payment' },
   driver_assigned: { icon: '🚗', label: 'Driver assigned' },
   driver_en_route: { icon: '🚙', label: 'Driver en route' },
@@ -49,8 +60,6 @@ function timeAgo(ts: string): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-/* ─── component ─── */
-
 export default function LiveMonitor() {
   const { isAdmin, authLoading } = useAuth();
   const navigate = useNavigate();
@@ -62,147 +71,207 @@ export default function LiveMonitor() {
   const [loading, setLoading] = useState(true);
 
   const feedIdsRef = useRef(new Set<string>());
+  const profileNameRef = useRef(new Map<string, string>());
+  const locationFeedCooldownRef = useRef(new Map<string, number>());
 
-  // Auth guard
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/login', { replace: true });
   }, [authLoading, isAdmin, navigate]);
 
-  /* ── helper: push a feed item (deduped) ── */
-  const pushFeedItem = useCallback((item: FeedItem) => {
+  const getCachedName = useCallback((uid: string) => {
+    return profileNameRef.current.get(uid) || uid.slice(0, 8);
+  }, []);
+
+  const upsertProfileNames = useCallback(async (userIds: string[]) => {
+    const uniqueIds = [...new Set(userIds.filter(Boolean))];
+    const missingIds = uniqueIds.filter((id) => !profileNameRef.current.has(id));
+    if (missingIds.length === 0) return;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('user_id, first_name, last_name, email')
+      .in('user_id', missingIds);
+
+    if (error) {
+      console.error('LiveMonitor: failed to load profile names', error);
+      return;
+    }
+
+    (data || []).forEach((p) => {
+      const display = [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email || p.user_id.slice(0, 8);
+      profileNameRef.current.set(p.user_id, display);
+    });
+  }, []);
+
+  const pushFeedItem = useCallback((item: FeedItem, shouldToast = true) => {
     if (feedIdsRef.current.has(item.id)) return;
     feedIdsRef.current.add(item.id);
     setFeed((prev) => [item, ...prev].slice(0, 80));
-    toast({ title: `${item.icon} New activity`, description: item.message });
+    if (shouldToast) {
+      toast({ title: `${item.icon} New activity`, description: item.message });
+    }
   }, [toast]);
 
-  /* ── load online counters from location tables (2-min window) ── */
+  const maybePushLocationFeed = useCallback(async (role: 'rider' | 'driver', userId: string, seenAt: string) => {
+    if (!seenAt || (Date.now() - new Date(seenAt).getTime()) > ONLINE_THRESHOLD_MS) return;
+
+    const key = `${role}:${userId}`;
+    const lastPushedAt = locationFeedCooldownRef.current.get(key) || 0;
+    if (Date.now() - lastPushedAt < LOCATION_FEED_COOLDOWN_MS) return;
+
+    await upsertProfileNames([userId]);
+    locationFeedCooldownRef.current.set(key, Date.now());
+
+    pushFeedItem({
+      id: `loc-${role}-${userId}-${seenAt}`,
+      icon: role === 'rider' ? '📡' : '🚕',
+      message: `${getCachedName(userId)} active on app (${role})`,
+      source: 'native',
+      created_at: seenAt,
+    }, false);
+  }, [getCachedName, pushFeedItem, upsertProfileNames]);
+
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
 
     const [riderRes, driverRes] = await Promise.all([
       supabase
         .from('rider_locations')
-        .select('user_id, last_seen_at, is_online')
+        .select('user_id, last_seen_at, updated_at')
         .gte('last_seen_at', cutoff),
       supabase
         .from('driver_locations')
-        .select('user_id, updated_at, is_online')
-        .eq('is_online', true)
+        .select('user_id, updated_at')
         .gte('updated_at', cutoff),
     ]);
 
-    // Fetch profile names for riders
-    const riderRows = riderRes.data || [];
-    const driverRows = driverRes.data || [];
-    const allUserIds = [
-      ...riderRows.map((r: any) => r.user_id),
-      ...driverRows.map((d: any) => d.user_id),
-    ];
-
-    let profileMap = new Map<string, { first_name: string | null; last_name: string | null; email: string | null }>();
-    if (allUserIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('user_id, first_name, last_name, email')
-        .in('user_id', allUserIds);
-      (profiles || []).forEach((p: any) => profileMap.set(p.user_id, p));
+    if (riderRes.error || driverRes.error) {
+      console.error('LiveMonitor: failed loading location tables', {
+        riderError: riderRes.error,
+        driverError: driverRes.error,
+      });
     }
 
-    const getName = (uid: string) => {
-      const p = profileMap.get(uid);
-      if (!p) return null;
-      const full = [p.first_name, p.last_name].filter(Boolean).join(' ');
-      return full || p.email || null;
-    };
+    const riderRows = (riderRes.data || []) as RiderLocationRow[];
+    const driverRows = (driverRes.data || []) as DriverLocationRow[];
+
+    const riderLatest = new Map<string, string>();
+    riderRows.forEach((row) => {
+      const ts = row.last_seen_at || row.updated_at;
+      const prev = riderLatest.get(row.user_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        riderLatest.set(row.user_id, ts);
+      }
+    });
+
+    const driverLatest = new Map<string, string>();
+    driverRows.forEach((row) => {
+      const ts = row.updated_at;
+      const prev = driverLatest.get(row.user_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        driverLatest.set(row.user_id, ts);
+      }
+    });
+
+    const allUserIds = [...riderLatest.keys(), ...driverLatest.keys()];
+    await upsertProfileNames(allUserIds);
 
     setOnlineRiders(
-      riderRows.map((r: any) => ({
-        user_id: r.user_id,
-        display_name: getName(r.user_id),
-        source: 'location',
-        last_seen_at: r.last_seen_at,
+      [...riderLatest.entries()].map(([user_id, last_seen_at]) => ({
+        user_id,
+        display_name: getCachedName(user_id),
+        source: 'native',
+        last_seen_at,
         role: 'rider' as const,
       }))
     );
 
     setOnlineDrivers(
-      driverRows.map((d: any) => ({
-        user_id: d.user_id,
-        display_name: getName(d.user_id),
-        source: 'location',
-        last_seen_at: d.updated_at,
+      [...driverLatest.entries()].map(([user_id, last_seen_at]) => ({
+        user_id,
+        display_name: getCachedName(user_id),
+        source: 'native',
+        last_seen_at,
         role: 'driver' as const,
       }))
     );
-  }, []);
+  }, [getCachedName, upsertProfileNames]);
 
-  /* ── load existing activity_events + recent rides for initial feed ── */
   const loadInitialFeed = useCallback(async () => {
     const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
 
-    const [eventsRes, ridesRes] = await Promise.all([
-      supabase
-        .from('activity_events')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(30),
+    const [ridesRes, riderLocRes, driverLocRes] = await Promise.all([
       supabase
         .from('rides')
         .select('id, rider_id, status, pickup_address, dropoff_address, estimated_fare, created_at, updated_at')
-        .gte('created_at', tenMinAgo)
-        .order('created_at', { ascending: false })
-        .limit(30),
+        .gte('updated_at', tenMinAgo)
+        .order('updated_at', { ascending: false })
+        .limit(40),
+      supabase
+        .from('rider_locations')
+        .select('user_id, last_seen_at, updated_at')
+        .gte('last_seen_at', tenMinAgo)
+        .order('last_seen_at', { ascending: false })
+        .limit(40),
+      supabase
+        .from('driver_locations')
+        .select('user_id, updated_at')
+        .gte('updated_at', tenMinAgo)
+        .order('updated_at', { ascending: false })
+        .limit(40),
     ]);
+
+    const riderIds = [
+      ...(ridesRes.data || []).map((r) => r.rider_id).filter(Boolean) as string[],
+      ...((riderLocRes.data || []).map((r) => r.user_id)),
+      ...((driverLocRes.data || []).map((d) => d.user_id)),
+    ];
+
+    await upsertProfileNames(riderIds);
 
     const items: FeedItem[] = [];
 
-    // Convert activity_events
-    (eventsRes.data || []).forEach((e: any) => {
-      const EVENT_ICONS: Record<string, string> = {
-        SIGNED_IN: '🟢',
-        APP_OPENED: '🔵',
-        BOOK_RIDE_CLICKED: '⚡',
-        BOOKING_CONFIRMED: '✅',
-      };
+    ((riderLocRes.data || []) as RiderLocationRow[]).forEach((row) => {
+      const seenAt = row.last_seen_at || row.updated_at;
       items.push({
-        id: `ae-${e.id}`,
-        icon: EVENT_ICONS[e.event_type] || '📌',
-        message: e.message,
-        source: e.source || 'web',
-        created_at: e.created_at,
+        id: `loc-rider-${row.user_id}-${seenAt}`,
+        icon: '📡',
+        message: `${getCachedName(row.user_id)} active on app (rider)`,
+        source: 'native',
+        created_at: seenAt,
       });
     });
 
-    // Convert recent rides to feed items
-    const riderIds = [...new Set((ridesRes.data || []).map((r: any) => r.rider_id).filter(Boolean))];
-    let riderNames = new Map<string, string>();
-    if (riderIds.length > 0) {
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('user_id, first_name, last_name, email')
-        .in('user_id', riderIds);
-      (profiles || []).forEach((p: any) => {
-        const name = [p.first_name, p.last_name].filter(Boolean).join(' ') || p.email || p.user_id.slice(0, 8);
-        riderNames.set(p.user_id, name);
+    ((driverLocRes.data || []) as DriverLocationRow[]).forEach((row) => {
+      items.push({
+        id: `loc-driver-${row.user_id}-${row.updated_at}`,
+        icon: '🚕',
+        message: `${getCachedName(row.user_id)} active on app (driver)`,
+        source: 'native',
+        created_at: row.updated_at,
       });
-    }
+    });
 
-    (ridesRes.data || []).forEach((ride: any) => {
-      const riderName = riderNames.get(ride.rider_id) || ride.rider_id?.slice(0, 8) || 'Unknown';
-      const statusInfo = RIDE_STATUS_LABELS[ride.status] || { icon: '📌', label: ride.status };
+    (ridesRes.data || []).forEach((ride) => {
+      const riderName = ride.rider_id ? getCachedName(ride.rider_id) : 'Unknown';
+      const status = String(ride.status || '').toLowerCase();
+      const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
 
       items.push({
-        id: `ride-${ride.id}-${ride.status}`,
+        id: `ride-${ride.id}-${status}`,
         icon: statusInfo.icon,
-        message: `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'} ($${Number(ride.estimated_fare || 0).toFixed(2)})`,
+        message: BOOKING_SUCCESS_STATUSES.has(status)
+          ? `${riderName}: Booking Successful`
+          : status === 'searching'
+            ? `${riderName} is booking a ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'} ($${Number(ride.estimated_fare || 0).toFixed(2)})`
+            : `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
         source: 'rides',
-        created_at: ride.status === 'searching' ? ride.created_at : ride.updated_at,
+        created_at: ride.updated_at || ride.created_at,
       });
     });
 
-    // Sort by time, dedup, take top 80
     items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
     const deduped = items.filter((item) => {
       if (feedIdsRef.current.has(item.id)) return false;
       feedIdsRef.current.add(item.id);
@@ -210,31 +279,24 @@ export default function LiveMonitor() {
     }).slice(0, 80);
 
     setFeed(deduped);
-  }, []);
+  }, [getCachedName, upsertProfileNames]);
 
-  /* ── main data loading + realtime subscriptions ── */
   useEffect(() => {
     if (!isAdmin) return;
 
-    Promise.all([loadOnlineUsers(), loadInitialFeed()]).then(() => setLoading(false));
+    feedIdsRef.current.clear();
+    setFeed([]);
 
-    // Realtime: rides table — capture every ride lifecycle event
+    Promise.all([loadOnlineUsers(), loadInitialFeed()]).finally(() => setLoading(false));
+
     const ridesCh = supabase
       .channel('admin-rides-feed')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rides' }, async (payload: any) => {
         const ride = payload.new;
-        // Fetch rider name
-        let riderName = ride.rider_id?.slice(0, 8) || 'Unknown';
-        if (ride.rider_id) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('first_name, last_name, email')
-            .eq('user_id', ride.rider_id)
-            .maybeSingle();
-          if (data) {
-            riderName = [data.first_name, data.last_name].filter(Boolean).join(' ') || data.email || riderName;
-          }
-        }
+        const riderId = ride.rider_id as string | null;
+        if (riderId) await upsertProfileNames([riderId]);
+
+        const riderName = riderId ? getCachedName(riderId) : 'Unknown';
 
         pushFeedItem({
           id: `ride-${ride.id}-created`,
@@ -244,90 +306,68 @@ export default function LiveMonitor() {
           created_at: ride.created_at || new Date().toISOString(),
         });
 
-        loadOnlineUsers();
+        void loadOnlineUsers();
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rides' }, async (payload: any) => {
         const ride = payload.new;
         const oldRide = payload.old;
 
-        // Only fire on status change
         if (ride.status === oldRide?.status) return;
 
-        let riderName = ride.rider_id?.slice(0, 8) || 'Unknown';
-        if (ride.rider_id) {
-          const { data } = await supabase
-            .from('profiles')
-            .select('first_name, last_name, email')
-            .eq('user_id', ride.rider_id)
-            .maybeSingle();
-          if (data) {
-            riderName = [data.first_name, data.last_name].filter(Boolean).join(' ') || data.email || riderName;
-          }
-        }
+        const riderId = ride.rider_id as string | null;
+        if (riderId) await upsertProfileNames([riderId]);
 
-        const statusInfo = RIDE_STATUS_LABELS[ride.status] || { icon: '📌', label: ride.status };
+        const riderName = riderId ? getCachedName(riderId) : 'Unknown';
+        const status = String(ride.status || '').toLowerCase();
+        const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
 
         pushFeedItem({
-          id: `ride-${ride.id}-${ride.status}`,
+          id: `ride-${ride.id}-${status}`,
           icon: statusInfo.icon,
-          message: `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
+          message: BOOKING_SUCCESS_STATUSES.has(status)
+            ? `${riderName}: Booking Successful`
+            : `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
           source: 'rides',
           created_at: ride.updated_at || new Date().toISOString(),
         });
 
-        loadOnlineUsers();
+        void loadOnlineUsers();
       })
       .subscribe();
 
-    // Realtime: activity_events (keep existing behavior)
-    const activityCh = supabase
-      .channel('admin-activity')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'activity_events' }, (payload: any) => {
-        const row = payload.new;
-        const EVENT_ICONS: Record<string, string> = {
-          SIGNED_IN: '🟢',
-          APP_OPENED: '🔵',
-          BOOK_RIDE_CLICKED: '⚡',
-          BOOKING_CONFIRMED: '✅',
-        };
-        pushFeedItem({
-          id: `ae-${row.id}`,
-          icon: EVENT_ICONS[row.event_type] || '📌',
-          message: row.message,
-          source: row.source || 'web',
-          created_at: row.created_at,
-        });
-      })
-      .subscribe();
-
-    // Realtime: rider_locations + driver_locations for online counters
     const riderLocCh = supabase
       .channel('admin-rider-locs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_locations' }, () => {
-        loadOnlineUsers();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_locations' }, (payload: any) => {
+        const row = payload.new as RiderLocationRow | undefined;
+        if (row?.user_id) {
+          const seenAt = row.last_seen_at || row.updated_at || new Date().toISOString();
+          void maybePushLocationFeed('rider', row.user_id, seenAt);
+        }
+        void loadOnlineUsers();
       })
       .subscribe();
 
     const driverLocCh = supabase
       .channel('admin-driver-locs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_locations' }, () => {
-        loadOnlineUsers();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_locations' }, (payload: any) => {
+        const row = payload.new as DriverLocationRow | undefined;
+        if (row?.user_id) {
+          const seenAt = row.updated_at || new Date().toISOString();
+          void maybePushLocationFeed('driver', row.user_id, seenAt);
+        }
+        void loadOnlineUsers();
       })
       .subscribe();
 
-    // Poll online counters every 15s
     const poll = setInterval(loadOnlineUsers, 15_000);
 
     return () => {
       clearInterval(poll);
       supabase.removeChannel(ridesCh);
-      supabase.removeChannel(activityCh);
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
     };
-  }, [isAdmin, loadOnlineUsers, loadInitialFeed, pushFeedItem]);
-
-  /* ── render ── */
+  }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, upsertProfileNames]);
 
   if (authLoading || !isAdmin) {
     return (
@@ -339,18 +379,13 @@ export default function LiveMonitor() {
 
   const now = Date.now();
   const fiveMinAgo = new Date(now - 5 * 60_000).toISOString();
-  const bookingEvents5m = feed.filter(
-    (e) => (e.icon === '⚡') && e.created_at >= fiveMinAgo
-  ).length;
-  const successEvents5m = feed.filter(
-    (e) => (e.icon === '✅') && e.created_at >= fiveMinAgo
-  ).length;
+  const bookingEvents5m = feed.filter((e) => e.icon === '⚡' && e.created_at >= fiveMinAgo).length;
+  const successEvents5m = feed.filter((e) => e.message.includes('Booking Successful') && e.created_at >= fiveMinAgo).length;
 
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {/* Header */}
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate('/admin')}>
             <ArrowLeft className="h-5 w-5" />
@@ -358,7 +393,6 @@ export default function LiveMonitor() {
           <h1 className="text-2xl font-bold">Live Monitor (MSN)</h1>
         </div>
 
-        {/* Counters */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card className="p-4 flex items-center gap-3">
             <Users className="h-6 w-6 text-primary" />
@@ -385,14 +419,12 @@ export default function LiveMonitor() {
             <CheckCircle className="h-6 w-6 text-primary" />
             <div>
               <div className="text-2xl font-bold">{successEvents5m}</div>
-              <div className="text-xs text-muted-foreground">Completed (5m)</div>
+              <div className="text-xs text-muted-foreground">Successful (5m)</div>
             </div>
           </Card>
         </div>
 
-        {/* Two panels */}
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Panel 1: Online Users */}
           <Card className="p-4">
             <h2 className="text-lg font-semibold mb-3">Online Users</h2>
             {loading ? (
@@ -404,12 +436,10 @@ export default function LiveMonitor() {
                 {[...onlineRiders, ...onlineDrivers]
                   .sort((a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime())
                   .map((u) => (
-                    <div key={u.user_id} className="flex items-center justify-between p-2 rounded-lg border border-border">
+                    <div key={`${u.role}-${u.user_id}`} className="flex items-center justify-between p-2 rounded-lg border border-border">
                       <div className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-green-500" />
-                        <span className="text-sm font-medium truncate max-w-[160px]">
-                          {u.display_name || u.user_id.slice(0, 8)}
-                        </span>
+                        <span className="h-2.5 w-2.5 rounded-full bg-primary" />
+                        <span className="text-sm font-medium truncate max-w-[160px]">{u.display_name || u.user_id.slice(0, 8)}</span>
                         <Badge variant="outline" className="text-xs capitalize">{u.role}</Badge>
                       </div>
                       <span className="text-xs text-muted-foreground">{timeAgo(u.last_seen_at)}</span>
@@ -419,7 +449,6 @@ export default function LiveMonitor() {
             )}
           </Card>
 
-          {/* Panel 2: Live Activity Feed (table-driven) */}
           <Card className="p-4">
             <h2 className="text-lg font-semibold mb-3">Live Activity Feed</h2>
             {loading ? (
