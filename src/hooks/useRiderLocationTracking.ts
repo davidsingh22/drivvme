@@ -73,15 +73,11 @@ function requestMedianLocation() {
   }
 }
 
-// ── HARD-CODE PATSY'S ID FOR TESTING ──
-const PATSY_OVERRIDE_ID = '7a97be8e-f3bc-491e-a143-e0e837b49dc3';
-
 export const useRiderLocationTracking = (enabled: boolean = true) => {
   const { user, isDriver, isAdmin, authLoading } = useAuth();
   const [isTracking, setIsTracking] = useState(false);
 
-  const source = detectSource();
-  const effectiveUserId = source !== 'web' ? (user?.id ? PATSY_OVERRIDE_ID : PATSY_OVERRIDE_ID) : (user?.id ?? null);
+  const effectiveUserId = user?.id ?? null;
 
   const watchIdRef = useRef<number | null>(null);
   const intervalRef = useRef<number | null>(null);

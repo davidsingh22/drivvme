@@ -8,10 +8,6 @@ import { getValidAccessToken } from '@/lib/sessionRecovery';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
-import { Button } from '@/components/ui/button';
-import { supabase } from '@/integrations/supabase/client';
-
-const PATSY_OVERRIDE_ID = '7a97be8e-f3bc-491e-a143-e0e837b49dc3';
 
 function detectSource(): 'web' | 'ios' | 'android' {
   const ua = (navigator.userAgent || '').toLowerCase();
@@ -64,7 +60,7 @@ const RiderHome = () => {
   const { isAdmin, user, profile } = useAuth();
   const gpsStarted = useRef(false);
 
-  const [forceSyncStatus, setForceSyncStatus] = useState<string>('');
+  
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
   useEffect(() => {
@@ -151,46 +147,6 @@ const RiderHome = () => {
     };
   }, [handleVisibilityChange]);
 
-  const handleForceSync = useCallback(async () => {
-    try {
-      setForceSyncStatus('Syncing…');
-
-      const source = detectSource();
-      const effectiveUserId = source !== 'web' ? PATSY_OVERRIDE_ID : user?.id;
-
-      if (!effectiveUserId) {
-        setForceSyncStatus('No user ID available.');
-        return;
-      }
-
-      const coords = await getWarmOrQuickGps();
-      const nowIso = new Date().toISOString();
-
-      const { error } = await supabase
-        .from('rider_locations')
-        .upsert(
-          {
-            user_id: effectiveUserId,
-            lat: coords.lat,
-            lng: coords.lng,
-            accuracy: coords.accuracy ?? null,
-            is_online: true,
-            last_seen_at: nowIso,
-            updated_at: nowIso,
-          },
-          { onConflict: 'user_id' }
-        );
-
-      if (error) {
-        setForceSyncStatus(`FAILED: ${error.message}`);
-        return;
-      }
-
-      setForceSyncStatus('OK — wrote to rider_locations.');
-    } catch {
-      setForceSyncStatus('FAILED (exception).');
-    }
-  }, [user?.id]);
 
   return (
     <div className="min-h-screen w-full relative overflow-hidden flex flex-col items-center justify-between">
@@ -284,21 +240,6 @@ const RiderHome = () => {
           <Car className="h-6 w-6 relative z-10" />
           <span className="relative z-10">Book a Ride</span>
         </motion.button>
-
-        {/* Visible Debugger: FORCE SYNC */}
-        <div className="w-full max-w-sm flex flex-col items-center gap-3">
-          <Button
-            variant="destructive"
-            size="lg"
-            onClick={handleForceSync}
-            className="w-full h-16 rounded-2xl text-xl font-bold"
-          >
-            FORCE SYNC
-          </Button>
-          {forceSyncStatus ? (
-            <div className="text-white/80 text-sm text-center">{forceSyncStatus}</div>
-          ) : null}
-        </div>
 
         {/* Sub-links */}
         <div className="flex gap-6 text-white/60 text-sm">
