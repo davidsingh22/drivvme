@@ -44,9 +44,6 @@ interface DriverWithDistance {
   current_lng: number | null;
   distance_km: number;
   is_priority: boolean;
-  is_online: boolean;
-  last_seen_at: string;
-  is_within_tier: boolean;
   current_dropoff_lat?: number | null;
   current_dropoff_lng?: number | null;
 }
@@ -227,23 +224,6 @@ async function getAccessToken(): Promise<string> {
   return tokenData.access_token;
 }
 
-function resolveFirebaseProjectId(): string | null {
-  const serviceAccountJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
-  if (serviceAccountJson) {
-    try {
-      const serviceAccount = JSON.parse(serviceAccountJson);
-      if (typeof serviceAccount.project_id === "string" && serviceAccount.project_id.trim()) {
-        return serviceAccount.project_id.trim();
-      }
-    } catch (error) {
-      console.warn("Failed to parse FIREBASE_SERVICE_ACCOUNT while resolving project id:", error);
-    }
-  }
-
-  const envProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
-  return envProjectId?.trim() || null;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -288,7 +268,7 @@ serve(async (req) => {
       );
     }
 
-    const firebaseProjectId = resolveFirebaseProjectId();
+    const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
 
     // Parse and validate input
     let rawInput: unknown;
@@ -343,50 +323,6 @@ serve(async (req) => {
       }
     }
 
-    // Read latest ride state for idempotent tier progression
-    const { data: latestRide, error: latestRideError } = await supabase
-      .from("rides")
-      .select("status, driver_id, notification_tier, notified_driver_ids")
-      .eq("id", rideId)
-      .maybeSingle();
-
-    if (latestRideError || !latestRide) {
-      console.error("Failed to fetch ride state:", latestRideError);
-      return new Response(
-        JSON.stringify({ error: "Failed to fetch ride state" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    if (latestRide.driver_id || latestRide.status !== "searching") {
-      return new Response(JSON.stringify({
-        message: "Ride is no longer searching, skipping escalation",
-        tier,
-        sent: 0,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const currentTier = latestRide.notification_tier ?? 0;
-    if (tier > 1 && currentTier >= tier) {
-      return new Response(JSON.stringify({
-        message: `Tier ${tier} already processed, skipping duplicate escalation`,
-        tier,
-        currentTier,
-        sent: 0,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const mergedExcludedDriverIds = [
-      ...new Set([
-        ...excludeDriverIds,
-        ...((latestRide.notified_driver_ids ?? []) as string[]),
-      ]),
-    ];
-
     // Tier configuration — closest-driver-first: only 1 driver per tier
     const tierConfig = {
       1: { maxDistanceKm: 3, maxEta: 10, maxDrivers: 1, description: "3km radius, closest driver" },
@@ -398,136 +334,88 @@ serve(async (req) => {
     const config = tierConfig[tier as keyof typeof tierConfig] || tierConfig[1];
     const effectiveMaxEta = maxEtaMinutes ?? config.maxEta;
 
-    // Get signed-in drivers ONLY from presence heartbeat (active in last 5 minutes)
-    // This is the single source of truth — no stale driver_profiles.is_online fallback
-    const signedInCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { data: activePresence, error: presenceError } = await supabase
-      .from("presence")
-      .select("user_id, role, last_seen_at")
-      .eq("role", "DRIVER")
-      .gte("last_seen_at", signedInCutoff);
-
-    if (presenceError) {
-      console.error("Error fetching active presence:", presenceError);
-      return new Response(JSON.stringify({ error: "Failed to fetch signed-in drivers" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const signedInDriverIds = [...new Set((activePresence ?? []).filter(r => r.user_id).map(r => r.user_id))];
-
-    if (signedInDriverIds.length === 0) {
-      // Update ride with current tier for escalation tracking
-      await supabase
-        .from("rides")
-        .update({ 
-          notification_tier: tier,
-          last_notification_at: new Date().toISOString(),
-        })
-        .eq("id", rideId);
-
-      return new Response(JSON.stringify({
-        message: `No signed-in drivers available for tier ${tier}`,
-        sent: 0,
-        tier,
-        config: config.description,
-        nearbyDrivers: 0,
-        totalSignedIn: 0,
-        shouldEscalate: tier < 4,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Get driver profile state (location + priority)
-    const { data: candidateDriverProfiles, error: driverError } = await supabase
+    // Get all online drivers with their current location and priority status
+    const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
-      .select("user_id, is_online, current_lat, current_lng, priority_driver_until")
-      .in("user_id", signedInDriverIds);
+      .select("user_id, current_lat, current_lng, priority_driver_until")
+      .eq("is_online", true);
 
     if (driverError) {
-      console.error("Error fetching driver profiles:", driverError);
+      console.error("Error fetching online drivers:", driverError);
       return new Response(JSON.stringify({ error: "Failed to fetch drivers" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const profileByUser = new Map((candidateDriverProfiles ?? []).map((profile) => [profile.user_id, profile]));
-    const presenceByUser = new Map((activePresence ?? []).map((row) => [row.user_id, row.last_seen_at]));
+    console.log("Found online drivers:", onlineDrivers?.length || 0);
 
-    const signedInDrivers = signedInDriverIds.map((userId) => {
-      const profile = profileByUser.get(userId);
-      return {
-        user_id: userId,
-        is_online: true, // they have active presence = they are online
-        current_lat: profile?.current_lat ?? null,
-        current_lng: profile?.current_lng ?? null,
-        priority_driver_until: profile?.priority_driver_until ?? null,
-        last_seen_at: presenceByUser.get(userId) ?? new Date(0).toISOString(),
-      };
-    });
-
-    console.log("Found signed-in drivers (presence-only):", signedInDriverIds.length, "| candidate drivers:", signedInDrivers.length);
+    if (!onlineDrivers || onlineDrivers.length === 0) {
+      return new Response(JSON.stringify({ 
+        message: "No online drivers found", 
+        sent: 0,
+        tier,
+        nearbyDrivers: 0,
+        totalOnline: 0 
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Check which drivers are currently on a ride (to check dropoff proximity)
     const { data: busyRides } = await supabase
       .from("rides")
       .select("driver_id, dropoff_lat, dropoff_lng")
-      .in("driver_id", signedInDrivers.map((d) => d.user_id))
+      .in("driver_id", onlineDrivers.map(d => d.user_id))
       .in("status", ["driver_assigned", "driver_en_route", "arrived", "in_progress"]);
 
     const busyDriverDropoffs = new Map<string, { lat: number; lng: number }>();
-    busyRides?.forEach((ride) => {
-      if (ride.driver_id && typeof ride.dropoff_lat === "number" && typeof ride.dropoff_lng === "number") {
+    busyRides?.forEach(ride => {
+      if (ride.driver_id && ride.dropoff_lat && ride.dropoff_lng) {
         busyDriverDropoffs.set(ride.driver_id, { lat: ride.dropoff_lat, lng: ride.dropoff_lng });
       }
     });
 
-    // Filter and sort drivers by: in-tier proximity -> online -> priority -> distance -> freshest session
-    const driversWithDistance: DriverWithDistance[] = signedInDrivers
-      .filter((driver) => !mergedExcludedDriverIds.includes(driver.user_id))
-      .map((driver) => {
+    // Filter and sort drivers by distance
+    const driversWithDistance: DriverWithDistance[] = onlineDrivers
+      .filter(driver => !excludeDriverIds.includes(driver.user_id))
+      .map(driver => {
+        // For busy drivers, use their dropoff location instead
         const dropoffLocation = busyDriverDropoffs.get(driver.user_id);
-
-        let distance = Number.POSITIVE_INFINITY;
+        
+        let distance = Infinity;
         if (dropoffLocation) {
           distance = calculateDistanceKm(pickupLat, pickupLng, dropoffLocation.lat, dropoffLocation.lng);
-        } else if (typeof driver.current_lat === "number" && typeof driver.current_lng === "number") {
+        } else if (driver.current_lat && driver.current_lng) {
           distance = calculateDistanceKm(pickupLat, pickupLng, driver.current_lat, driver.current_lng);
         }
+        // Drivers without location are excluded (distance stays Infinity)
 
-        const etaMinutes = Number.isFinite(distance) ? estimateEtaMinutes(distance) : Number.POSITIVE_INFINITY;
-        const isWithinTier = Number.isFinite(distance) && distance <= config.maxDistanceKm && etaMinutes <= effectiveMaxEta;
-        const isPriority = !!(
-          driver.priority_driver_until &&
-          new Date(driver.priority_driver_until) > new Date()
-        );
+        const isPriority = driver.priority_driver_until && 
+          new Date(driver.priority_driver_until) > new Date();
 
         return {
           user_id: driver.user_id,
           current_lat: driver.current_lat,
           current_lng: driver.current_lng,
           distance_km: distance,
-          is_priority: isPriority,
-          is_online: driver.is_online,
-          last_seen_at: driver.last_seen_at,
-          is_within_tier: isWithinTier,
+          is_priority: !!isPriority,
         };
       })
+      .filter((d): d is DriverWithDistance => d !== null)
+      .filter(d => d.distance_km <= config.maxDistanceKm)
+      .filter(d => estimateEtaMinutes(d.distance_km) <= effectiveMaxEta)
       .sort((a, b) => {
-        if (a.is_within_tier !== b.is_within_tier) return a.is_within_tier ? -1 : 1;
-        if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
-        if (a.is_priority !== b.is_priority) return a.is_priority ? -1 : 1;
-        if (a.distance_km !== b.distance_km) return a.distance_km - b.distance_km;
-        return new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime();
+        // Priority drivers first, then by distance
+        if (a.is_priority && !b.is_priority) return -1;
+        if (!a.is_priority && b.is_priority) return 1;
+        return a.distance_km - b.distance_km;
       });
 
-    // Limit batch size per tier config (strictly one at a time)
+    // Limit batch size per tier config
     const nearbyDrivers = driversWithDistance.slice(0, config.maxDrivers);
 
-    console.log(`Tier ${tier}: Picked ${nearbyDrivers.length} driver (${config.description}) from ${signedInDrivers.length} signed-in candidates`);
+    console.log(`Tier ${tier}: Found ${nearbyDrivers.length} eligible drivers (${config.description})`);
 
     if (nearbyDrivers.length === 0) {
       // Update ride with current tier for escalation tracking
@@ -540,12 +428,12 @@ serve(async (req) => {
         .eq("id", rideId);
 
       return new Response(JSON.stringify({ 
-        message: `No signed-in drivers available for tier ${tier}`,
+        message: `No nearby drivers found for tier ${tier}`, 
         sent: 0,
         tier,
         config: config.description,
         nearbyDrivers: 0,
-        totalSignedIn: signedInDrivers.length,
+        totalOnline: onlineDrivers.length,
         shouldEscalate: tier < 4,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -560,7 +448,7 @@ serve(async (req) => {
       .update({ 
         notification_tier: tier,
         last_notification_at: new Date().toISOString(),
-        notified_driver_ids: [...new Set([...mergedExcludedDriverIds, ...driverUserIds])],
+        notified_driver_ids: [...new Set([...excludeDriverIds, ...driverUserIds])],
       })
       .eq("id", rideId);
 
@@ -816,7 +704,7 @@ serve(async (req) => {
       tier,
       config: config.description,
       nearbyDrivers: nearbyDrivers.length,
-      totalSignedIn: signedInDrivers.length,
+      totalOnline: onlineDrivers.length,
       inAppNotifications: inAppNotifications.length,
       notifiedDriverIds: driverUserIds,
       shouldEscalate: nearbyDrivers.length === 0 && tier < 4,

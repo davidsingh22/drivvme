@@ -195,23 +195,6 @@ async function getAccessToken(): Promise<string> {
   return tokenData.access_token;
 }
 
-function resolveFirebaseProjectId(): string | null {
-  const serviceAccountJson = Deno.env.get("FIREBASE_SERVICE_ACCOUNT");
-  if (serviceAccountJson) {
-    try {
-      const serviceAccount = JSON.parse(serviceAccountJson);
-      if (typeof serviceAccount.project_id === "string" && serviceAccount.project_id.trim()) {
-        return serviceAccount.project_id.trim();
-      }
-    } catch (error) {
-      console.warn("Failed to parse FIREBASE_SERVICE_ACCOUNT while resolving project id:", error);
-    }
-  }
-
-  const envProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
-  return envProjectId?.trim() || null;
-}
-
 // Send OneSignal notification to specific drivers using player_ids + tag fallback
 async function sendOneSignalDriverAlert(
   rideId: string,
@@ -299,7 +282,7 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const firebaseProjectId = resolveFirebaseProjectId();
+    const firebaseProjectId = Deno.env.get("FIREBASE_PROJECT_ID");
 
     // Parse input
     let rawInput: unknown;
@@ -362,184 +345,64 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey!);
 
-    // Server-side escalation watchdog: if current driver misses the offer,
-    // automatically move to the next closest driver every 25s.
-    const runServerEscalation = async () => {
-      if (!isTrigger) {
-        return { enabled: false, escalatedTiers: [] as number[] };
-      }
-
-      const escalatedTiers: number[] = [];
-
-      for (let i = 0; i < 3; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 25000));
-
-        const { data: latestRide, error: latestRideError } = await supabase
-          .from("rides")
-          .select("status, driver_id, notification_tier, notified_driver_ids, pickup_lat, pickup_lng, pickup_address, dropoff_address, estimated_fare")
-          .eq("id", rideId)
-          .maybeSingle();
-
-        if (latestRideError || !latestRide) {
-          console.error("[Waterfall] Failed to load ride state:", latestRideError);
-          break;
-        }
-
-        if (latestRide.driver_id || latestRide.status !== "searching") {
-          console.log(`[Waterfall] Stopping escalation for ride ${rideId} - status=${latestRide.status}, driver_id=${latestRide.driver_id}`);
-          break;
-        }
-
-        const nextTier = (latestRide.notification_tier ?? 1) + 1;
-        if (nextTier > 4) {
-          console.log(`[Waterfall] Max tier reached for ride ${rideId}`);
-          break;
-        }
-
-        const tierPickupLat = Number(latestRide.pickup_lat ?? pickupLat);
-        const tierPickupLng = Number(latestRide.pickup_lng ?? pickupLng);
-
-        if (!Number.isFinite(tierPickupLat) || !Number.isFinite(tierPickupLng)) {
-          console.error("[Waterfall] Missing pickup coordinates, stopping escalation", { rideId, tierPickupLat, tierPickupLng });
-          break;
-        }
-
-        const tierPayload = {
-          rideId,
-          pickupAddress: latestRide.pickup_address ?? pickupAddress,
-          dropoffAddress: latestRide.dropoff_address ?? dropoffAddress,
-          estimatedFare: Number(latestRide.estimated_fare ?? estimatedFare ?? 0),
-          pickupLat: tierPickupLat,
-          pickupLng: tierPickupLng,
-          tier: nextTier,
-          excludeDriverIds: (latestRide.notified_driver_ids ?? []) as string[],
-        };
-
-        console.log(`[Waterfall] Escalating ride ${rideId} to tier ${nextTier}`);
-
-        const tierResponse = await fetch(`${supabaseUrl}/functions/v1/notify-drivers-tiered`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${serviceRoleKey}`,
-          },
-          body: JSON.stringify(tierPayload),
-        });
-
-        const tierResult = await tierResponse.json().catch(() => null);
-        console.log(`[Waterfall] Tier ${nextTier} response (${tierResponse.status}):`, JSON.stringify(tierResult));
-
-        if (!tierResponse.ok) {
-          break;
-        }
-
-        escalatedTiers.push(nextTier);
-      }
-
-      return { enabled: true, escalatedTiers };
-    };
-
-    // Build signed-in driver pool ONLY from presence heartbeat (active in last 5 minutes)
-    // This is the single source of truth for "online" — no stale driver_profiles.is_online fallback
-    const signedInCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    const { data: activePresence, error: presenceError } = await supabase
-      .from("presence")
-      .select("user_id, role, last_seen_at")
-      .eq("role", "DRIVER")
-      .gte("last_seen_at", signedInCutoff);
-
-    if (presenceError) {
-      console.error("Error fetching active presence:", presenceError);
-      return new Response(JSON.stringify({ error: "Failed to fetch signed-in drivers" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const signedInDriverIds = [...new Set((activePresence ?? []).filter(r => r.user_id).map(r => r.user_id))];
-
-    if (signedInDriverIds.length === 0) {
-      return new Response(JSON.stringify({
-        message: "No signed-in drivers found",
-        sent: 0,
-        nearbyDrivers: 0,
-        totalSignedIn: 0,
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const { data: candidateDriverProfiles, error: driverError } = await supabase
+    // Get all online drivers with their current location
+    const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
-      .select("user_id, is_online, current_lat, current_lng")
-      .in("user_id", signedInDriverIds);
+      .select("user_id, current_lat, current_lng")
+      .eq("is_online", true);
 
     if (driverError) {
-      console.error("Error fetching driver profiles:", driverError);
+      console.error("Error fetching online drivers:", driverError);
       return new Response(JSON.stringify({ error: "Failed to fetch drivers" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const profileByUser = new Map((candidateDriverProfiles ?? []).map((profile) => [profile.user_id, profile]));
-    const presenceByUser = new Map((activePresence ?? []).map((row) => [row.user_id, row.last_seen_at]));
+    console.log("Found online drivers:", onlineDrivers?.length || 0);
 
-    const signedInDrivers = signedInDriverIds.map((userId) => {
-      const profile = profileByUser.get(userId);
-      return {
-        user_id: userId,
-        is_online: true, // they have active presence = they are online
-        current_lat: profile?.current_lat ?? null,
-        current_lng: profile?.current_lng ?? null,
-        last_seen_at: presenceByUser.get(userId) ?? new Date(0).toISOString(),
-      };
-    });
-
-    console.log("Found signed-in drivers (presence-only):", signedInDriverIds.length, "| candidate drivers:", signedInDrivers.length);
-
-    // Sequential waterfall: notify ONE driver at a time.
-    // Ranking: in-radius with location -> online -> closest -> freshest signed-in session.
-    const canUsePickup = typeof pickupLat === "number" && typeof pickupLng === "number";
-
-    const rankedDrivers = signedInDrivers
-      .map((driver) => {
-        let distance = Number.POSITIVE_INFINITY;
-        if (canUsePickup && typeof driver.current_lat === "number" && typeof driver.current_lng === "number") {
-          distance = calculateDistanceKm(pickupLat!, pickupLng!, driver.current_lat, driver.current_lng);
-        }
-
-        const inRadius = Number.isFinite(distance) && distance <= maxDistanceKm;
-
-        return {
-          ...driver,
-          distance,
-          in_radius: inRadius,
-        };
-      })
-      .sort((a, b) => {
-        if (a.in_radius !== b.in_radius) return a.in_radius ? -1 : 1;
-        if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
-        if (a.distance !== b.distance) return a.distance - b.distance;
-        return new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime();
+    if (!onlineDrivers || onlineDrivers.length === 0) {
+      return new Response(JSON.stringify({ 
+        message: "No online drivers found", 
+        sent: 0,
+        nearbyDrivers: 0,
+        totalOnline: 0 
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
+    }
 
-    // Only take the single best signed-in driver
-    const nearbyDrivers = rankedDrivers.slice(0, 1);
-
-    console.log(`Sequential waterfall: picked ${nearbyDrivers.length} driver out of ${signedInDrivers.length} signed-in candidates`);
-    if (nearbyDrivers.length > 0) {
-      const picked = nearbyDrivers[0];
-      const distanceLabel = Number.isFinite(picked.distance) ? `${picked.distance.toFixed(2)}km` : "no-gps";
-      console.log(`Picked driver: ${picked.user_id} at ${distanceLabel} (online=${picked.is_online})`);
+    // Filter drivers by proximity to pickup location
+    // Exclusive test driver bypasses distance filter — receives rides from anywhere
+    let nearbyDrivers = onlineDrivers;
+    
+    if (pickupLat && pickupLng) {
+      nearbyDrivers = onlineDrivers.filter(driver => {
+        // Include drivers without location data (they might have just gone online)
+        if (!driver.current_lat || !driver.current_lng) {
+          return true;
+        }
+        
+        const distance = calculateDistanceKm(
+          pickupLat, 
+          pickupLng, 
+          driver.current_lat, 
+          driver.current_lng
+        );
+        
+        console.log(`Driver ${driver.user_id} is ${distance.toFixed(2)}km from pickup`);
+        return distance <= maxDistanceKm;
+      });
+      
+      console.log(`Filtered to ${nearbyDrivers.length} nearby drivers within ${maxDistanceKm}km`);
     }
 
     if (nearbyDrivers.length === 0) {
-      return new Response(JSON.stringify({
-        message: "No signed-in drivers available",
+      return new Response(JSON.stringify({ 
+        message: "No nearby drivers found", 
         sent: 0,
         nearbyDrivers: 0,
-        totalSignedIn: signedInDrivers.length,
+        totalOnline: onlineDrivers.length 
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -563,17 +426,7 @@ serve(async (req) => {
 
     console.log("Found driver subscriptions:", subscriptions?.length || 0);
 
-    // Update ride with the notified driver so escalation hook excludes them
-    await supabase
-      .from("rides")
-      .update({ 
-        notification_tier: 1,
-        last_notification_at: new Date().toISOString(),
-        notified_driver_ids: driverUserIds,
-      })
-      .eq("id", rideId);
-
-    // Create in-app notification for the single closest driver
+    // Create in-app notifications for all nearby drivers (even without push subscriptions)
     const inAppNotifications = nearbyDrivers.map(driver => ({
       user_id: driver.user_id,
       ride_id: rideId,
@@ -593,16 +446,28 @@ serve(async (req) => {
     }
 
     if (!subscriptions || subscriptions.length === 0) {
-      const escalation = await runServerEscalation();
-
       return new Response(JSON.stringify({ 
         message: "No driver push subscriptions found, in-app notifications sent", 
         sent: 0,
         inAppNotifications: inAppNotifications.length,
         nearbyDrivers: nearbyDrivers.length,
-        totalSignedIn: signedInDrivers.length,
-        escalation,
+        totalOnline: onlineDrivers.length 
       }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Get FCM access token
+    let accessToken: string;
+    try {
+      accessToken = await getAccessToken();
+    } catch (error) {
+      console.error("Failed to get FCM access token:", error);
+      return new Response(JSON.stringify({ 
+        error: "FCM authentication failed",
+        inAppNotifications: inAppNotifications.length 
+      }), {
+        status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -614,19 +479,7 @@ serve(async (req) => {
 
     const results: Array<{ id: string; success: boolean; reason?: string; status?: number }> = [];
 
-    let accessToken = "";
-    if (firebaseProjectId) {
-      try {
-        accessToken = await getAccessToken();
-      } catch (error) {
-        console.error("Failed to get FCM access token (continuing with in-app + OneSignal):", error);
-      }
-    } else {
-      console.error("Missing Firebase project id, skipping FCM delivery");
-    }
-
-    if (accessToken) {
-      // Send push notifications in parallel for faster delivery
+    // Send push notifications in parallel for faster delivery
     const pushPromises = subscriptions.map(async (sub) => {
       try {
         // FCM token is stored in p256dh field
@@ -713,7 +566,6 @@ serve(async (req) => {
 
     const pushResults = await Promise.all(pushPromises);
     results.push(...pushResults);
-    }
 
     const sent = results.filter((r) => r.success).length;
 
@@ -721,16 +573,13 @@ serve(async (req) => {
     const oneSignalResult = await sendOneSignalDriverAlert(rideId, pickupAddress, driverUserIds);
     console.log("OneSignal driver alert:", oneSignalResult);
 
-    const escalation = await runServerEscalation();
-
     return new Response(JSON.stringify({ 
       sent, 
       total: results.length, 
       nearbyDrivers: nearbyDrivers.length,
-      totalSignedIn: signedInDrivers.length,
+      totalOnline: onlineDrivers.length,
       inAppNotifications: inAppNotifications.length,
       oneSignal: oneSignalResult,
-      escalation,
       results 
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -5,60 +5,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell } from 'lucide-react';
+import { ArrowLeft, Users, Zap, CheckCircle, Car } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
-
-const RIDE_OFFER_TIMEOUT_S = 25;
-
-interface ActiveRideOffer {
-  id: string; // notification id
-  rideId: string;
-  driverUserId: string;
-  driverName: string;
-  riderName: string;
-  pickupAddress: string;
-  dropoffAddress: string;
-  estimatedFare: number;
-  sentAt: number; // epoch ms
-}
-
-function RideOfferCountdown({ offer, onExpired }: { offer: ActiveRideOffer; onExpired: (id: string) => void }) {
-  const [remaining, setRemaining] = useState(() => {
-    const elapsed = Math.floor((Date.now() - offer.sentAt) / 1000);
-    return Math.max(0, RIDE_OFFER_TIMEOUT_S - elapsed);
-  });
-
-  useEffect(() => {
-    if (remaining <= 0) { onExpired(offer.id); return; }
-    const t = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - offer.sentAt) / 1000);
-      const r = Math.max(0, RIDE_OFFER_TIMEOUT_S - elapsed);
-      setRemaining(r);
-      if (r <= 0) { onExpired(offer.id); clearInterval(t); }
-    }, 1000);
-    return () => clearInterval(t);
-  }, [offer.sentAt, offer.id, onExpired, remaining]);
-
-  const urgency = remaining <= 5 ? 'text-red-500 font-bold' : remaining <= 10 ? 'text-orange-500 font-semibold' : 'text-yellow-500';
-
-  return (
-    <div className="flex items-start gap-2 p-3 rounded-lg border-2 border-yellow-500/50 bg-yellow-500/5 animate-pulse-slow">
-      <Bell className="h-5 w-5 text-yellow-500 mt-0.5 shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium">
-          🔔 {offer.driverName} is receiving a ride request from {offer.riderName}
-        </div>
-        <div className="text-xs text-muted-foreground mt-0.5">
-          {offer.pickupAddress} → {offer.dropoffAddress} · ${offer.estimatedFare.toFixed(2)}
-        </div>
-        <div className={`text-sm mt-1 ${urgency}`}>
-          ⏱ {remaining}s remaining to accept
-        </div>
-      </div>
-    </div>
-  );
-}
 
 interface OnlineUser {
   user_id: string;
@@ -74,7 +23,6 @@ interface FeedItem {
   message: string;
   source: string;
   created_at: string;
-  feedRole: 'rider' | 'driver' | 'both';
 }
 
 interface RiderLocationRow {
@@ -88,15 +36,8 @@ interface DriverLocationRow {
   updated_at: string;
 }
 
-interface RideActivityRow {
-  rider_id: string | null;
-  updated_at: string;
-  status: string;
-}
-
 const ONLINE_THRESHOLD_MS = 2 * 60_000;
 const LOCATION_FEED_COOLDOWN_MS = 45_000;
-const ACTIVE_RIDER_RIDE_STATUSES = ['searching', 'pending_payment', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'] as const;
 const BOOKING_SUCCESS_STATUSES = new Set(['confirmed', 'paid']);
 
 const RIDE_STATUS_LABELS: Record<string, { icon: string; label: string }> = {
@@ -127,7 +68,6 @@ export default function LiveMonitor() {
   const [onlineRiders, setOnlineRiders] = useState<OnlineUser[]>([]);
   const [onlineDrivers, setOnlineDrivers] = useState<OnlineUser[]>([]);
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const [activeOffers, setActiveOffers] = useState<ActiveRideOffer[]>([]);
   const [loading, setLoading] = useState(true);
 
   const feedIdsRef = useRef(new Set<string>());
@@ -188,14 +128,13 @@ export default function LiveMonitor() {
       message: `${getCachedName(userId)} active on app (${role})`,
       source: 'native',
       created_at: seenAt,
-      feedRole: role,
     }, false);
   }, [getCachedName, pushFeedItem, upsertProfileNames]);
 
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
 
-    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes] = await Promise.all([
+    const [riderRes, driverRes, rolesRes] = await Promise.all([
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
@@ -207,22 +146,12 @@ export default function LiveMonitor() {
       supabase
         .from('user_roles')
         .select('user_id, role'),
-      supabase
-        .from('rides')
-        .select('rider_id, updated_at, status')
-        .gte('updated_at', cutoff)
-        .in('status', [...ACTIVE_RIDER_RIDE_STATUSES]),
-      supabase
-        .from('presence')
-        .select('user_id, last_seen_at, role')
-        .gte('last_seen_at', cutoff),
     ]);
 
-    if (riderRes.error || driverRes.error || activeRidesRes.error) {
-      console.error('LiveMonitor: failed loading online presence sources', {
+    if (riderRes.error || driverRes.error) {
+      console.error('LiveMonitor: failed loading location tables', {
         riderError: riderRes.error,
         driverError: driverRes.error,
-        rideActivityError: activeRidesRes.error,
       });
     }
 
@@ -234,10 +163,8 @@ export default function LiveMonitor() {
 
     const riderRows = (riderRes.data || []) as RiderLocationRow[];
     const driverRows = (driverRes.data || []) as DriverLocationRow[];
-    const rideActivityRows = (activeRidesRes.data || []) as RideActivityRow[];
-    const presenceRows = (presenceRes.data || []) as { user_id: string; last_seen_at: string; role: string }[];
 
-    // Collect latest timestamps per user across all sources
+    // Collect latest timestamps per user across both tables
     const allUsersLatest = new Map<string, string>();
 
     riderRows.forEach((row) => {
@@ -253,28 +180,6 @@ export default function LiveMonitor() {
       const prev = allUsersLatest.get(row.user_id);
       if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
         allUsersLatest.set(row.user_id, ts);
-      }
-    });
-
-    rideActivityRows.forEach((row) => {
-      if (!row.rider_id) return;
-      const ts = row.updated_at;
-      const prev = allUsersLatest.get(row.rider_id);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(row.rider_id, ts);
-      }
-    });
-
-    // Also consider presence heartbeat as an online signal
-    presenceRows.forEach((row) => {
-      const ts = row.last_seen_at;
-      const prev = allUsersLatest.get(row.user_id);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(row.user_id, ts);
-      }
-      // If presence says DRIVER, add to driver role set too
-      if (row.role === 'DRIVER') {
-        driverRoleSet.add(row.user_id);
       }
     });
 
@@ -346,7 +251,6 @@ export default function LiveMonitor() {
         message: `${getCachedName(row.user_id)} active on app (rider)`,
         source: 'native',
         created_at: seenAt,
-        feedRole: 'rider',
       });
     });
 
@@ -357,7 +261,6 @@ export default function LiveMonitor() {
         message: `${getCachedName(row.user_id)} active on app (driver)`,
         source: 'native',
         created_at: row.updated_at,
-        feedRole: 'driver',
       });
     });
 
@@ -365,8 +268,6 @@ export default function LiveMonitor() {
       const riderName = ride.rider_id ? getCachedName(ride.rider_id) : 'Unknown';
       const status = String(ride.status || '').toLowerCase();
       const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
-
-      const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived'].includes(status) ? 'both' : 'rider';
 
       items.push({
         id: `ride-${ride.id}-${status}`,
@@ -378,7 +279,6 @@ export default function LiveMonitor() {
             : `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
         source: 'rides',
         created_at: ride.updated_at || ride.created_at,
-        feedRole,
       });
     });
 
@@ -393,20 +293,11 @@ export default function LiveMonitor() {
     setFeed(deduped);
   }, [getCachedName, upsertProfileNames]);
 
-  const handleOfferExpired = useCallback((offerId: string) => {
-    setActiveOffers((prev) => prev.filter((o) => o.id !== offerId));
-  }, []);
-
-  const removeOffersForRide = useCallback((rideId: string) => {
-    setActiveOffers((prev) => prev.filter((o) => o.rideId !== rideId));
-  }, []);
-
   useEffect(() => {
     if (!isAdmin) return;
 
     feedIdsRef.current.clear();
     setFeed([]);
-    setActiveOffers([]);
 
     Promise.all([loadOnlineUsers(), loadInitialFeed()]).finally(() => setLoading(false));
 
@@ -425,7 +316,6 @@ export default function LiveMonitor() {
           message: `${riderName} is booking a ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'} ($${Number(ride.estimated_fare || 0).toFixed(2)})`,
           source: 'rides',
           created_at: ride.created_at || new Date().toISOString(),
-          feedRole: 'rider',
         });
 
         void loadOnlineUsers();
@@ -436,96 +326,24 @@ export default function LiveMonitor() {
 
         if (ride.status === oldRide?.status) return;
 
-        // If ride was accepted or cancelled, remove any active offer countdown
-        if (['driver_assigned', 'cancelled', 'completed'].includes(ride.status)) {
-          removeOffersForRide(ride.id);
-        }
-
         const riderId = ride.rider_id as string | null;
-        const driverId = ride.driver_id as string | null;
         if (riderId) await upsertProfileNames([riderId]);
-        if (driverId) await upsertProfileNames([driverId]);
 
         const riderName = riderId ? getCachedName(riderId) : 'Unknown';
         const status = String(ride.status || '').toLowerCase();
         const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
 
-        // If driver_assigned, show who accepted
-        let message: string;
-        if (status === 'driver_assigned' && driverId) {
-          const driverName = getCachedName(driverId);
-          message = `${driverName} accepted ${riderName}'s ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
-        } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
-          message = `${riderName}: Booking Successful`;
-        } else {
-          message = `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
-        }
-
-        const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
-
         pushFeedItem({
           id: `ride-${ride.id}-${status}`,
           icon: statusInfo.icon,
-          message,
+          message: BOOKING_SUCCESS_STATUSES.has(status)
+            ? `${riderName}: Booking Successful`
+            : `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
           source: 'rides',
           created_at: ride.updated_at || new Date().toISOString(),
-          feedRole,
         });
 
         void loadOnlineUsers();
-      })
-      .subscribe();
-
-    // Subscribe to notifications for new_ride to detect ride offers sent to drivers
-    const notifCh = supabase
-      .channel('admin-ride-offers')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: 'type=eq.new_ride' }, async (payload: any) => {
-        const notif = payload.new;
-        const driverUserId = notif.user_id as string;
-        const rideId = notif.ride_id as string | null;
-        if (!rideId) return;
-
-        // Fetch ride details to get rider name and route
-        const { data: ride } = await supabase
-          .from('rides')
-          .select('rider_id, pickup_address, dropoff_address, estimated_fare')
-          .eq('id', rideId)
-          .maybeSingle();
-
-        const riderId = ride?.rider_id as string | null;
-        const idsToResolve = [driverUserId];
-        if (riderId) idsToResolve.push(riderId);
-        await upsertProfileNames(idsToResolve);
-
-        const driverName = getCachedName(driverUserId);
-        const riderName = riderId ? getCachedName(riderId) : 'Unknown';
-
-        const offer: ActiveRideOffer = {
-          id: notif.id,
-          rideId,
-          driverUserId,
-          driverName,
-          riderName,
-          pickupAddress: ride?.pickup_address || '?',
-          dropoffAddress: ride?.dropoff_address || '?',
-          estimatedFare: Number(ride?.estimated_fare || 0),
-          sentAt: new Date(notif.created_at || Date.now()).getTime(),
-        };
-
-        setActiveOffers((prev) => {
-          // Don't duplicate
-          if (prev.some((o) => o.id === offer.id)) return prev;
-          return [offer, ...prev];
-        });
-
-        pushFeedItem({
-          id: `offer-${notif.id}`,
-          icon: '🔔',
-          message: `${driverName} received a ride request from ${riderName}`,
-          source: 'dispatch',
-          created_at: notif.created_at || new Date().toISOString(),
-          feedRole: 'driver',
-        });
       })
       .subscribe();
 
@@ -558,11 +376,10 @@ export default function LiveMonitor() {
     return () => {
       clearInterval(poll);
       supabase.removeChannel(ridesCh);
-      supabase.removeChannel(notifCh);
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
     };
-  }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, upsertProfileNames]);
+  }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, upsertProfileNames]);
 
   if (authLoading || !isAdmin) {
     return (
@@ -619,7 +436,7 @@ export default function LiveMonitor() {
           </Card>
         </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid md:grid-cols-3 gap-6">
           <Card className="p-4">
             <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
               <Users className="h-5 w-5 text-primary" />
@@ -631,7 +448,7 @@ export default function LiveMonitor() {
             ) : onlineRiders.length === 0 ? (
               <div className="text-muted-foreground text-sm">No riders online</div>
             ) : (
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
                 {onlineRiders
                   .sort((a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime())
                   .map((u) => (
@@ -658,7 +475,7 @@ export default function LiveMonitor() {
             ) : onlineDrivers.length === 0 ? (
               <div className="text-muted-foreground text-sm">No drivers online</div>
             ) : (
-              <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
                 {onlineDrivers
                   .sort((a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime())
                   .map((u) => (
@@ -673,78 +490,27 @@ export default function LiveMonitor() {
               </div>
             )}
           </Card>
-        </div>
 
-        <div className="grid md:grid-cols-2 gap-6">
           <Card className="p-4">
-            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-              <Users className="h-5 w-5 text-primary" />
-              Riders Live Activity Feed
-              <Badge variant="secondary" className="ml-auto">
-                {feed.filter((e) => e.feedRole === 'rider' || e.feedRole === 'both').length}
-              </Badge>
-            </h2>
+            <h2 className="text-lg font-semibold mb-3">Live Activity Feed</h2>
             {loading ? (
               <div className="animate-pulse text-muted-foreground text-sm">Loading…</div>
-            ) : feed.filter((e) => e.feedRole === 'rider' || e.feedRole === 'both').length === 0 ? (
-              <div className="text-muted-foreground text-sm">No rider events yet</div>
+            ) : feed.length === 0 ? (
+              <div className="text-muted-foreground text-sm">No events yet</div>
             ) : (
               <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {feed
-                  .filter((e) => e.feedRole === 'rider' || e.feedRole === 'both')
-                  .map((e) => (
-                    <div key={e.id} className="flex items-start gap-2 p-2 rounded-lg border border-border">
-                      <span className="text-lg leading-none mt-0.5">{e.icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm">{e.message}</div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-xs text-muted-foreground">{timeAgo(e.created_at)}</span>
-                          <Badge variant="outline" className="text-xs">{e.source}</Badge>
-                        </div>
+                {feed.map((e) => (
+                  <div key={e.id} className="flex items-start gap-2 p-2 rounded-lg border border-border">
+                    <span className="text-lg leading-none mt-0.5">{e.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm">{e.message}</div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-muted-foreground">{timeAgo(e.created_at)}</span>
+                        <Badge variant="outline" className="text-xs">{e.source}</Badge>
                       </div>
                     </div>
-                  ))}
-              </div>
-            )}
-          </Card>
-
-          <Card className="p-4">
-            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-              <Car className="h-5 w-5 text-primary" />
-              Drivers Live Activity Feed
-              <Badge variant="secondary" className="ml-auto">
-                {feed.filter((e) => e.feedRole === 'driver' || e.feedRole === 'both').length}
-              </Badge>
-            </h2>
-
-            {activeOffers.length > 0 && (
-              <div className="space-y-2 mb-4">
-                {activeOffers.map((offer) => (
-                  <RideOfferCountdown key={offer.id} offer={offer} onExpired={handleOfferExpired} />
+                  </div>
                 ))}
-              </div>
-            )}
-
-            {loading ? (
-              <div className="animate-pulse text-muted-foreground text-sm">Loading…</div>
-            ) : feed.filter((e) => e.feedRole === 'driver' || e.feedRole === 'both').length === 0 && activeOffers.length === 0 ? (
-              <div className="text-muted-foreground text-sm">No driver events yet</div>
-            ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {feed
-                  .filter((e) => e.feedRole === 'driver' || e.feedRole === 'both')
-                  .map((e) => (
-                    <div key={e.id} className="flex items-start gap-2 p-2 rounded-lg border border-border">
-                      <span className="text-lg leading-none mt-0.5">{e.icon}</span>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm">{e.message}</div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-xs text-muted-foreground">{timeAgo(e.created_at)}</span>
-                          <Badge variant="outline" className="text-xs">{e.source}</Badge>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
               </div>
             )}
           </Card>
