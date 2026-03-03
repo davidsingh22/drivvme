@@ -74,6 +74,7 @@ interface FeedItem {
   message: string;
   source: string;
   created_at: string;
+  feedRole: 'rider' | 'driver' | 'both';
 }
 
 interface RiderLocationRow {
@@ -187,6 +188,7 @@ export default function LiveMonitor() {
       message: `${getCachedName(userId)} active on app (${role})`,
       source: 'native',
       created_at: seenAt,
+      feedRole: role,
     }, false);
   }, [getCachedName, pushFeedItem, upsertProfileNames]);
 
@@ -326,6 +328,7 @@ export default function LiveMonitor() {
         message: `${getCachedName(row.user_id)} active on app (rider)`,
         source: 'native',
         created_at: seenAt,
+        feedRole: 'rider',
       });
     });
 
@@ -336,6 +339,7 @@ export default function LiveMonitor() {
         message: `${getCachedName(row.user_id)} active on app (driver)`,
         source: 'native',
         created_at: row.updated_at,
+        feedRole: 'driver',
       });
     });
 
@@ -343,6 +347,8 @@ export default function LiveMonitor() {
       const riderName = ride.rider_id ? getCachedName(ride.rider_id) : 'Unknown';
       const status = String(ride.status || '').toLowerCase();
       const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
+
+      const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived'].includes(status) ? 'both' : 'rider';
 
       items.push({
         id: `ride-${ride.id}-${status}`,
@@ -354,6 +360,7 @@ export default function LiveMonitor() {
             : `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
         source: 'rides',
         created_at: ride.updated_at || ride.created_at,
+        feedRole,
       });
     });
 
@@ -400,6 +407,7 @@ export default function LiveMonitor() {
           message: `${riderName} is booking a ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'} ($${Number(ride.estimated_fare || 0).toFixed(2)})`,
           source: 'rides',
           created_at: ride.created_at || new Date().toISOString(),
+          feedRole: 'rider',
         });
 
         void loadOnlineUsers();
@@ -435,12 +443,15 @@ export default function LiveMonitor() {
           message = `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
         }
 
+        const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
+
         pushFeedItem({
           id: `ride-${ride.id}-${status}`,
           icon: statusInfo.icon,
           message,
           source: 'rides',
           created_at: ride.updated_at || new Date().toISOString(),
+          feedRole,
         });
 
         void loadOnlineUsers();
@@ -495,6 +506,7 @@ export default function LiveMonitor() {
           message: `${driverName} received a ride request from ${riderName}`,
           source: 'dispatch',
           created_at: notif.created_at || new Date().toISOString(),
+          feedRole: 'driver',
         });
       })
       .subscribe();
@@ -589,7 +601,7 @@ export default function LiveMonitor() {
           </Card>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6">
+        <div className="grid md:grid-cols-2 gap-6">
           <Card className="p-4">
             <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
               <Users className="h-5 w-5 text-primary" />
@@ -601,7 +613,7 @@ export default function LiveMonitor() {
             ) : onlineRiders.length === 0 ? (
               <div className="text-muted-foreground text-sm">No riders online</div>
             ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
                 {onlineRiders
                   .sort((a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime())
                   .map((u) => (
@@ -628,7 +640,7 @@ export default function LiveMonitor() {
             ) : onlineDrivers.length === 0 ? (
               <div className="text-muted-foreground text-sm">No drivers online</div>
             ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+              <div className="space-y-2 max-h-[300px] overflow-y-auto">
                 {onlineDrivers
                   .sort((a, b) => new Date(b.last_seen_at).getTime() - new Date(a.last_seen_at).getTime())
                   .map((u) => (
@@ -643,9 +655,49 @@ export default function LiveMonitor() {
               </div>
             )}
           </Card>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-6">
+          <Card className="p-4">
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Rider Activity Feed
+              <Badge variant="secondary" className="ml-auto">
+                {feed.filter((e) => e.feedRole === 'rider' || e.feedRole === 'both').length}
+              </Badge>
+            </h2>
+            {loading ? (
+              <div className="animate-pulse text-muted-foreground text-sm">Loading…</div>
+            ) : feed.filter((e) => e.feedRole === 'rider' || e.feedRole === 'both').length === 0 ? (
+              <div className="text-muted-foreground text-sm">No rider events yet</div>
+            ) : (
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {feed
+                  .filter((e) => e.feedRole === 'rider' || e.feedRole === 'both')
+                  .map((e) => (
+                    <div key={e.id} className="flex items-start gap-2 p-2 rounded-lg border border-border">
+                      <span className="text-lg leading-none mt-0.5">{e.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm">{e.message}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-muted-foreground">{timeAgo(e.created_at)}</span>
+                          <Badge variant="outline" className="text-xs">{e.source}</Badge>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </Card>
 
           <Card className="p-4">
-            <h2 className="text-lg font-semibold mb-3">Live Activity Feed</h2>
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Car className="h-5 w-5 text-primary" />
+              Driver Activity Feed
+              <Badge variant="secondary" className="ml-auto">
+                {feed.filter((e) => e.feedRole === 'driver' || e.feedRole === 'both').length}
+              </Badge>
+            </h2>
 
             {activeOffers.length > 0 && (
               <div className="space-y-2 mb-4">
@@ -657,22 +709,24 @@ export default function LiveMonitor() {
 
             {loading ? (
               <div className="animate-pulse text-muted-foreground text-sm">Loading…</div>
-            ) : feed.length === 0 && activeOffers.length === 0 ? (
-              <div className="text-muted-foreground text-sm">No events yet</div>
+            ) : feed.filter((e) => e.feedRole === 'driver' || e.feedRole === 'both').length === 0 && activeOffers.length === 0 ? (
+              <div className="text-muted-foreground text-sm">No driver events yet</div>
             ) : (
               <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {feed.map((e) => (
-                  <div key={e.id} className="flex items-start gap-2 p-2 rounded-lg border border-border">
-                    <span className="text-lg leading-none mt-0.5">{e.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm">{e.message}</div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-muted-foreground">{timeAgo(e.created_at)}</span>
-                        <Badge variant="outline" className="text-xs">{e.source}</Badge>
+                {feed
+                  .filter((e) => e.feedRole === 'driver' || e.feedRole === 'both')
+                  .map((e) => (
+                    <div key={e.id} className="flex items-start gap-2 p-2 rounded-lg border border-border">
+                      <span className="text-lg leading-none mt-0.5">{e.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm">{e.message}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-muted-foreground">{timeAgo(e.created_at)}</span>
+                          <Badge variant="outline" className="text-xs">{e.source}</Badge>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             )}
           </Card>
