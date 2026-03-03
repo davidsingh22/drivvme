@@ -94,7 +94,7 @@ interface RideActivityRow {
   status: string;
 }
 
-const ONLINE_THRESHOLD_MS = 2 * 60_000;
+const ONLINE_THRESHOLD_MS = 5 * 60_000;
 const LOCATION_FEED_COOLDOWN_MS = 45_000;
 const ACTIVE_RIDER_RIDE_STATUSES = ['searching', 'pending_payment', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'] as const;
 const BOOKING_SUCCESS_STATUSES = new Set(['confirmed', 'paid']);

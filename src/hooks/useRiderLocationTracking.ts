@@ -6,6 +6,19 @@ import { getValidAccessToken } from '@/lib/sessionRecovery';
 const UPDATE_INTERVAL_MS = 5000; // heartbeat
 const RETRY_DELAY_MS = 3000;
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: number | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(`TIMEOUT_${timeoutMs}`)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
+}
+
 function detectSource(): 'web' | 'ios' | 'android' {
   const ua = (navigator.userAgent || '').toLowerCase();
   if (ua.includes('android')) return 'android';
@@ -105,13 +118,33 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     }
 
     lastSessionCheckAtRef.current = now;
+
+    // Preferred path: lightweight raw token recovery utility.
     try {
       await getValidAccessToken();
       return true;
-    } catch (error) {
-      console.error('[RiderLocation] Session recovery failed:', error);
-      return false;
+    } catch {
+      // Fallback path below.
     }
+
+    // Fallback 1: in-memory auth session can still be valid even if localStorage read failed.
+    try {
+      const sessionRes = await withTimeout(supabase.auth.getSession(), 3500);
+      if (sessionRes.data.session?.access_token) return true;
+    } catch {
+      // continue to refresh fallback
+    }
+
+    // Fallback 2: explicit refresh through auth client.
+    try {
+      const refreshRes = await withTimeout(supabase.auth.refreshSession(), 5000);
+      if (refreshRes.data.session?.access_token) return true;
+    } catch {
+      // final failure below
+    }
+
+    console.error('[RiderLocation] Could not validate auth session for heartbeat writes');
+    return false;
   }, []);
 
   const syncPresenceHeartbeat = useCallback(async (lastSeenAt: string) => {
@@ -426,9 +459,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
       stopMedianBackgroundLocationIfRunning();
 
       void syncPresenceHeartbeat(new Date().toISOString());
-      void markOffline();
     };
-  }, [shouldTrack, source, ensureValidSession, markOffline, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, syncPresenceHeartbeat, writeLocationCoords]);
+  }, [shouldTrack, source, ensureValidSession, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, syncPresenceHeartbeat, writeLocationCoords]);
 
   useEffect(() => {
     if (!user?.id) return;
