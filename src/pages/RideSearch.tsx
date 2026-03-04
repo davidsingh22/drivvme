@@ -37,11 +37,7 @@ const RideSearch = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [searchTimedOut, setSearchTimedOut] = useState(false);
   const [apiReady, setApiReady] = useState(false);
-  const [isEditingPickup, setIsEditingPickup] = useState(false);
-  const [pickupQuery, setPickupQuery] = useState('');
-  const [pickupResults, setPickupResults] = useState<{ name: string; address?: string; lat: number; lng: number }[]>([]);
   const destRef = useRef<HTMLInputElement>(null);
-  const pickupInputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCountRef = useRef(0);
   const pendingQueryRef = useRef<string | null>(null);
@@ -282,26 +278,7 @@ const RideSearch = () => {
     [mapboxToken, language]
   );
 
-  // ── Pickup address search (simple geocoding) ──
-  const searchPickup = useCallback(async (query: string) => {
-    const tk = mapboxTokenRef.current || getPersistedToken();
-    if (!tk || query.length < 2) { setPickupResults([]); return; }
-    try {
-      const res = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?access_token=${tk}&limit=5&country=ca&language=${language}`
-      );
-      const data = await res.json();
-      setPickupResults(
-        (data.features || []).map((f: any) => ({
-          name: f.text || f.place_name?.split(',')[0],
-          address: f.place_name,
-          lat: f.center[1],
-          lng: f.center[0],
-        }))
-      );
-    } catch { setPickupResults([]); }
-  }, [language]);
-
+  // ── Core search: 1.5s SearchBox timeout → instant Geocoding fuzzy fallback ──
   const searchMapbox = useCallback(
     async (query: string) => {
       if (query.length < 2) {
@@ -536,106 +513,11 @@ const RideSearch = () => {
 
       {/* Pickup + Destination boxes */}
       <div className="px-4 py-4 space-y-3">
-        <div
-          className="flex items-center gap-3 bg-white/8 rounded-xl px-4 py-3 cursor-pointer hover:bg-white/12 transition-colors"
-          onClick={() => setIsEditingPickup(true)}
-        >
+        <div className="flex items-center gap-3 bg-white/8 rounded-xl px-4 py-3">
           <div className="h-3 w-3 rounded-full bg-lime-400 flex-shrink-0" />
           <span className="text-white/80 text-sm truncate flex-1">{pickupLabel}</span>
-          <span className="text-[10px] text-white/40 flex-shrink-0">{language === 'fr' ? 'Modifier' : 'Edit'}</span>
+          <Navigation className="h-4 w-4 text-white/40 flex-shrink-0" />
         </div>
-
-        {/* Pickup edit modal */}
-        {isEditingPickup && (
-          <div className="fixed inset-0 z-[60] bg-[#1a1a2e] flex flex-col">
-            <div className="flex items-center gap-3 px-4 pt-[env(safe-area-inset-top,12px)] pb-3 border-b border-white/10">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-white hover:bg-white/10"
-                onClick={() => setIsEditingPickup(false)}
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <h2 className="text-white font-semibold text-lg">
-                {language === 'fr' ? 'Modifier le départ' : 'Edit pickup'}
-              </h2>
-            </div>
-            <div className="px-4 py-4">
-              <div className="flex items-center gap-3 bg-white/12 rounded-xl px-4 py-3">
-                <div className="h-3 w-3 rounded-full bg-lime-400 flex-shrink-0" />
-                <input
-                  ref={pickupInputRef}
-                  type="text"
-                  value={pickupQuery}
-                  onChange={(e) => {
-                    setPickupQuery(e.target.value);
-                    if (e.target.value.length >= 2) {
-                      searchPickup(e.target.value);
-                    } else {
-                      setPickupResults([]);
-                    }
-                  }}
-                  placeholder={language === 'fr' ? 'Entrez une adresse de départ' : 'Enter pickup address'}
-                  className="flex-1 bg-transparent text-white placeholder:text-white/40 text-sm outline-none"
-                  autoComplete="off"
-                  autoFocus
-                />
-              </div>
-            </div>
-            <div className="flex-1 overflow-y-auto px-4">
-              {/* Use current location option */}
-              <button
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/8 transition-colors mb-2"
-                onClick={() => {
-                  if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition(
-                      async (pos) => {
-                        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                        setPickupCoords(coords);
-                        setPickupLabel(language === 'fr' ? 'Position actuelle' : 'Current location');
-                        // Reverse geocode
-                        const tk = mapboxTokenRef.current || getPersistedToken();
-                        if (tk) {
-                          try {
-                            const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${coords.lng},${coords.lat}.json?access_token=${tk}&limit=1`);
-                            const data = await res.json();
-                            if (data.features?.[0]) {
-                              setPickupLabel(data.features[0].place_name?.split(',').slice(0, 2).join(',') || (language === 'fr' ? 'Position actuelle' : 'Current location'));
-                            }
-                          } catch { /* silent */ }
-                        }
-                        setIsEditingPickup(false);
-                      },
-                      () => { setIsEditingPickup(false); },
-                      { enableHighAccuracy: true, timeout: 5000 }
-                    );
-                  }
-                }}
-              >
-                <Navigation className="h-4 w-4 text-lime-400" />
-                <span className="text-white/80 text-sm">{language === 'fr' ? 'Utiliser ma position actuelle' : 'Use my current location'}</span>
-              </button>
-              {pickupResults.map((result, i) => (
-                <button
-                  key={i}
-                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/8 transition-colors"
-                  onClick={() => {
-                    setPickupLabel(result.name);
-                    setPickupCoords({ lat: result.lat, lng: result.lng });
-                    setIsEditingPickup(false);
-                  }}
-                >
-                  <MapPin className="h-4 w-4 text-white/40 flex-shrink-0" />
-                  <div className="text-left">
-                    <p className="text-white text-sm">{result.name}</p>
-                    {result.address && <p className="text-white/40 text-xs">{result.address}</p>}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         <div className="flex items-center gap-3 bg-white/12 rounded-xl px-4 py-3">
           <div className="h-3 w-3 rounded-sm bg-purple-400 flex-shrink-0" />
