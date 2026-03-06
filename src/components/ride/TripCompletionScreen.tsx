@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Star, DollarSign, TrendingDown, CheckCircle2, MessageSquare, Receipt } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -73,85 +73,69 @@ const TripCompletionScreen = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
-  const autoRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Auto-redirect after 30 seconds if no action taken
-  useEffect(() => {
-    autoRedirectRef.current = setTimeout(() => {
-      console.log('[TripCompletion] 30s auto-redirect — no action taken');
-      onComplete();
-    }, 30000);
-
-    return () => {
-      if (autoRedirectRef.current) clearTimeout(autoRedirectRef.current);
-    };
-  }, [onComplete]);
 
   const handleSubmit = async () => {
-    // Clear auto-redirect since user is actively submitting
-    if (autoRedirectRef.current) clearTimeout(autoRedirectRef.current);
-    if (isSubmitting) return; // prevent double-tap
     setIsSubmitting(true);
 
-    // Hard safety timeout — no matter what, navigate away after 8s
-    const safetyTimer = setTimeout(() => {
-      console.warn('[TripCompletion] Safety timeout — forcing navigation');
-      setIsSubmitting(false);
-      onComplete();
-    }, 8000);
-
     try {
-      // Fire all DB operations in parallel, each with individual timeouts
-      const withTimeout = <T,>(p: Promise<T>, ms = 5000): Promise<T | null> =>
-        Promise.race([p, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+      // Submit rating
+      const { error: ratingError } = await supabase.from('ratings').insert({
+        ride_id: rideId,
+        driver_id: driverId,
+        rider_id: riderId,
+        rating,
+        comment: comment || null,
+      });
 
-      await Promise.allSettled([
-        // 1. Submit rating
-        withTimeout(
-          Promise.resolve(supabase.from('ratings').insert({
-            ride_id: rideId,
-            driver_id: driverId,
-            rider_id: riderId,
-            rating,
-            comment: comment || null,
-          })).then(({ error }) => {
-            if (error && !error.message?.includes('duplicate') && !error.code?.includes('23505')) {
-              console.error('Rating insert error:', error);
-            }
-          })
-        ),
+      if (ratingError) throw ratingError;
 
-        // 2. Update driver avg rating (best-effort)
-        withTimeout(
-          Promise.resolve(supabase.from('ratings').select('rating').eq('driver_id', driverId)).then(({ data: ratings }) => {
-            if (ratings && ratings.length > 0) {
-              const avgRating = ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
-              return Promise.resolve(supabase.from('driver_profiles').update({ average_rating: avgRating }).eq('user_id', driverId));
-            }
-          })
-        ),
+      // Update driver's average rating
+      const { data: ratings } = await supabase
+        .from('ratings')
+        .select('rating')
+        .eq('driver_id', driverId);
 
-        // 3. Save tip as pending
-        selectedTip > 0
-          ? withTimeout(
-              Promise.resolve(supabase.from('rides').update({ tip_amount: selectedTip, tip_status: 'pending' }).eq('id', rideId))
-                .then(({ error }) => { if (error) console.error('[TIP] Save failed:', error); })
-            )
-          : Promise.resolve(),
-      ]);
+      if (ratings && ratings.length > 0) {
+        const avgRating = ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
+        await supabase
+          .from('driver_profiles')
+          .update({ average_rating: avgRating })
+          .eq('user_id', driverId);
+      }
+
+      // Save tip as pending (admin will charge it)
+      if (selectedTip > 0) {
+        console.log('[TIP] Saving tip:', { rideId, selectedTip, riderId });
+        const { data: tipData, error: tipError } = await supabase
+          .from('rides')
+          .update({ tip_amount: selectedTip, tip_status: 'pending' })
+          .eq('id', rideId)
+          .select('id, tip_amount, tip_status');
+
+        if (tipError) {
+          console.error('[TIP] Save failed:', tipError);
+        } else {
+          console.log('[TIP] Save succeeded:', tipData);
+        }
+      }
 
       toast({
         title: language === 'fr' ? 'Merci!' : 'Thank you!',
-        description: language === 'fr'
-          ? 'Votre évaluation a été enregistrée'
+        description: language === 'fr' 
+          ? 'Votre évaluation a été enregistrée' 
           : 'Your rating has been submitted',
       });
+
+      onComplete();
     } catch (error: any) {
       console.error('Submit error:', error);
+      toast({
+        title: language === 'fr' ? 'Erreur' : 'Error',
+        description: error.message,
+        variant: 'destructive',
+      });
     } finally {
-      clearTimeout(safetyTimer);
       setIsSubmitting(false);
-      onComplete();
     }
   };
 

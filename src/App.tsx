@@ -11,7 +11,6 @@ import { supabase } from "@/integrations/supabase/client";
 import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
-import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
@@ -37,8 +36,6 @@ const DriverLive = lazy(() => import("./pages/DriverLive"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Debug = lazy(() => import("./pages/Debug"));
 const DriverFloatingGPSButton = lazy(() => import("@/components/DriverFloatingGPSButton"));
-const RiderHome = lazy(() => import("./pages/RiderHome"));
-const RideSearch = lazy(() => import("./pages/RideSearch"));
 
 const queryClient = new QueryClient();
 
@@ -183,9 +180,7 @@ const AppRoutes = () => {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
-         <Route path="/rider-home" element={<RiderHome />} />
-         <Route path="/search" element={<RideSearch />} />
-         <Route path="/ride" element={<RideRoute />} />
+        <Route path="/ride" element={<RideRoute />} />
         <Route
           path="/driver"
           element={
@@ -243,13 +238,7 @@ const RouteRestorer = () => {
       // If the driver last used /driver, restore them there immediately on iOS reload.
       if (roles.length === 0 || roles.includes('driver')) {
         navigate('/driver', { replace: true });
-        return;
       }
-    }
-
-    // For riders, always go to rider-home on cold start / reopen
-    if (roles.includes('rider') || (!roles.includes('driver') && !roles.includes('admin'))) {
-      navigate('/rider-home', { replace: true });
     }
   }, [authLoading, session, roles, location.pathname, navigate]);
 
@@ -277,7 +266,6 @@ const App = () => {
       <LanguageProvider>
         <AuthProvider>
           <TooltipProvider>
-            <GlobalRideOfferGuard />
             <Toaster />
             <Sonner />
             <BrowserRouter>

@@ -31,7 +31,6 @@ import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
 import { withTimeout } from '@/lib/withTimeout';
-import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
@@ -107,12 +106,10 @@ const DriverDashboard = () => {
   // Refs to avoid stale closures in the realtime listener
   const currentRideRef = useRef<RideRequest | null>(null);
   const newRideAlertOpenRef = useRef(false);
-  const newRideAlertRideIdRef = useRef<string | null>(null);
 
   // Keep refs in sync with state
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
   useEffect(() => { newRideAlertOpenRef.current = newRideAlertOpen; }, [newRideAlertOpen]);
-  useEffect(() => { newRideAlertRideIdRef.current = newRideAlertRideId; }, [newRideAlertRideId]);
 
 
   // GPS Streaming for live driver location (continuous foreground tracking)
@@ -146,7 +143,6 @@ const DriverDashboard = () => {
     lastUpdate: locationLastUpdate,
     locationError,
     permissionStatus: locationPermission,
-    resetLocationError,
   } = useDriverLocationTracking({
     userId: user?.id,
     // Use auth user id as the stable driver identifier for driver_locations.
@@ -159,23 +155,6 @@ const DriverDashboard = () => {
   // Sync GPS position to local state for map
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
   
-  // GPS error → non-blocking dismissible toast (never blocks UI)
-  const lastGpsToastRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!gpsError) { lastGpsToastRef.current = null; return; }
-    const key = `${gpsError.code}`;
-    if (key === lastGpsToastRef.current) return;
-    lastGpsToastRef.current = key;
-    if (currentRide || newRideAlertOpen) return;
-    toast({
-      title: gpsError.code === 1 ? (language === 'fr' ? 'GPS refusé' : 'GPS Permission Denied')
-        : gpsError.code === 2 ? (language === 'fr' ? 'Signal GPS perdu' : 'GPS Signal Lost')
-        : (language === 'fr' ? 'GPS lent' : 'GPS Timeout'),
-      description: language === 'fr' ? 'Appuyez sur Réessayer dans les paramètres' : 'Location access needed for tracking',
-      variant: 'destructive',
-    });
-  }, [gpsError?.code, currentRide, newRideAlertOpen]);
-
   const alertStartTimeRef = useRef<number | null>(null);
 
   // Helper function for distance calculation (must be defined before any hooks that call it)
@@ -393,366 +372,30 @@ const DriverDashboard = () => {
     restoreActiveRide();
   }, [session?.user?.id]);
 
-  // Safety guard: periodically validate that currentRide is still active in DB.
-  // Prevents stale ride state from persisting due to missed realtime events.
-  useEffect(() => {
-    if (!currentRide?.id || !session?.user?.id) return;
-
-    const validate = async () => {
-      const { data } = await supabase
-        .from('rides')
-        .select('status')
-        .eq('id', currentRide.id)
-        .maybeSingle();
-
-      if (!data || data.status === 'completed' || data.status === 'cancelled') {
-        console.log('[DriverDashboard] Safety guard: clearing stale currentRide', currentRide.id, data?.status);
-        setCurrentRide(null);
-        setRiderInfo(null);
-        setShowGPSNavigation(false);
-      }
-    };
-
-    // Validate immediately and then every 5 seconds
-    validate();
-    const interval = window.setInterval(validate, 5000);
-    return () => window.clearInterval(interval);
-  }, [currentRide?.id, session?.user?.id]);
-
   // GPS location is now handled by useDriverGPSStreaming hook
   // The hook automatically tracks when isOnline or currentRide changes
 
-  // Shared countdown constant — visual countdown in modal
-  const COUNTDOWN_SECONDS = 25;
-  // Max age we'll still recover an offer (gives driver time to open app)
-  const MAX_OFFER_AGE_SECONDS = 90;
-
-  // recoveredCountdown is kept for API compat but always null now (always fresh 25s)
-  const [recoveredCountdown, setRecoveredCountdown] = useState<number | null>(null);
-
-  // Recovery: check for pending new_ride notifications on mount/resume.
-  // IMPORTANT: NOT gated on isOnline — driver may tap push before toggling online.
-  // Uses session?.user?.id as primary (hydrates before useAuth's user), falls back to user?.id.
-  useEffect(() => {
-    // AUTH-GATE: Do NOT return early when userId is null.
-    // We mount the effect unconditionally so the onAuthStateChange listener
-    // can fire and trigger recovery once the session hydrates (cold start fix).
-    const userId = session?.user?.id || user?.id;
-    if (!userId) {
-      console.log('[Recovery] ⏳ No userId yet — mounting auth listener to wait for SIGNED_IN');
-    }
-    let cancelled = false;
-
-    /**
-     * Show a ride offer from a ride_id (used by both recovery query and global store).
-     * Returns true if successfully showed the modal.
-     */
-    const showOfferForRide = async (rideId: string): Promise<boolean> => {
-      if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return false;
-
-      const { data: ride, error: rideError } = await supabase
-        .from('rides')
-        .select('*')
-        .eq('id', rideId)
-        .eq('status', 'searching')
-        .maybeSingle();
-
-      if (rideError || !ride) {
-        console.log('[Recovery] Ride not in searching status for', rideId);
-        return false;
-      }
-      if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return false;
-
-      // Only reject if ride is truly expired (>90s). Visual countdown always starts fresh at 25s.
-      const notifAge = (Date.now() - new Date(ride.requested_at || ride.created_at).getTime()) / 1000;
-      if (notifAge > MAX_OFFER_AGE_SECONDS) {
-        console.log('[Recovery] ⏰ Ride too old:', Math.round(notifAge), 's');
-        return false;
-      }
-
-      // Always show a FRESH 25s countdown — the timer starts when the modal appears, not when the notification was created.
-      console.log('[Recovery] ✅ Showing ride offer:', ride.id, '(age:', Math.round(notifAge), 's, visual countdown: FRESH 25s)');
-      setRecoveredCountdown(null); // null = use full default countdown
-      setCachedAlertRide(ride);
-      setNewRideAlertRideId(ride.id);
-      setNewRideAlertOpen(true);
-      // Auto-dismiss reconnecting overlay so the modal is visible immediately
-      setShowReconnect(false);
-      alertStartTimeRef.current = Date.now() - (notifAge * 1000);
-      return true;
-    };
-
-    /**
-     * Core recovery check with forced session refresh.
-     * Retry-ladder calls this at 100ms, 1500ms, 4000ms after activation.
-     */
-    const checkPendingOffers = async (attempt: number = 0) => {
-      if (cancelled) return;
-
-      const hasCurrentRide = !!currentRideRef.current;
-      const hasAlertOpen = !!newRideAlertOpenRef.current;
-      if (hasCurrentRide || hasAlertOpen) {
-        console.log(`[Recovery] ⏭️ Skipping (attempt ${attempt}) — currentRide:`, hasCurrentRide, 'alertOpen:', hasAlertOpen);
-        return;
-      }
-
-      try {
-        // STEP 0: Check localStorage signal FIRST (works before auth hydrates)
-        try {
-          const lsRideId = localStorage.getItem('pendingRideFromPush');
-          if (lsRideId && !currentRideRef.current && !newRideAlertOpenRef.current) {
-            console.log(`[Recovery] (attempt ${attempt}) 📱 Found localStorage signal:`, lsRideId);
-            localStorage.removeItem('pendingRideFromPush');
-            // Try to consume from global store too
-            consumePendingRide();
-          }
-        } catch { /* ignore localStorage errors */ }
-
-        // AUTH-GATE: Force session refresh, but HARD-STOP if no session available.
-        // This prevents querying with a null user_id which returns zero results.
-        let activeSession: any = null;
-        try {
-          const { data: { session: freshSession } } = await supabase.auth.getSession();
-          activeSession = freshSession;
-          if (!freshSession) {
-            console.log(`[Recovery] (attempt ${attempt}) ⚠️ Auth Status: No Session — attempting refresh…`);
-            const { data: refreshed } = await supabase.auth.refreshSession();
-            activeSession = refreshed?.session;
-          }
-        } catch (e) {
-          console.warn(`[Recovery] (attempt ${attempt}) Session check error:`, e);
-        }
-
-        const effectiveUserId = activeSession?.user?.id;
-        console.log(`[Recovery] Checking for ride. Auth Status: ${effectiveUserId ? 'Authenticated (uid: ' + effectiveUserId + ')' : 'No Session'} (attempt ${attempt})`);
-
-        // HARD AUTH-GATE: Do not query the database without a valid user ID.
-        if (!effectiveUserId) {
-          console.log(`[Recovery] ❌ (attempt ${attempt}) No authenticated user — skipping DB query, will retry on next ladder step or SIGNED_IN event`);
-          return;
-        }
-
-        // STEP 2: Check global pending ride store (from OneSignal click before mount)
-        const globalRideId = consumePendingRide();
-        if (globalRideId) {
-          console.log(`[Recovery] (attempt ${attempt}) 🌐 Found global pending ride:`, globalRideId);
-          const shown = await showOfferForRide(globalRideId);
-          if (shown) return;
-        }
-
-        // STEP 3: Query unread notifications
-        console.log(`[Recovery] (attempt ${attempt}) 🔍 Querying unread new_ride notifications for user: ${effectiveUserId}`);
-
-        const { data: pending, error: notifError } = await supabase
-          .from('notifications')
-          .select('ride_id, created_at')
-          .eq('user_id', effectiveUserId)
-          .eq('type', 'new_ride')
-          .eq('is_read', false)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (notifError) {
-          console.warn(`[Recovery] ❌ (attempt ${attempt}) Notification query error:`, notifError.message);
-          return;
-        }
-
-        if (!pending?.ride_id) {
-          console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications found`);
-          return;
-        }
-        if (cancelled || currentRideRef.current || newRideAlertOpenRef.current) return;
-
-        const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
-        console.log(`[Recovery] (attempt ${attempt}) 📋 Found notification — ride:`, pending.ride_id, 'age:', Math.round(notifAge), 's');
-
-        if (notifAge > MAX_OFFER_AGE_SECONDS) {
-          console.log(`[Recovery] ⏰ Expired (age: ${Math.round(notifAge)}s > ${MAX_OFFER_AGE_SECONDS}s) — marking read`);
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
-            .eq('user_id', effectiveUserId)
-            .eq('type', 'new_ride');
-          return;
-        }
-
-        const shown = await showOfferForRide(pending.ride_id);
-        if (!shown) {
-          // Ride no longer searching — mark notification read to avoid re-querying
-          console.log('[Recovery] Ride not available — marking notification read');
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
-            .eq('user_id', effectiveUserId)
-            .eq('type', 'new_ride');
-        }
-        // NOTE: Do NOT mark is_read here if shown — only mark read on accept/decline/timeout
-      } catch (err) {
-        console.warn(`[Recovery] (attempt ${attempt}) check failed:`, err);
-      }
-    };
-
-    // ===== RETRY LADDER: 500ms intervals for first 5s (10 attempts) =====
-    console.log('[Recovery] 🚀 Effect mounted. userId:', userId || '(pending auth)');
-    const runLadder = () => {
-      const timers: ReturnType<typeof setTimeout>[] = [];
-      for (let i = 0; i < 10; i++) {
-        timers.push(setTimeout(() => checkPendingOffers(i), i * 500));
-      }
-      return timers;
-    };
-
-    // Only run initial ladder if we already have a userId
-    const initialTimers = userId ? runLadder() : [];
-
-    // Poll every 3 seconds as safety net — start immediately if authenticated,
-    // otherwise the onAuthStateChange SIGNED_IN handler will start it.
-    let intervalId = userId ? window.setInterval(() => checkPendingOffers(99), 3000) : 0;
-    const ensurePolling = () => {
-      if (!intervalId) {
-        console.log('[Recovery] ▶️ Starting 3s polling interval (auth just arrived)');
-        intervalId = window.setInterval(() => checkPendingOffers(99), 3000);
-      }
-    };
-
-    // Listen for global store updates (push click while already mounted)
-    const unsubGlobal = onPendingRide(async (rideId) => {
-      console.log('[Recovery] 🌐 Global store event received:', rideId);
-      await showOfferForRide(rideId);
-    });
-
-    // Force-clear stale state and re-check on app resume
-    // Auto-retry GPS on resume to clear stale "GPS Permission Denied" banners
-    const retryGeolocation = () => {
-      try {
-        navigator.geolocation?.getCurrentPosition(
-          () => console.log('[Recovery] 📍 GPS re-acquired on resume'),
-          (err) => console.log('[Recovery] 📍 GPS retry error on resume:', err.code),
-          { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-        );
-      } catch { /* ignore */ }
-    };
-
-    const resetAndRetry = (source: string) => {
-      console.log(`[Recovery] 👁️ ${source} — clearing ALL stale state, force-refreshing session + retrying GPS + running retry ladder`);
-      setRecoveredCountdown(null);
-      // Force-clear BOTH refs AND state so useEffect sync doesn't overwrite back
-      newRideAlertOpenRef.current = false;
-      newRideAlertRideIdRef.current = null;
-      setNewRideAlertOpen(false);
-      setNewRideAlertRideId(null);
-      setCachedAlertRide(null);
-      // Auto-clear the GPS error banner so it doesn't block the UI on resume
-      resetLocationError();
-      // If a ride is active, force a GPS re-acquire so the navigation works immediately
-      if (currentRide || currentRideRef.current) {
-        try {
-          navigator.geolocation.getCurrentPosition(() => {}, () => {}, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-        } catch (_) {}
-      }
-      // NOTE: Do NOT clear currentRideRef if there's an active ride in progress
-      if (!currentRide) {
-        currentRideRef.current = null;
-      }
-      supabase.auth.refreshSession().catch(() => {});
-      retryGeolocation();
-      runLadder();
-    };
-
-    const handleResume = () => {
-      if (document.visibilityState === 'visible' || !document.hidden) {
-        resetAndRetry('App resumed (visibilitychange)');
-      }
-    };
-    const handleFocus = () => resetAndRetry('Window focused');
-    const handlePageShow = () => resetAndRetry('pageshow fired');
-
-    // Post-reconnection check: when auth transitions to SIGNED_IN, immediately check for rides
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      if (cancelled) return;
-      console.log(`[Recovery] 🔐 Auth state changed: ${_event}, Session: ${newSession ? 'present' : 'null'}`);
-      if (_event === 'SIGNED_IN' && newSession) {
-        console.log('[Recovery] ✅ SIGNED_IN detected — running retry ladder + ensuring polling');
-        ensurePolling();
-        runLadder();
-      }
-      if (_event === 'TOKEN_REFRESHED' && newSession) {
-        console.log('[Recovery] 🔄 TOKEN_REFRESHED — running single check');
-        checkPendingOffers(50);
-      }
-    });
-
-    document.addEventListener('visibilitychange', handleResume);
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('pageshow', handlePageShow);
-
-    return () => {
-      cancelled = true;
-      initialTimers.forEach(clearTimeout);
-      if (intervalId) window.clearInterval(intervalId);
-      unsubGlobal();
-      authListener?.subscription?.unsubscribe();
-      document.removeEventListener('visibilitychange', handleResume);
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('pageshow', handlePageShow);
-    };
-  }, [user?.id, session?.user?.id]);
-
   // Push-based ride offer listener — no polling, no feed.
   // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
-  // Use a unique channel name per user to avoid conflicts across re-renders.
   useEffect(() => {
-    if (!user?.id) return;
-    const userId = user.id;
+    if (!isOnline || !user || !session) return;
 
-    const channelName = `driver-ride-offers-${userId}-${Date.now()}`;
-    console.log('[Realtime] 📡 Subscribing to notifications channel:', channelName);
-
+    // Listen for new ride notifications via realtime on the notifications table
     const channel = supabase
-      .channel(channelName)
+      .channel('driver-ride-offers')
       .on(
         'postgres_changes',
         {
           event: 'INSERT',
           schema: 'public',
           table: 'notifications',
-          filter: `user_id=eq.${userId}`,
+          filter: `user_id=eq.${user.id}`,
         },
         async (payload) => {
           try {
             const notif = payload.new as { type: string; ride_id: string | null };
-            console.log('[Realtime] 📩 Notification received:', notif.type, notif.ride_id);
-
-            // Handle ride_cancelled notifications — dismiss offer modal or clear active ride
-            if (notif.type === 'ride_cancelled' && notif.ride_id) {
-              console.log('[Realtime] 🚫 ride_cancelled for:', notif.ride_id);
-              if (newRideAlertRideIdRef.current === notif.ride_id) {
-                setNewRideAlertOpen(false);
-                setCachedAlertRide(null);
-                setNewRideAlertRideId(null);
-                alertStartTimeRef.current = null;
-              }
-              if (currentRideRef.current?.id === notif.ride_id) {
-                setCurrentRide(null);
-                setRiderInfo(null);
-                setShowGPSNavigation(false);
-              }
-              toast({
-                title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-                description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
-                variant: 'destructive',
-              });
-              return;
-            }
-
             if (notif.type !== 'new_ride' || !notif.ride_id) return;
-            if (currentRideRef.current || newRideAlertOpenRef.current) {
-              console.log('[Realtime] ⏭️ Already busy — currentRide:', !!currentRideRef.current, 'alertOpen:', !!newRideAlertOpenRef.current);
-              return;
-            }
+            if (currentRideRef.current || newRideAlertOpenRef.current) return; // already busy
 
             // Fetch the ride details
             const { data: ride, error } = await supabase
@@ -762,18 +405,14 @@ const DriverDashboard = () => {
               .eq('status', 'searching')
               .maybeSingle();
 
-            if (error || !ride) {
-              console.log('[Realtime] Ride not available:', error?.message || 'not searching');
-              return;
-            }
+            if (error || !ride) return;
 
-            console.log('[Realtime] 🔔 Showing ride offer from realtime:', ride.id);
+            console.log('[DriverDashboard] 🔔 Push-based ride offer:', ride.id);
               
+            // Cache and show offer modal
             setCachedAlertRide(ride);
             setNewRideAlertRideId(ride.id);
             setNewRideAlertOpen(true);
-            setShowReconnect(false); // Auto-dismiss reconnecting overlay
-            setRecoveredCountdown(null); // fresh offer = full countdown
             alertStartTimeRef.current = Date.now();
 
             toast({
@@ -785,92 +424,16 @@ const DriverDashboard = () => {
               (navigator as any).vibrate?.([300, 100, 300, 100, 500]);
             }
           } catch (err) {
-            console.error('[Realtime] Ride offer handler error:', err);
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log('[Realtime] 📡 Channel status:', status);
-      });
-
-    return () => {
-      console.log('[Realtime] 🔌 Removing channel:', channelName);
-      supabase.removeChannel(channel);
-    };
-  }, [user?.id]);
-
-  // Watch alerted ride for cancellation — dismiss modal if rider cancels
-  // Uses BOTH realtime (may fail due to RLS on cancelled rows) AND polling fallback
-  useEffect(() => {
-    if (!newRideAlertRideId || !newRideAlertOpen) return;
-
-    const dismissAlert = (reason: string) => {
-      console.log('[DriverDashboard] Alerted ride dismissed:', reason);
-      setNewRideAlertOpen(false);
-      setCachedAlertRide(null);
-      setNewRideAlertRideId(null);
-      alertStartTimeRef.current = null;
-    };
-
-    // Realtime listener (works when RLS allows seeing the updated row)
-    const channel = supabase
-      .channel(`alert-ride-cancel-${newRideAlertRideId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'rides',
-          filter: `id=eq.${newRideAlertRideId}`,
-        },
-        (payload) => {
-          const updated = payload.new as any;
-          if (updated.status === 'cancelled' || (updated.driver_id && updated.driver_id !== user?.id)) {
-            dismissAlert('realtime: ' + updated.status);
-            if (updated.status === 'cancelled') {
-              toast({
-                title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-                description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
-                variant: 'destructive',
-              });
-            }
+            console.error('[DriverDashboard] Ride offer handler error:', err);
           }
         }
       )
       .subscribe();
 
-    // Polling fallback every 3s — catches cancellations that realtime misses
-    // (driver RLS only allows SELECT on status='searching', so cancelled rows are invisible to realtime)
-    const rideId = newRideAlertRideId;
-    const pollInterval = setInterval(async () => {
-      try {
-        const { data, error } = await supabase
-          .from('rides')
-          .select('status, driver_id')
-          .eq('id', rideId)
-          .maybeSingle();
-
-        // If ride is no longer visible (RLS blocks cancelled rows) or status changed
-        if (error || !data || data.status !== 'searching' || (data.driver_id && data.driver_id !== user?.id)) {
-          dismissAlert('poll: ' + (data?.status || 'not visible'));
-          if (!data || data.status === 'cancelled' || (!data && !error)) {
-            toast({
-              title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-              description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
-              variant: 'destructive',
-            });
-          }
-        }
-      } catch (e) {
-        // Network error — ignore, will retry next interval
-      }
-    }, 3000);
-
     return () => {
-      clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
-  }, [newRideAlertRideId, newRideAlertOpen, user?.id]);
+  }, [isOnline, user, session]);
 
   // Subscribe to current ride updates
   useEffect(() => {
@@ -888,23 +451,17 @@ const DriverDashboard = () => {
         },
         (payload) => {
           const updatedRide = payload.new as RideRequest;
+          setCurrentRide(updatedRide);
           
-          // Don't restore completed/cancelled rides — they're finished
-          if (updatedRide.status === 'completed' || updatedRide.status === 'cancelled') {
+          if (updatedRide.status === 'cancelled') {
+            toast({
+              title: 'Ride cancelled',
+              description: 'The rider cancelled this ride',
+              variant: 'destructive',
+            });
             setCurrentRide(null);
             setRiderInfo(null);
-            setShowGPSNavigation(false);
-            if (updatedRide.status === 'cancelled') {
-              toast({
-                title: 'Ride cancelled',
-                description: 'The rider cancelled this ride',
-                variant: 'destructive',
-              });
-            }
-            return;
           }
-          
-          setCurrentRide(updatedRide);
         }
       )
       .subscribe();
@@ -1026,49 +583,11 @@ const DriverDashboard = () => {
 
     console.log('[AcceptRide] START — ride.id:', ride.id, 'user.id:', user.id);
 
-    // Pre-check: verify ride is still available before committing UI changes
-    try {
-      const { data: freshRide } = await supabase
-        .from('rides')
-        .select('status, driver_id')
-        .eq('id', ride.id)
-        .maybeSingle();
-
-      if (!freshRide || freshRide.status !== 'searching' || freshRide.driver_id) {
-        console.log('[AcceptRide] Ride no longer available:', freshRide?.status, freshRide?.driver_id);
-        setNewRideAlertOpen(false);
-        setCachedAlertRide(null);
-        setNewRideAlertRideId(null);
-        alertStartTimeRef.current = null;
-        toast({
-          title: language === 'fr' ? 'Course non disponible' : 'Ride unavailable',
-          description: language === 'fr' ? 'Cette course a été annulée ou prise par un autre chauffeur' : 'This ride was cancelled or taken by another driver',
-          variant: 'destructive',
-        });
-        return;
-      }
-    } catch {
-      // If pre-check fails (network), proceed with acceptance attempt — DB constraints will catch it
-    }
-
     // Stop the beep immediately and clear cached ride
-    const acceptedRideId = newRideAlertRideId; // capture before clearing
     setNewRideAlertOpen(false);
     setCachedAlertRide(null);
     setNewRideAlertRideId(null);
-    setRecoveredCountdown(null);
     setBusyAction('accept');
-
-    // Mark notification as read so recovery doesn't re-find it
-    if (acceptedRideId && user) {
-      supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('ride_id', acceptedRideId)
-        .eq('user_id', user.id)
-        .eq('type', 'new_ride')
-        .then(() => {});
-    }
 
     try {
       // Calculate acceptance time for priority driver reward
@@ -1149,17 +668,7 @@ const DriverDashboard = () => {
 
       // Update UI immediately
       setCurrentRide({ ...ride, status: 'driver_assigned' });
-
-      // Hard-reset GPS: force the browser to re-acquire a lock, clearing any stale 'denied' state
-      resetLocationError();
-      try {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => console.log('[AcceptRide] GPS re-acquired after acceptance:', pos.coords.latitude, pos.coords.longitude),
-          (err) => console.warn('[AcceptRide] GPS refresh after acceptance failed (non-blocking):', err.message),
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-        );
-      } catch (e) { /* ignore */ }
-
+      
       if (!acceptanceTimeSeconds || acceptanceTimeSeconds > 5) {
         toast({
           title: 'Ride accepted!',
@@ -1336,97 +845,90 @@ const DriverDashboard = () => {
   const currentRideFee = currentRide ? calculatePlatformFee(currentRideFareForFee) : 0;
   const driverEarnings = currentRide ? currentRideFareForFee - currentRideFee : 0;
 
-  // Shared cleanup function for accept/decline/timeout
-  const cleanupOffer = (markRead: boolean = true) => {
-    const rideId = newRideAlertRideId;
-    // Clear BOTH state AND refs immediately to prevent race conditions
-    setNewRideAlertOpen(false);
-    setCachedAlertRide(null);
-    setNewRideAlertRideId(null);
-    newRideAlertOpenRef.current = false;
-    newRideAlertRideIdRef.current = null;
-    alertStartTimeRef.current = null;
-    setRecoveredCountdown(null);
-    if (markRead && rideId && user) {
-      supabase
-        .from('notifications')
-        .update({ is_read: true })
-        .eq('ride_id', rideId)
-        .eq('user_id', user.id)
-        .eq('type', 'new_ride')
-        .then(() => {});
-    }
-  };
-
-  // CRITICAL: RideOfferModal + DriverBeepFix are rendered ONCE here, above all early returns,
-  // so they are always mounted regardless of loading/reconnecting state.
-  // Wrapped in a fixed container with z-[99999] and pointer-events:auto so it floats above
-  // any "Reconnecting", "GPS Denied", or loading overlays.
-  const globalModalLayer = (
-    <div className="fixed inset-0 pointer-events-none" style={{ isolation: 'isolate', zIndex: 2147483647 }}>
-      <DriverBeepFix
-        incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
-        onTimeout={() => cleanupOffer(true)}
-        timeoutSeconds={25}
-      />
-      <RideOfferModal
-        open={newRideAlertOpen}
-        ride={alertRide}
-        countdownSeconds={recoveredCountdown ?? COUNTDOWN_SECONDS}
-        driverLocation={driverLocation}
-        onDecline={() => cleanupOffer(true)}
-        onAccept={() => {
-          setRecoveredCountdown(null);
-          if (cachedAlertRide) acceptRide(cachedAlertRide);
-        }}
-      />
-    </div>
-  );
-
   // Loading states: never redirect while we are still restoring session/profile on iOS.
-  const waitingForIdentity = !!session && profileLoading;
-
   if (authLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        {globalModalLayer}
         <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
       </div>
     );
   }
 
+  const waitingForIdentity =
+    !!session && profileLoading;
+
   if (waitingForIdentity) {
+    if (!showReconnect) {
+      return (
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
-        {globalModalLayer}
-        {showReconnect ? (
-          <Card className="w-full max-w-sm p-6 text-center">
-            <div className="font-medium">Reconnecting…</div>
-            <div className="mt-2 text-sm text-muted-foreground">
-              We're keeping you signed in while we reload your driver account.
-            </div>
-            <div className="mt-5 flex flex-col gap-3">
-              <Button onClick={async () => { await refreshSession(); await refreshDriverProfile(); }}>Retry now</Button>
-              <Button variant="outline" onClick={() => window.location.reload()}>Reload page</Button>
-            </div>
-          </Card>
-        ) : (
-          <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
-        )}
+        <Card className="w-full max-w-sm p-6 text-center">
+          <div className="font-medium">Reconnecting…</div>
+          <div className="mt-2 text-sm text-muted-foreground">
+            We're keeping you signed in while we reload your driver account.
+          </div>
+          <div className="mt-5 flex flex-col gap-3">
+            <Button
+              onClick={async () => {
+                await refreshSession();
+                await refreshDriverProfile();
+              }}
+            >
+              Retry now
+            </Button>
+            <Button variant="outline" onClick={() => window.location.reload()}>
+              Reload page
+            </Button>
+          </div>
+        </Card>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-background">
-      {globalModalLayer}
+
+      <DriverBeepFix
+        incomingRide={newRideAlertOpen && newRideAlertRideId ? { id: newRideAlertRideId } : null}
+        onTimeout={() => {
+          setNewRideAlertOpen(false);
+          setCachedAlertRide(null);
+          setNewRideAlertRideId(null);
+          alertStartTimeRef.current = null;
+        }}
+        timeoutSeconds={25}
+      />
+
+      <RideOfferModal
+        open={newRideAlertOpen}
+        ride={alertRide}
+        countdownSeconds={20}
+        driverLocation={driverLocation}
+        onDecline={() => {
+          setNewRideAlertOpen(false);
+          setCachedAlertRide(null);
+          setNewRideAlertRideId(null);
+          alertStartTimeRef.current = null;
+        }}
+        onAccept={() => {
+          // Use cached ride data for acceptance (persists even if ride was removed from availableRides)
+          if (cachedAlertRide) {
+            acceptRide(cachedAlertRide);
+          }
+        }}
+      />
       <Navbar />
       
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
         {/* Map - takes 65% on mobile, flex-[2] on desktop */}
         <div className="flex-[2] min-h-[60vh] lg:min-h-0 relative">
           <MapComponent
-            key={currentRide?.id ?? 'idle'}
             pickup={currentRide ? { lat: currentRide.pickup_lat, lng: currentRide.pickup_lng } : null}
             dropoff={currentRide ? { lat: currentRide.dropoff_lat, lng: currentRide.dropoff_lng } : null}
             driverLocation={driverLocation}
@@ -1435,7 +937,7 @@ const DriverDashboard = () => {
                   ? currentRide.status === 'in_progress'
                     ? 'driver-to-dropoff'
                     : 'driver-to-pickup'
-                  : undefined
+                  : 'pickup-dropoff'
               }
               followDriver={!!currentRide}
           />
@@ -1458,14 +960,40 @@ const DriverDashboard = () => {
           {/* Dark overlay for readability */}
           <div className="absolute inset-0 bg-gradient-to-b from-background/90 via-background/85 to-background/95" />
           
-           {/* Content container - relative to appear above background */}
-           <div className="relative z-10 flex flex-col flex-1 overflow-hidden">
-             {/* Banner stack — ONLY shown when idle (no active ride, no ride offer) */}
-             {!currentRide && !newRideAlertOpen && (
-               <div className="pt-4">
-                 <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={false} />
-               </div>
-             )}
+          {/* Content container - relative to appear above background */}
+          <div className="relative z-10 flex flex-col flex-1 overflow-hidden">
+            {/* Wake Lock Banner - Keep screen awake while driving */}
+            <div className="pt-4">
+              <DriverWakeLockBanner isOnline={isOnline} hasActiveRide={!!currentRide} />
+              
+              {/* GPS Status Indicator - Simplified to just the button */}
+              {(isOnline || currentRide) && (
+                <DriverGPSStatusIndicator
+                  onForceSend={gpsForceWriteWithFeedback}
+                  isStreaming={isGPSStreaming}
+                  isConnected={isGPSConnected}
+                  position={gpsPosition}
+                  secondsSinceLastUpdate={gpsSecondsSinceLastUpdate}
+                  secondsSinceDbSync={gpsSecondsSinceDbSync}
+                  secondsSinceLastGpsFix={gpsSecondsSinceLastGpsFix}
+                  retryCount={gpsRetryCount}
+                  onRetry={retryGPS}
+                  rideId={currentRide?.id ?? null}
+                  lastDbWriteError={gpsLastDbWriteError}
+                  dbWriteRetryCount={gpsDbWriteRetryCount}
+                  isDbSyncing={gpsIsDbSyncing}
+                  authStatus={gpsAuthStatus}
+                  historyWriteCount={gpsHistoryWriteCount}
+                />
+              )}
+              
+              {/* GPS Error Banner - Show when location fails */}
+              <DriverGPSErrorBanner 
+                error={gpsError} 
+                retryCount={gpsRetryCount} 
+                onRetry={retryGPS} 
+              />
+            </div>
 
             <div className="p-4 flex-1 overflow-y-auto pb-8">
 
@@ -1490,15 +1018,11 @@ const DriverDashboard = () => {
               onRideCompleted={() => {
                 setCurrentRide(null);
                 setRiderInfo(null);
-                setShowGPSNavigation(false);
                 void refreshDriverProfile();
               }}
               onRideUpdated={(ride) => {
-                // Only sync if the ride is actually active — never restore completed/cancelled
-                const activeStatuses = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
-                if (ride && activeStatuses.includes((ride as any).status)) {
-                  setCurrentRide(ride as RideRequest);
-                }
+                // Keep local state in sync
+                setCurrentRide(ride as RideRequest);
               }}
             />
 

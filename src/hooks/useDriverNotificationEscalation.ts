@@ -14,12 +14,11 @@ interface EscalationOptions {
 
 /**
  * Hook to manage tiered driver notification escalation.
- * Closest-driver-first: only 1 driver per tier, 25s timeout each.
  * 
- * Tier 1 (0-25s): 3km radius, closest driver
- * Tier 2 (25-50s): 5km radius, next closest
- * Tier 3 (50-75s): 8km radius, next closest
- * Tier 4 (75s+): 12km radius, next closest
+ * Tier 1 (0-10s): 3km radius, 2 drivers max
+ * Tier 2 (10-20s): 5km radius, 3 drivers max
+ * Tier 3 (20-30s): 8km radius, 3 drivers max
+ * Tier 4 (30s+): 12km radius, 3 drivers max
  */
 export function useDriverNotificationEscalation(options: EscalationOptions | null) {
   const {
@@ -84,9 +83,9 @@ export function useDriverNotificationEscalation(options: EscalationOptions | nul
     if (!isActiveRef.current) return;
 
     const tierTimings = {
-      1: 25000,  // After 25s, escalate to tier 2 (next closest driver)
-      2: 25000,  // After 50s total, escalate to tier 3
-      3: 25000,  // After 75s total, escalate to tier 4
+      1: 10000,  // After 10s, escalate to tier 2
+      2: 10000,  // After 20s total, escalate to tier 3
+      3: 10000,  // After 30s total, escalate to tier 4
       4: null,   // No more escalation
     };
 

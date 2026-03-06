@@ -56,10 +56,7 @@ export function RideOfferModal({
   const [showUberShimmer, setShowUberShimmer] = useState(true);
   const timerRef = useRef<number | null>(null);
   const onDeclineRef = useRef(onDecline);
-  const onAcceptRef = useRef(onAccept);
-  const tapGuardRef = useRef(false); // prevent double-fire
   onDeclineRef.current = onDecline;
-  onAcceptRef.current = onAccept;
 
   // Calculate distance from driver to pickup using passed driverLocation
   const driverDistanceKm = useMemo(() => {
@@ -74,15 +71,11 @@ export function RideOfferModal({
     );
   }, [driverLocation, ride?.pickup_lat, ride?.pickup_lng]);
 
-  // Reset timer when modal actually appears — countdown starts from NOW, not from DB creation time.
-  // The parent always passes countdownSeconds=25 (full), regardless of notification age.
-  // The system only rejects rides older than 90s, so the driver always gets a fresh 25s visual timer.
+  // Reset timer when ride changes
   useEffect(() => {
     if (open && ride) {
-      console.log('[RideOfferModal] ⏱️ Modal opened — starting fresh', countdownSeconds, 's countdown NOW');
       setTimeLeft(countdownSeconds);
       setShowUberShimmer(true);
-      tapGuardRef.current = false; // reset tap guard for new offer
     }
   }, [open, ride?.id, countdownSeconds]);
 
@@ -115,23 +108,6 @@ export function RideOfferModal({
 
   if (!ride) return null;
 
-  // Log when modal JSX is actually mounted/rendered (not just state set)
-  console.log('[RideOfferModal] JSX rendered — open:', open, 'ride:', ride?.id);
-
-  const handleAccept = () => {
-    if (tapGuardRef.current) return;
-    tapGuardRef.current = true;
-    onAcceptRef.current();
-    setTimeout(() => { tapGuardRef.current = false; }, 1000);
-  };
-
-  const handleDecline = () => {
-    if (tapGuardRef.current) return;
-    tapGuardRef.current = true;
-    onDeclineRef.current();
-    setTimeout(() => { tapGuardRef.current = false; }, 1000);
-  };
-
   const fare = ride.estimated_fare;
   const platformFee = calculatePlatformFee(fare);
   const driverEarnings = calculateDriverEarnings(fare);
@@ -144,19 +120,13 @@ export function RideOfferModal({
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 flex items-start justify-center p-2 pt-16 pb-4 overflow-y-auto"
-          style={{ zIndex: 2147483647, pointerEvents: 'none' }}
+          className="fixed inset-0 z-50 flex items-start justify-center p-2 pt-16 pb-4 overflow-y-auto"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
         >
-          {/* Backdrop — blocks background taps */}
-          <div
-            className="fixed inset-0 bg-black/80 backdrop-blur-xl"
-            style={{ pointerEvents: 'auto' }}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => e.stopPropagation()}
-          />
+          {/* Backdrop */}
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-xl" />
 
           <motion.div
             initial={{ y: 50, scale: 0.9, opacity: 0 }}
@@ -164,7 +134,6 @@ export function RideOfferModal({
             exit={{ y: 50, scale: 0.9, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 300, damping: 25 }}
             className="relative w-full max-w-xl my-auto"
-            style={{ pointerEvents: 'auto' }}
           >
             <Card className="relative bg-black/60 backdrop-blur-xl border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
               {/* Header */}
@@ -267,17 +236,14 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Accept Button — multiple event handlers for reliable mobile taps */}
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleAccept(); }}
-                  onTouchStartCapture={(e) => { e.stopPropagation(); }}
-                  onTouchEndCapture={(e) => { e.preventDefault(); e.stopPropagation(); handleAccept(); }}
-                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 active:scale-95 text-white rounded-xl relative z-[60] touch-manipulation select-none cursor-pointer"
-                  style={{ WebkitTapHighlightColor: 'transparent', WebkitUserSelect: 'none' } as React.CSSProperties}
+                {/* Accept Button */}
+                <Button
+                  size="lg"
+                  onClick={onAccept}
+                  className="accept-pulse w-full h-14 text-lg font-bold bg-success hover:bg-success/90 text-white rounded-xl"
                 >
                   {language === 'fr' ? 'Accepter la course' : 'Accept Ride'}
-                </button>
+                </Button>
 
                 {/* Priority Driver Reward */}
                 <div className="flex items-center gap-3 bg-accent/10 border border-accent/30 rounded-xl p-3">
@@ -292,18 +258,15 @@ export function RideOfferModal({
                   </div>
                 </div>
 
-                {/* Decline Button */}
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleDecline(); }}
-                  onTouchStartCapture={(e) => { e.stopPropagation(); }}
-                  onTouchEndCapture={(e) => { e.preventDefault(); e.stopPropagation(); handleDecline(); }}
-                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 active:scale-95 text-white rounded-xl relative z-[60] flex items-center justify-center gap-2 touch-manipulation select-none cursor-pointer"
-                  style={{ WebkitTapHighlightColor: 'transparent', WebkitUserSelect: 'none' } as React.CSSProperties}
+                {/* Decline Button - dismisses and returns ride to pool */}
+                <Button
+                  size="lg"
+                  onClick={onDecline}
+                  className="w-full h-14 text-lg font-bold bg-destructive hover:bg-destructive/90 text-white rounded-xl"
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-5 w-5 mr-2" />
                   {language === 'fr' ? 'Non merci — Passer' : 'No thanks — Skip'}
-                </button>
+                </Button>
                 <p className="text-center text-white/40 text-xs">
                   {language === 'fr' 
                     ? 'La course restera disponible pour d\'autres chauffeurs'

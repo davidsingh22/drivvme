@@ -1,1 +1,0 @@
-UPDATE rides SET status = 'cancelled', cancelled_at = now(), cancellation_reason = 'Admin cancelled - stuck ride' WHERE id = 'a65c5ae2-c812-42da-b016-82f6dcb4f7da' AND status NOT IN ('completed', 'cancelled')

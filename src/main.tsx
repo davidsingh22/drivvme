@@ -2,20 +2,6 @@ import { createRoot } from "react-dom/client";
 import OneSignal from "react-onesignal";
 import App from "./App.tsx";
 import "./index.css";
-import { setPendingRideFromNotification } from "@/lib/pendingRideStore";
-
-// === FAST-PATH: Check localStorage for pending ride from notification tap ===
-// This runs BEFORE React renders, so the app can skip loading animations.
-try {
-  const pendingRide = localStorage.getItem('pendingRideFromPush') || localStorage.getItem('last_notified_ride');
-  if (pendingRide) {
-    console.log('[FastPath] 🚀 Found pending_ride from notification tap:', pendingRide);
-    // Keep it in localStorage — GlobalRideOfferGuard will consume it on mount.
-    (window as any).__FAST_PATH_RIDE_ID = pendingRide;
-    // Also inject into global store so it's available immediately
-    setPendingRideFromNotification(pendingRide);
-  }
-} catch { /* ignore */ }
 
 // Prefetch mapbox token immediately on app load for faster map rendering
 import { prefetchMapboxToken } from "@/hooks/useMapboxToken";

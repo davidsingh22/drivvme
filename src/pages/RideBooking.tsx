@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react';
-import { withTimeout } from '@/lib/withTimeout';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -10,7 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { calculateFare, formatCurrency, formatDistance, formatDuration, FareEstimate } from '@/lib/pricing';
 import Navbar from '@/components/Navbar';
-const MapComponent = React.lazy(() => import('@/components/MapComponent'));
+import MapComponent from '@/components/MapComponent';
 import LocationInput from '@/components/LocationInput';
 import PaymentForm from '@/components/PaymentForm';
 import { useToast } from '@/hooks/use-toast';
@@ -30,7 +29,6 @@ import { useRiderLocationTracking } from '@/hooks/useRiderLocationTracking';
 import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
-import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 import welcomeBg from '@/assets/drivveme-galaxy-bg-new.png';
 import rideBg from '@/assets/drivveme-ride-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
@@ -52,14 +50,12 @@ interface Location {
   lng: number;
 }
 
-// Test accounts that bypass payment (unlimited)
-const TEST_ACCOUNTS: string[] = [];
+// Test accounts that bypass payment
+const TEST_ACCOUNTS = ['alsenesa@hotmail.com'];
 
 // Limited test accounts - bypass payment for a limited number of rides
 const LIMITED_TEST_ACCOUNTS: Record<string, number> = {
-  'alsenesa@hotmail.com': 500,
   'sean.mcturk@outlook.com': 3,
-  'mcturksean@gmail.com': 500,
   'patsy@hotmail.com': 999,
   'rymcturk@gmail.com': 3,
   'kissmebaby@hotmail.com': 999
@@ -82,45 +78,6 @@ const incrementFreeRidesUsed = (email: string): void => {
   const used = parseInt(localStorage.getItem(usedKey) || '0', 10);
   localStorage.setItem(usedKey, String(used + 1));
 };
-
-// Zombie Location Overlay — shows spinner for 7s then "Try Again" button
-const ZombieLocationOverlay = ({ language, onCancel }: { language: string; onCancel: () => void }) => {
-  const [showRetry, setShowRetry] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setShowRetry(true), 7000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  return (
-    <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
-      <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
-        {!showRetry ? (
-          <>
-            <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-            <p className="text-sm font-medium text-foreground">
-              {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
-            </p>
-          </>
-        ) : (
-          <>
-            <p className="text-sm font-medium text-foreground">
-              {language === 'fr' ? 'La localisation prend trop de temps' : 'Location is taking too long'}
-            </p>
-            <Button
-              variant="default"
-              size="sm"
-              onClick={onCancel}
-              className="gradient-primary"
-            >
-              {language === 'fr' ? 'Réessayer / Entrer manuellement' : 'Try Again / Enter Manually'}
-            </Button>
-          </>
-        )}
-      </div>
-    </div>
-  );
-};
-
 const RideBooking = () => {
   const {
     t,
@@ -136,7 +93,6 @@ const RideBooking = () => {
     signOut
   } = useAuth();
   const navigate = useNavigate();
-  const routeLocation = useLocation();
   const {
     toast
   } = useToast();
@@ -159,7 +115,6 @@ const RideBooking = () => {
   } = useActiveRide(user?.id);
   const hasRestoredRide = useRef(false);
   const [step, setStep] = useState<RideStep>('input');
-  const [isCancelling, setIsCancelling] = useState(false);
   const [pickup, setPickup] = useState<Location | null>(null);
   const [dropoff, setDropoff] = useState<Location | null>(null);
   const [pickupAddress, setPickupAddress] = useState('');
@@ -169,8 +124,6 @@ const RideBooking = () => {
   const [durationMinutes, setDurationMinutes] = useState(0);
   const [currentRide, setCurrentRide] = useState<any>(null);
   const [driverInfo, setDriverInfo] = useState<any>(null);
-  const driverInfoRef = useRef<any>(null);
-  const driverInfoFetchedForId = useRef<string | null>(null);
   const [driverLocation, setDriverLocation] = useState<{
     lat: number;
     lng: number;
@@ -185,7 +138,6 @@ const RideBooking = () => {
   const [minutesAway, setMinutesAway] = useState<number | null>(null);
   const [followDriver, setFollowDriver] = useState(true);
   const paymentGateCheckedRef = useRef<string | null>(null);
-  const rideCreatedRef = useRef(false);
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
@@ -226,31 +178,8 @@ const RideBooking = () => {
     token: mapboxToken
   } = useMapboxToken();
 
-  // Safety net moved below fetchDriverInfo declaration
-
   // Track rider location for admin visibility
   useRiderLocationTracking(true);
-
-  // ── Server Pre-Warming: ping edge functions every 3 min on the estimate page ──
-  // Uses raw fetch to bypass frozen Supabase JS client after backgrounding
-  const warmingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    if (step !== 'estimate') {
-      if (warmingIntervalRef.current) { clearInterval(warmingIntervalRef.current); warmingIntervalRef.current = null; }
-      return;
-    }
-    const ping = () => {
-      // Silent HEAD-style pings to warm containers — fire & forget via raw fetch
-      getValidAccessToken().then(token => {
-        const headers = { 'Content-Type': 'application/json', 'apikey': ANON_KEY, 'Authorization': `Bearer ${token}` };
-        fetch(`${SUPABASE_URL}/functions/v1/create-payment-intent`, { method: 'POST', headers, body: '{}' }).catch(() => {});
-        fetch(`${SUPABASE_URL}/functions/v1/create-ride-and-notify-drivers`, { method: 'POST', headers, body: '{}' }).catch(() => {});
-      }).catch(() => {});
-    };
-    ping(); // immediate first ping
-    warmingIntervalRef.current = setInterval(ping, 3 * 60 * 1000);
-    return () => { if (warmingIntervalRef.current) clearInterval(warmingIntervalRef.current); };
-  }, [step]);
 
   // Tiered driver notification escalation
   const escalationOptions = currentRide && step === 'searching' && pickup && dropoff && fareEstimate ? {
@@ -487,199 +416,11 @@ const RideBooking = () => {
     }
   }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
-  // Visibility listener: warm GPS on app resume (session refresh moved to payment handler)
-  useEffect(() => {
-    let lastHidden = 0;
-    const IDLE_THRESHOLD_MS = 2 * 60 * 1000;
-
-    const handleVisibility = async () => {
-      if (document.visibilityState === 'hidden') {
-        lastHidden = Date.now();
-        return;
-      }
-
-      const idleMs = lastHidden ? Date.now() - lastHidden : 0;
-      if (idleMs < IDLE_THRESHOLD_MS) return;
-
-      console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's');
-
-      // Proactively refresh token so payment/ride creation don't hit expired JWT
-      getValidAccessToken().catch(() => {});
-
-      // If we're in an active ride phase, verify ride is still active in DB
-      if (currentRide?.id && ['searching', 'matched', 'arriving', 'arrived', 'inProgress', 'completed'].includes(step)) {
-        try {
-          const { data: freshRide } = await supabase
-            .from('rides')
-            .select('status')
-            .eq('id', currentRide.id)
-            .maybeSingle();
-          if (freshRide && ['completed', 'cancelled'].includes(freshRide.status) && step !== 'completed') {
-            console.log('[RideBooking] Ride ended while app was backgrounded, redirecting home');
-            clearRide();
-            navigate('/rider-home', { replace: true });
-            return;
-          }
-        } catch { /* ignore, continue normally */ }
-      }
-
-      // Warm GPS so next action has a fresh position
-      if ('geolocation' in navigator && (step === 'input' || step === 'estimate')) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            const { latitude: lat, longitude: lng } = pos.coords;
-            setPickup(prev => prev ? { ...prev, lat, lng } : { address: '', lat, lng });
-            if (mapboxToken) {
-              reverseGeocode(lat, lng).then(addr => {
-                if (addr) {
-                  setPickupAddress(addr);
-                  setPickup(prev => prev ? { ...prev, address: addr } : null);
-                }
-              });
-            }
-          },
-          () => {},
-          { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-        );
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [step, mapboxToken, reverseGeocode, currentRide?.id, clearRide, navigate]);
-
-  // Phase 3: If arriving from /search with a destination, auto-fill and jump to estimate
-  const hasAppliedSearchState = useRef(false);
-  const shouldAutoEstimate = useRef(false);
-  // If arriving from search with autoEstimate, show a loading screen instead of flashing input
-  const [isAutoEstimating, setIsAutoEstimating] = useState(
-    !!(routeLocation.state as any)?.autoEstimate
-  );
-  useEffect(() => {
-    const state = routeLocation.state as any;
-    if (!state?.dropoffAddress || hasAppliedSearchState.current) return;
-    hasAppliedSearchState.current = true;
-    hasRestoredRide.current = true; // prevent stale ride restoration from overriding
-
-    // Set dropoff
-    setDropoffAddress(state.dropoffAddress);
-    if (state.dropoffLat != null && state.dropoffLng != null) {
-      setDropoff({ address: state.dropoffAddress, lat: state.dropoffLat, lng: state.dropoffLng });
-    }
-
-    // ALWAYS prefer fresh GPS for the most accurate pickup — run GPS and DB in parallel
-    hasAutoDetectedLocation.current = true;
-    setIsDetectingLocation(true);
-
-    // If search passed coords, use them as an immediate fallback while GPS resolves
-    const hasSearchCoords = state.pickupLat != null && state.pickupLng != null;
-    if (hasSearchCoords) {
-      const addr = state.pickupAddress || (language === 'fr' ? 'Détection...' : 'Detecting...');
-      setPickupAddress(addr);
-      setPickup({ address: addr, lat: state.pickupLat, lng: state.pickupLng });
-    }
-
-    // Resolve best pickup location: GPS (highest priority), then search coords, then DB, then defaults
-    (async () => {
-      let resolved = false;
-
-      // Try fresh GPS first — this gives the most accurate current address
-      if (navigator.geolocation) {
-        try {
-          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true, timeout: 5000, maximumAge: 30000
-            });
-          });
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          // Store warm GPS for next time
-          localStorage.setItem('drivveme_gps_warm', JSON.stringify({ lat, lng, ts: Date.now() }));
-          const addr = await reverseGeocode(lat, lng);
-          const pickupAddr = addr || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-          setPickupAddress(pickupAddr);
-          setPickup({ address: pickupAddr, lat, lng });
-          resolved = true;
-        } catch {
-          console.log('[RideBooking] Fresh GPS failed, using fallbacks');
-        }
-      }
-
-      // If GPS failed but we have search coords, resolve their address properly
-      if (!resolved && hasSearchCoords) {
-        const generic = ['Current location', 'Position actuelle', 'Detecting...', 'Détection...', ''];
-        if (generic.includes(state.pickupAddress || '')) {
-          const addr = await reverseGeocode(state.pickupLat, state.pickupLng);
-          if (addr) {
-            setPickupAddress(addr);
-            setPickup(prev => prev ? { ...prev, address: addr } : null);
-          }
-        }
-        resolved = true; // search coords are already set above
-      }
-
-      // DB fallback if neither GPS nor search coords worked
-      if (!resolved && user?.id) {
-        try {
-          const { data } = await supabase
-            .from('rider_locations')
-            .select('lat, lng')
-            .eq('user_id', user.id)
-            .maybeSingle();
-          if (data?.lat && data?.lng && !(data.lat === 45.5017 && data.lng === -73.5673)) {
-            const addr = await reverseGeocode(data.lat, data.lng);
-            const pickupAddr = addr || `${data.lat.toFixed(4)}, ${data.lng.toFixed(4)}`;
-            setPickupAddress(pickupAddr);
-            setPickup({ address: pickupAddr, lat: data.lat, lng: data.lng });
-            resolved = true;
-          }
-        } catch { /* ignore */ }
-      }
-
-      // Last resort: Montreal defaults
-      if (!resolved) {
-        const defaultAddr = language === 'fr' ? 'Position actuelle' : 'Current location';
-        setPickupAddress(defaultAddr);
-        setPickup({ address: defaultAddr, lat: 45.5017, lng: -73.5673 });
-      }
-
-      setIsDetectingLocation(false);
-    })();
-
-    if (state.autoEstimate) {
-      shouldAutoEstimate.current = true;
-    }
-
-    // Clear the state so refreshing doesn't re-trigger
-    window.history.replaceState({}, document.title);
-  }, [routeLocation.state, user?.id]);
-
-
-  // Detect ?new=1 parameter to force a fresh booking flow
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('new') === '1') {
-      console.log('[RideBooking] ?new=1 detected — clearing stale ride and starting fresh');
-      hasRestoredRide.current = true; // prevent restoration
-      clearRide();
-      setCurrentRide(null);
-      setStep('input');
-      // Clean the URL without triggering a re-render
-      window.history.replaceState({}, document.title, '/ride');
-    }
-  }, []); // only on mount
-
+  // Restore active ride when returning to the app (especially on iOS)
   useEffect(() => {
     if (activeRideLoading || !activeRide || hasRestoredRide.current) return;
     hasRestoredRide.current = true;
     console.log('Restoring active ride:', activeRide.id, activeRide.status);
-
-    // If the ride is already completed or cancelled, don't restore — go to clean state
-    if (['completed', 'cancelled'].includes(activeRide.status)) {
-      console.log('[RideBooking] Ride already finished, clearing stale state');
-      clearRide();
-      return;
-    }
 
     // Check if payment was completed for this ride before restoring to searching step
     const checkPaymentAndRestore = async () => {
@@ -770,10 +511,6 @@ const RideBooking = () => {
         case 'driver_assigned':
           setStep('matched');
           fetchDriverInfo(updatedRide.driver_id);
-          // Store driver ID as backup for cancellation reliability
-          if (updatedRide.driver_id) {
-            localStorage.setItem(`drivvme_last_accepted_driver_${updatedRide.id}`, updatedRide.driver_id);
-          }
           // Notify rider that driver has been found
           toast({
             title: t('booking.found'),
@@ -782,7 +519,6 @@ const RideBooking = () => {
           break;
         case 'driver_en_route':
           setStep('arriving');
-          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Driver on the way',
             description: 'Your driver is heading to your pickup location.'
@@ -790,7 +526,6 @@ const RideBooking = () => {
           break;
         case 'arrived':
           setStep('arrived');
-          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Driver has arrived!',
             description: 'Your driver is waiting at the pickup location.'
@@ -798,7 +533,6 @@ const RideBooking = () => {
           break;
         case 'in_progress':
           setStep('inProgress');
-          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
           toast({
             title: 'Ride started',
             description: 'Enjoy your trip!'
@@ -819,7 +553,6 @@ const RideBooking = () => {
           });
           clearRide(); // Clear from localStorage
           resetBooking();
-          navigate('/rider-home');
           break;
       }
     }).subscribe(status => {
@@ -830,38 +563,6 @@ const RideBooking = () => {
       supabase.removeChannel(channel);
     };
   }, [currentRide?.id, t, toast]);
-
-  // Listen for ride_cancelled notifications from the driver (backup channel)
-  useEffect(() => {
-    if (!currentRide?.id || !user?.id) return;
-    const activeStatuses = ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
-    if (!activeStatuses.includes(currentRide.status)) return;
-
-    const channel = supabase
-      .channel(`rider-cancel-notif-${currentRide.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'notifications',
-        filter: `user_id=eq.${user.id}`,
-      }, (payload) => {
-        const notif = payload.new as { type: string; ride_id: string | null; title: string; message: string };
-        if (notif.type === 'ride_cancelled' && notif.ride_id === currentRide.id) {
-          console.log('[RideBooking] Received ride_cancelled notification from driver');
-          toast({
-            title: notif.title || t('booking.cancelled'),
-            description: notif.message,
-            variant: 'destructive',
-          });
-          clearRide();
-          resetBooking();
-          navigate('/rider-home');
-        }
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [currentRide?.id, currentRide?.status, user?.id, t, toast]);
 
   // Hard payment gate: never allow the UI to show "searching" (or beyond) if payment isn't succeeded.
   // Test accounts bypass this gate entirely (unlimited or limited free rides).
@@ -909,7 +610,37 @@ const RideBooking = () => {
     };
   }, [currentRide?.id, step, fareEstimate, toast, isTestAccount]);
 
-  // Fallback polling moved below fetchDriverInfo declaration
+  // Fallback polling: if realtime misses updates, poll every 5 seconds
+  useEffect(() => {
+    if (!currentRide?.id) return;
+    // Only poll when in 'searching' status
+    if (currentRide.status !== 'searching') return;
+    const pollInterval = setInterval(async () => {
+      console.log('[RideBooking] Polling ride status...');
+      const {
+        data,
+        error
+      } = await supabase.from('rides').select('*').eq('id', currentRide.id).single();
+      if (error) {
+        console.error('[RideBooking] Poll error:', error);
+        return;
+      }
+      if (data && data.status !== currentRide.status) {
+        console.log('[RideBooking] Poll detected status change:', data.status);
+        setCurrentRide(data);
+        updateRide(data);
+        if (data.status === 'driver_assigned') {
+          setStep('matched');
+          fetchDriverInfo(data.driver_id);
+          toast({
+            title: t('booking.found'),
+            description: 'Your driver is on the way!'
+          });
+        }
+      }
+    }, 5000);
+    return () => clearInterval(pollInterval);
+  }, [currentRide?.id, currentRide?.status, t, toast]);
 
   // Subscribe to driver location updates
   useEffect(() => {
@@ -1018,132 +749,35 @@ const RideBooking = () => {
       }
     };
   }, [step, pickup]);
-  const setDriverInfoSafe = useCallback((info: any) => {
-    console.log('[RideBooking] setDriverInfoSafe called', info?.first_name);
-    driverInfoRef.current = info;
-    setDriverInfo(info);
-  }, []);
+  const fetchDriverInfo = async (driverId: string) => {
+    console.log('[RideBooking] Fetching driver info for:', driverId);
+    const [profileResult, driverProfileResult] = await Promise.all([supabase.from('profiles').select('first_name, last_name, phone_number, avatar_url').eq('user_id', driverId).maybeSingle(), supabase.from('driver_profiles').select('vehicle_make, vehicle_model, vehicle_color, license_plate, average_rating').eq('user_id', driverId).maybeSingle()]);
+    const {
+      data: profile,
+      error: profileError
+    } = profileResult;
+    const {
+      data: driverProfile,
+      error: driverProfileError
+    } = driverProfileResult;
+    if (profileError) console.error('[RideBooking] Error fetching driver profile:', profileError);
+    if (driverProfileError) console.error('[RideBooking] Error fetching driver vehicle info:', driverProfileError);
 
-  const fetchDriverInfo = useCallback(async (driverId: string, attempt = 1) => {
-    // Skip if already fetched for this driver
-    if (driverInfoRef.current && driverInfoFetchedForId.current === driverId) {
-      console.log('[RideBooking] driverInfo already fetched for', driverId);
-      return;
-    }
-    console.log('[RideBooking] Fetching driver info for:', driverId, 'attempt:', attempt);
-    driverInfoFetchedForId.current = driverId;
-    try {
-      const [profileResult, driverProfileResult] = await Promise.all([
-        supabase.from('profiles').select('first_name, last_name, phone_number, avatar_url').eq('user_id', driverId).maybeSingle(),
-        supabase.from('driver_profiles').select('vehicle_make, vehicle_model, vehicle_color, license_plate, average_rating').eq('user_id', driverId).maybeSingle(),
-      ]);
-      const { data: profile, error: profileError } = profileResult;
-      const { data: driverProfile, error: driverProfileError } = driverProfileResult;
-      if (profileError) console.error('[RideBooking] Error fetching driver profile:', profileError);
-      if (driverProfileError) console.error('[RideBooking] Error fetching driver vehicle info:', driverProfileError);
+    // Always set something so the in-ride UI can render (never blank screen)
+    setDriverInfo({
+      first_name: profile?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver'),
+      last_name: profile?.last_name || '',
+      phone_number: profile?.phone_number || null,
+      avatar_url: profile?.avatar_url || null,
+      vehicle_make: driverProfile?.vehicle_make || '',
+      vehicle_model: driverProfile?.vehicle_model || '',
+      vehicle_color: driverProfile?.vehicle_color || '',
+      license_plate: driverProfile?.license_plate || '—',
+      average_rating: Number(driverProfile?.average_rating ?? 5)
+    });
+  };
 
-      setDriverInfoSafe({
-        first_name: profile?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver'),
-        last_name: profile?.last_name || '',
-        phone_number: profile?.phone_number || null,
-        avatar_url: profile?.avatar_url || null,
-        vehicle_make: driverProfile?.vehicle_make || '',
-        vehicle_model: driverProfile?.vehicle_model || '',
-        vehicle_color: driverProfile?.vehicle_color || '',
-        license_plate: driverProfile?.license_plate || '—',
-        average_rating: Number(driverProfile?.average_rating ?? 5)
-      });
-    } catch (err) {
-      console.error('[RideBooking] fetchDriverInfo failed:', err);
-      if (attempt < 3) {
-        driverInfoFetchedForId.current = null; // Allow retry
-        setTimeout(() => fetchDriverInfo(driverId, attempt + 1), 2000);
-      } else {
-        setDriverInfoSafe({
-          first_name: language === 'fr' ? 'Chauffeur' : 'Driver',
-          last_name: '',
-          phone_number: null,
-          avatar_url: null,
-          vehicle_make: '',
-          vehicle_model: '',
-          vehicle_color: '',
-          license_plate: '—',
-          average_rating: 5
-        });
-      }
-    }
-  }, [language, setDriverInfoSafe]);
-
-  // Safety net: if in active ride phase but driverInfo is null, aggressively fetch it
-  useEffect(() => {
-    if (!isActiveRidePhase || !currentRide?.driver_id) return;
-    if (driverInfoRef.current) return;
-    
-    // Immediate attempt
-    console.log('[RideBooking] Safety net: immediate fetch for missing driverInfo');
-    fetchDriverInfo(currentRide.driver_id);
-    
-    // Backup: retry every 3s until driverInfo is set
-    const interval = setInterval(() => {
-      if (driverInfoRef.current) {
-        clearInterval(interval);
-        return;
-      }
-      console.log('[RideBooking] Safety net: retrying driverInfo fetch');
-      driverInfoFetchedForId.current = null; // Force re-fetch
-      fetchDriverInfo(currentRide.driver_id);
-    }, 3000);
-    
-    return () => clearInterval(interval);
-  }, [isActiveRidePhase, currentRide?.driver_id, fetchDriverInfo]);
-
-  // Fallback polling: poll every 5 seconds for ALL active phases
-  useEffect(() => {
-    if (!currentRide?.id) return;
-    const activeStatuses = ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
-    if (!activeStatuses.includes(currentRide.status)) return;
-    const pollInterval = setInterval(async () => {
-      const { data, error } = await supabase.from('rides').select('*').eq('id', currentRide.id).single();
-      if (error) {
-        console.error('[RideBooking] Poll error:', error);
-        return;
-      }
-      if (data && data.status !== currentRide.status) {
-        console.log('[RideBooking] Poll detected status change:', data.status);
-        setCurrentRide(data);
-        updateRide(data);
-        const statusToStep: Record<string, RideStep> = {
-          searching: 'searching',
-          driver_assigned: 'matched',
-          driver_en_route: 'arriving',
-          arrived: 'arrived',
-          in_progress: 'inProgress',
-          completed: 'completed',
-        };
-        const newStep = statusToStep[data.status];
-        if (newStep) setStep(newStep);
-        if (data.driver_id && !driverInfoRef.current) {
-          fetchDriverInfo(data.driver_id);
-        }
-        if (data.status === 'completed') {
-          clearRide();
-          if (dropoff && user?.id) saveDropoffDestination(dropoff);
-        }
-        if (data.status === 'cancelled') {
-          toast({ title: t('booking.cancelled'), variant: 'destructive' });
-          clearRide();
-          resetBooking();
-          navigate('/rider-home');
-        }
-      }
-      // Even if status hasn't changed, check if driverInfo is missing
-      if (data?.driver_id && !driverInfoRef.current) {
-        fetchDriverInfo(data.driver_id);
-      }
-    }, 5000);
-    return () => clearInterval(pollInterval);
-  }, [currentRide?.id, currentRide?.status, t, toast, fetchDriverInfo]);
-
+  // Save dropoff destination for frequent places suggestions
   const saveDropoffDestination = async (destination: Location) => {
     if (!user?.id) return;
     try {
@@ -1267,9 +901,7 @@ const RideBooking = () => {
       const estimate = calculateFare(estimatedDistance, estimatedDuration);
       setFareEstimate(estimate);
       setStep('estimate');
-      setIsAutoEstimating(false);
     } catch (error) {
-      setIsAutoEstimating(false);
       toast({
         title: 'Route error',
         description: 'Unable to calculate route',
@@ -1277,24 +909,6 @@ const RideBooking = () => {
       });
     }
   }, [pickup, dropoff, toast, mapboxToken]);
-
-  // Auto-trigger estimate once pickup + dropoff are both set from search
-  useEffect(() => {
-    if (!shouldAutoEstimate.current || !pickup || !dropoff) return;
-    shouldAutoEstimate.current = false;
-    calculateRoute();
-  }, [pickup, dropoff, calculateRoute]);
-
-  // Safety: clear auto-estimating state after 8s to prevent stuck loading screen
-  useEffect(() => {
-    if (!isAutoEstimating) return;
-    const timer = setTimeout(() => {
-      console.warn('[RideBooking] Auto-estimate safety timeout — clearing loading screen');
-      setIsAutoEstimating(false);
-    }, 8000);
-    return () => clearTimeout(timer);
-  }, [isAutoEstimating]);
-
   const handleGetEstimate = async () => {
     if (!pickup || !dropoff) {
       toast({
@@ -1306,221 +920,114 @@ const RideBooking = () => {
     }
     await calculateRoute();
   };
-  // ── RAW FETCH ride insert: bypasses Supabase JS client internals entirely ──
-  // This is the #1 fix for "Finalizing..." hang on Median WebViews.
-  // The Supabase client's PostgREST layer waits for any pending GoTrue refresh
-  // before sending requests. On mobile WebViews the auto-refresh timer gets
-  // corrupted after backgrounding, causing .insert() to hang forever.
-  // Direct fetch() with AbortController gives us a REAL cancellable timeout.
-  const rawInsertRide = async (payload: Record<string, any>, token: string): Promise<any> => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-
-    try {
-      const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/rides?select=id,status,rider_id,pickup_address,pickup_lat,pickup_lng,dropoff_address,dropoff_lat,dropoff_lng,distance_km,estimated_duration_minutes,estimated_fare,driver_id`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'apikey': ANON_KEY,
-            'Authorization': `Bearer ${token}`,
-            'Prefer': 'return=representation',
-          },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        }
-      );
-      clearTimeout(timeout);
-
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`Ride insert failed (${res.status}): ${body}`);
-      }
-
-      const rows = await res.json();
-      return Array.isArray(rows) ? rows[0] : rows;
-    } catch (err: any) {
-      clearTimeout(timeout);
-      if (err.name === 'AbortError') {
-        throw new Error('Ride creation timed out (8s). Please try again.');
-      }
-      throw err;
-    }
-  };
-
   const handleProceedToPayment = async () => {
-    // ── One-click lock — prevent double-submit ──
-    if (isSubmitting) return;
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
-    const ts = () => `[${new Date().toISOString()}]`;
-
-    // Test accounts skip payment entirely
+    // Test accounts skip payment entirely (unlimited or with remaining free rides)
     const isUnlimited = user.email && TEST_ACCOUNTS.includes(user.email.toLowerCase());
     const freeRidesLeft = user.email ? getRemainingFreeRides(user.email) : 0;
     const skipPayment = isUnlimited || freeRidesLeft > 0;
 
-    // Lock button immediately
+    // Show payment UI immediately (no perceived delay) — unless test account
+    if (!skipPayment) {
+      setStep('payment');
+    }
     setIsSubmitting(true);
-    rideCreatedRef.current = false;
 
-    // ── WATCHDOG: 12s timeout to reset UI if everything hangs ──
-    const watchdogTimeout = setTimeout(() => {
-      console.warn(ts(), 'WATCHDOG_12S_TRIGGERED');
-      setIsSubmitting(false);
-      if (!rideCreatedRef.current) {
-        setStep('estimate');
+    // Create the ride in the background as fast as possible.
+    // This avoids edge-function overhead so the PaymentForm gets a rideId sooner.
+    (async () => {
+      try {
+        const {
+          data: {
+            session
+          }
+        } = await supabase.auth.getSession();
+        if (!session) {
+          toast({
+            title: 'Session expired',
+            description: 'Please sign in again to continue.',
+            variant: 'destructive'
+          });
+          setStep('estimate');
+          navigate('/login');
+          return;
+        }
+
+        // Test accounts create ride directly with 'searching' status
+        const rideStatus = skipPayment ? 'searching' : 'pending_payment';
+        const {
+          data: ride,
+          error: rideErr
+        } = await supabase.from('rides').insert({
+          rider_id: user.id,
+          pickup_address: pickup.address,
+          pickup_lat: pickup.lat,
+          pickup_lng: pickup.lng,
+          dropoff_address: dropoff.address,
+          dropoff_lat: dropoff.lat,
+          dropoff_lng: dropoff.lng,
+          distance_km: distanceKm,
+          estimated_duration_minutes: Math.round(durationMinutes),
+          estimated_fare: fareEstimate.total,
+          promo_discount: fareEstimate.promoDiscount,
+          subtotal_before_tax: fareEstimate.subtotalBeforeTax,
+          gst_amount: fareEstimate.gstAmount,
+          qst_amount: fareEstimate.qstAmount,
+          platform_fee: fareEstimate.platformFee,
+          status: rideStatus
+        }).select('*').single();
+        if (rideErr || !ride?.id) {
+          console.error('Ride insert error:', rideErr);
+          throw new Error(rideErr?.message || 'Ride creation failed');
+        }
+
+        // Optional rider notification (non-blocking)
+        void supabase.from('notifications').insert({
+          user_id: user.id,
+          ride_id: ride.id,
+          type: 'ride_booked',
+          title: skipPayment ? 'Test ride created' : 'Payment required',
+          message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
+        });
+        setCurrentRide(ride);
+        updateRide(ride);
+
+        // Test accounts go directly to searching (escalation hook will handle notifications)
+        if (skipPayment) {
+          // Increment free rides counter for limited test accounts
+          if (!isUnlimited && freeRidesLeft > 0 && user.email) {
+            incrementFreeRidesUsed(user.email);
+          }
+          setStep('searching');
+          const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
+          toast({
+            title: 'Test mode',
+            description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
+          });
+        }
+      } catch (err: any) {
+        console.error('Error creating ride:', err);
         toast({
-          title: language === 'fr' ? 'Délai dépassé' : 'Request timed out',
-          description: language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.',
+          title: 'Error booking ride',
+          description: err.message,
           variant: 'destructive'
         });
-      }
-    }, 12000);
-
-    try {
-      // ── SESSION: Get a VALID token (auto-refreshes if expired) ──
-      // Uses raw HTTP refresh — never touches the Supabase JS client's GoTrue layer.
-      console.log(ts(), 'STEP_1_GET_TOKEN');
-      let accessToken: string;
-      try {
-        accessToken = await getValidAccessToken();
-      } catch (e: any) {
-        console.error(ts(), 'STEP_1_NO_SESSION', e.message);
-        clearTimeout(watchdogTimeout);
+        setStep('estimate');
+      } finally {
         setIsSubmitting(false);
-        navigate('/login');
-        return;
       }
-      console.log(ts(), 'STEP_1_TOKEN_OK');
-
-      // ── NOTE: We show payment UI AFTER ride creation so PaymentForm has a valid rideId ──
-
-      // ── RIDE CREATION via raw fetch (bypasses Supabase client internals) ──
-      console.log(ts(), 'STEP_2_CREATING_RIDE');
-      const rideStatus = skipPayment ? 'searching' : 'pending_payment';
-
-      const ridePayload = {
-        rider_id: user.id,
-        pickup_address: pickup.address,
-        pickup_lat: pickup.lat,
-        pickup_lng: pickup.lng,
-        dropoff_address: dropoff.address,
-        dropoff_lat: dropoff.lat,
-        dropoff_lng: dropoff.lng,
-        distance_km: distanceKm,
-        estimated_duration_minutes: Math.round(durationMinutes),
-        estimated_fare: fareEstimate.total,
-        promo_discount: fareEstimate.promoDiscount,
-        subtotal_before_tax: fareEstimate.subtotalBeforeTax,
-        gst_amount: fareEstimate.gstAmount,
-        qst_amount: fareEstimate.qstAmount,
-        platform_fee: fareEstimate.platformFee,
-        status: rideStatus,
-      };
-
-      let ride: any = null;
-
-      try {
-        ride = await rawInsertRide(ridePayload, accessToken);
-      } catch (firstErr: any) {
-        console.warn(ts(), 'STEP_2_FIRST_ATTEMPT_FAILED:', firstErr.message);
-
-        // If 401/JWT, refresh token and retry
-        if (firstErr.message.includes('401') || firstErr.message.includes('JWT')) {
-          console.log(ts(), 'STEP_2_TOKEN_INVALID — re-refreshing via raw HTTP');
-          try {
-            const freshToken = await getValidAccessToken();
-            ride = await rawInsertRide(ridePayload, freshToken);
-          } catch (refreshErr: any) {
-            console.error(ts(), 'STEP_2_REFRESH_AND_RETRY_FAILED:', refreshErr.message);
-            clearTimeout(watchdogTimeout);
-            setIsSubmitting(false);
-            toast({
-              title: language === 'fr' ? 'Session expirée' : 'Session expired',
-              description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
-              variant: 'destructive',
-            });
-            navigate('/login');
-            return;
-          }
-        } else {
-          // Transient network error (cold start, "Load failed") — quick retry
-          console.log(ts(), 'STEP_2_TRANSIENT_RETRY in 800ms');
-          await new Promise(r => setTimeout(r, 800));
-          try {
-            ride = await rawInsertRide(ridePayload, accessToken);
-          } catch (retryErr: any) {
-            console.error(ts(), 'STEP_2_RETRY_ALSO_FAILED:', retryErr.message);
-            throw retryErr;
-          }
-        }
-      }
-
-      if (!ride?.id) throw new Error('No ride ID returned');
-
-      console.log(ts(), 'STEP_2_RIDE_CREATED rideId=' + ride.id);
-      rideCreatedRef.current = true;
-      setCurrentRide(ride as any);
-      updateRide(ride as any);
-
-      // Non-blocking notification
-      void supabase.from('notifications').insert({
-        user_id: user.id, ride_id: ride.id, type: 'ride_booked',
-        title: skipPayment ? 'Test ride created' : 'Payment required',
-        message: skipPayment ? 'Looking for a driver...' : 'Complete payment to find a driver.'
-      });
-
-      if (skipPayment) {
-        if (!isUnlimited && freeRidesLeft > 0 && user.email) incrementFreeRidesUsed(user.email);
-        setStep('searching');
-        const remainingAfter = user.email ? getRemainingFreeRides(user.email) : 0;
-        toast({
-          title: 'Test mode',
-          description: isUnlimited ? 'Payment bypassed. Starting driver search...' : `Free ride used! ${remainingAfter} free ride${remainingAfter !== 1 ? 's' : ''} remaining.`
-        });
-      } else {
-        // Show payment UI AFTER ride exists in DB — prevents "Load failed" race condition
-        setStep('payment');
-      }
-
-      console.log(ts(), 'STEP_2_COMPLETE');
-    } catch (err: any) {
-      console.error('PAYMENT_FLOW_ERROR', err);
-      toast({
-        title: language === 'fr' ? 'Erreur' : 'Error',
-        description: err.message || 'An unexpected error occurred.',
-        variant: 'destructive'
-      });
-      setStep('estimate');
-    } finally {
-      clearTimeout(watchdogTimeout);
-      setIsSubmitting(false);
-    }
+    })();
   };
   const handlePaymentSuccess = async () => {
     // Payment succeeded – transition ride status to searching so drivers can see it
     if (currentRide?.id) {
       try {
-        const token = await getValidAccessToken();
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        await fetch(
-          `${SUPABASE_URL}/rest/v1/rides?id=eq.${currentRide.id}&status=eq.pending_payment`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': ANON_KEY,
-              'Authorization': `Bearer ${token}`,
-              'Prefer': 'return=minimal',
-            },
-            body: JSON.stringify({ status: 'searching' }),
-            signal: controller.signal,
-          }
-        ).catch(() => {});
-        clearTimeout(timeout);
+        await supabase.from('rides').update({
+          status: 'searching'
+        }).eq('id', currentRide.id).eq('status', 'pending_payment');
+
+        // Escalation hook will automatically start notifying drivers when step changes to 'searching'
       } catch (e) {
         console.error('Failed to update ride status to searching', e);
       }
@@ -1532,162 +1039,58 @@ const RideBooking = () => {
     });
   };
   const handlePaymentCancel = async () => {
-    // Cancel the ride if payment is cancelled — use raw fetch to avoid Supabase client hangs
+    // Cancel the ride if payment is cancelled
     if (currentRide) {
-      const rideId = currentRide.id;
-      try {
-        const token = await getValidAccessToken();
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        await fetch(
-          `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': ANON_KEY,
-              'Authorization': `Bearer ${token}`,
-              'Prefer': 'return=minimal',
-            },
-            body: JSON.stringify({
-              status: 'cancelled',
-              cancelled_at: new Date().toISOString(),
-              cancelled_by: user?.id,
-              cancellation_reason: 'Payment cancelled',
-            }),
-            signal: controller.signal,
-          }
-        );
-        clearTimeout(timeout);
-
-        // Clean up driver notifications for this ride
-        void fetch(
-          `${SUPABASE_URL}/rest/v1/notifications?ride_id=eq.${rideId}&type=eq.new_ride`,
-          {
-            method: 'DELETE',
-            headers: {
-              'apikey': ANON_KEY,
-              'Authorization': `Bearer ${token}`,
-            },
-          }
-        ).catch(() => {});
-      } catch (err: any) {
-        console.error('[RideBooking] Cancel ride error:', err.message);
+      const {
+        error
+      } = await supabase.from('rides').update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        cancelled_by: user?.id,
+        cancellation_reason: 'Payment cancelled'
+      }).eq('id', currentRide.id);
+      if (error) {
         toast({
           title: 'Cancel failed',
-          description: err.message,
+          description: error.message,
           variant: 'destructive'
         });
       }
     }
     setCurrentRide(null);
     clearRide();
-    navigate('/rider-home');
+    setStep('estimate');
   };
   const handleCancelRide = async () => {
-    console.log('STARTING CANCEL');
-    if (!currentRide || isCancelling) return;
-    setIsCancelling(true);
+    if (!currentRide) return;
 
+    // Optimistic UI update first — makes cancel feel instant
     const rideId = currentRide.id;
-    const userId = user?.id;
-    const targetDriverId = currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
-
-    console.log('[Cancel] rideId:', rideId, 'driverId:', targetDriverId);
-    toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
-
-    // ── CRITICAL: Use raw fetch with keepalive so requests survive page navigation ──
-    let token = '';
-    try { token = await getValidAccessToken(); } catch { /* use empty, will fail gracefully */ }
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
-      'Authorization': `Bearer ${token}`,
-      'Prefer': 'return=minimal',
-    };
-
-    // 1) Update ride status — keepalive ensures it completes even after unmount
+    resetBooking();
+    toast({
+      title: 'Cancelling ride…'
+    });
     try {
-      fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-          cancelled_by: userId,
-          cancellation_reason: 'Cancelled by rider',
-        }),
-        keepalive: true,
-      }).then(r => console.log('[Cancel] Ride DB updated:', r.status)).catch(e => console.warn('[Cancel] Ride update err:', e));
-    } catch (e) { console.warn('[Cancel] Ride fetch err:', e); }
-
-    // 2) Notify driver via MULTIPLE channels for reliability
-    if (targetDriverId) {
-      // 2a) ride-status-push — battle-tested, does proper driver lookup & player ID resolution
-      try {
-        fetch(`${SUPABASE_URL}/functions/v1/ride-status-push`, {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': '' },
-          body: JSON.stringify({
-            ride_id: rideId,
-            rider_id: userId,
-            driver_id: targetDriverId,
-            new_status: 'cancelled',
-            old_status: currentRide.status,
-          }),
-          keepalive: true,
-        }).then(r => console.log('[Cancel] ride-status-push:', r.status)).catch(e => console.warn('[Cancel] ride-status-push err:', e));
-      } catch (e) { console.warn('[Cancel] ride-status-push fetch err:', e); }
-
-      // 2b) Tag-based push (most reliable fallback — works even if external ID not set)
-      try {
-        fetch(`${SUPABASE_URL}/functions/v1/send-onesignal-notification`, {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': '' },
-          body: JSON.stringify({
-            tagUids: [targetDriverId],
-            title: 'Ride Cancelled ❌',
-            message: 'The rider cancelled this ride.',
-            url: '/driver',
-          }),
-          keepalive: true,
-        }).then(r => console.log('[Cancel] Tag push sent:', r.status)).catch(e => console.warn('[Cancel] Tag push err:', e));
-      } catch (e) { console.warn('[Cancel] Tag push fetch err:', e); }
-
-      // 3) DB notification (keepalive) — driver's realtime listener picks this up
-      try {
-        fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': 'return=minimal' },
-          body: JSON.stringify({
-            user_id: targetDriverId,
-            ride_id: rideId,
-            type: 'ride_cancelled',
-            title: 'Ride Cancelled ❌',
-            message: 'The rider cancelled this ride.',
-          }),
-          keepalive: true,
-        }).then(() => console.log('[Cancel] DB notif ok')).catch(e => console.warn('[Cancel] DB notif err:', e));
-      } catch (e) { console.warn('[Cancel] DB notif fetch err:', e); }
-
-      localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+      const {
+        error
+      } = await supabase.from('rides').update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        cancelled_by: user?.id,
+        cancellation_reason: 'Cancelled by rider'
+      }).eq('id', rideId);
+      if (error) throw error;
+      toast({
+        title: 'Ride cancelled'
+      });
+    } catch (error: any) {
+      console.error('Cancel ride error:', error);
+      toast({
+        title: 'Cancel may have failed',
+        description: error.message,
+        variant: 'destructive'
+      });
     }
-
-    // 4) Clean up stale new_ride notifications
-    try {
-      fetch(`${SUPABASE_URL}/rest/v1/notifications?ride_id=eq.${rideId}&type=eq.new_ride`, {
-        method: 'DELETE',
-        headers,
-        keepalive: true,
-      }).catch(() => {});
-    } catch { /* ignore */ }
-
-    // One click = exit after 1.5s — requests already in flight with keepalive
-    window.setTimeout(() => {
-      setIsCancelling(false);
-      resetBooking();
-      window.location.href = '/rider-home';
-    }, 1500);
   };
   const resetBooking = () => {
     setStep('input');
@@ -1698,8 +1101,6 @@ const RideBooking = () => {
     setFareEstimate(null);
     setCurrentRide(null);
     setDriverInfo(null);
-    driverInfoRef.current = null;
-    driverInfoFetchedForId.current = null;
     setDriverLocation(null);
     clearRide(); // Clear from localStorage
     hasRestoredRide.current = false;
@@ -1786,9 +1187,7 @@ const RideBooking = () => {
   if (isActiveRidePhase) {
     return <div className="h-screen w-screen relative overflow-hidden">
         {/* Fullscreen Map */}
-        <Suspense fallback={<div className="h-full w-full bg-background" />}>
-          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={effectiveDriverLocation} riderLocation={riderLiveLocation} routeMode={step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' : step === 'inProgress' ? 'driver-to-dropoff' : 'pickup-dropoff'} followDriver={step === 'arriving' || step === 'arrived' || step === 'inProgress'} />
-        </Suspense>
+        <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={effectiveDriverLocation} riderLocation={riderLiveLocation} routeMode={step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' : step === 'inProgress' ? 'driver-to-dropoff' : 'pickup-dropoff'} followDriver={step === 'arriving' || step === 'arrived' || step === 'inProgress'} />
 
         {/* Debug Bar Overlay - ONLY visible if localStorage.DEBUG_RIDE === "1" */}
         {showDebug && <Suspense fallback={null}>
@@ -1828,18 +1227,22 @@ const RideBooking = () => {
         {/* Status Bar Overlay */}
         <InRideStatusBar phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} driverLocation={effectiveDriverLocation} pickupLocation={pickup} dropoffLocation={dropoff} lastUpdateSeconds={lastUpdateSeconds} />
 
-        {/* Driver Card at Bottom — always render with fallback values to prevent hanging */}
-        <InRideDriverCard driverInfo={driverInfo || {
-          first_name: language === 'fr' ? 'Chauffeur' : 'Driver',
-          last_name: '',
-          phone_number: null,
-          avatar_url: null,
-          vehicle_make: '',
-          vehicle_model: '',
-          vehicle_color: '',
-          license_plate: '—',
-          average_rating: 5
-        }} driverId={currentRide?.driver_id || ''} pickupAddress={pickup?.address || currentRide?.pickup_address || ''} dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''} estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0} distanceKm={distanceKm || currentRide?.distance_km || 0} durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0} rideId={currentRide?.id || ''} rideStatus={currentRide?.status || ''} phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} minutesAway={minutesAway} onShareTrip={handleShareTrip} onSafetyPress={() => setSafetySheetOpen(true)} onCancelRide={handleCancelRide} />
+        {/* Driver Card at Bottom */}
+        {driverInfo ? <InRideDriverCard driverInfo={driverInfo} driverId={currentRide?.driver_id || ''} pickupAddress={pickup?.address || currentRide?.pickup_address || ''} dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''} estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0} distanceKm={distanceKm || currentRide?.distance_km || 0} durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0} rideId={currentRide?.id || ''} rideStatus={currentRide?.status || ''} phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} minutesAway={minutesAway} onShareTrip={handleShareTrip} onSafetyPress={() => setSafetySheetOpen(true)} onCancelRide={handleCancelRide} /> : <div className="absolute bottom-0 left-0 right-0 z-10">
+            <Card className="rounded-t-3xl rounded-b-none border-b-0 shadow-2xl p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">
+                    {language === 'fr' ? 'Chargement des détails...' : 'Loading trip details...'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {language === 'fr' ? 'La carte et le trajet sont en direct — les infos du chauffeur arrivent.' : 'Map is live — driver details will appear shortly.'}
+                  </p>
+                </div>
+                <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              </div>
+            </Card>
+          </div>}
 
         {/* Safety Sheet */}
         <SafetySheet open={safetySheetOpen} onOpenChange={setSafetySheetOpen} rideId={currentRide?.id || ''} driverName={driverInfo?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver')} vehicleInfo={driverInfo ? `${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}` : ''} licensePlate={driverInfo?.license_plate || ''} onShareLocation={handleShareTrip} />
@@ -1849,27 +1252,13 @@ const RideBooking = () => {
   }
 
   // TRIP COMPLETION SCREEN
-  if (step === 'completed' && currentRide) {
+  if (step === 'completed' && currentRide && driverInfo) {
     return <div className="min-h-screen bg-background">
         <Navbar />
         <div className="pt-20 pb-12 container mx-auto px-4 max-w-md">
-          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={driverInfo || { first_name: language === 'fr' ? 'Chauffeur' : 'Driver', last_name: '', phone_number: null, avatar_url: null, vehicle_make: '', vehicle_model: '', vehicle_color: '', license_plate: '—', average_rating: 5 }} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={() => { resetBooking(); window.location.href = '/rider-home'; }} />
+          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={driverInfo} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={resetBooking} />
         </div>
       </div>;
-  }
-
-  // Show loading screen while auto-estimating from search → estimate transition
-  if (step === 'input' && isAutoEstimating) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
-          <p className="text-sm text-muted-foreground">
-            {language === 'fr' ? 'Calcul de votre trajet...' : 'Calculating your ride...'}
-          </p>
-        </div>
-      </div>
-    );
   }
 
   // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
@@ -1887,6 +1276,13 @@ const RideBooking = () => {
         <div className="absolute inset-0 z-0" style={{
         background: 'linear-gradient(to bottom, rgba(10, 10, 25, 0.3) 0%, rgba(60, 30, 100, 0.4) 50%, rgba(10, 10, 25, 0.6) 100%)'
       }} />
+        
+        {/* Full-bleed Map - with transparency to show background */}
+        <div className="absolute inset-0 z-10" style={{
+        opacity: 0.85
+      }}>
+          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={null} routeMode="pickup-dropoff" pickupAddress={displayPickupAddress} use3DStyle={true} />
+        </div>
             
         {/* Compact Frosted Top Bar */}
         <motion.div initial={{
@@ -1970,9 +1366,9 @@ const RideBooking = () => {
                       </span>}
                   </button>
                   <div className="h-px bg-white/10" />
-                  <button onClick={async () => {
-                  await signOut();
-                  window.location.href = '/';
+                  <button onClick={() => {
+                  signOut();
+                  navigate('/');
                 }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
                     <LogOut className="h-5 w-5 text-destructive" />
                     <span className="text-white font-medium">
@@ -1987,11 +1383,15 @@ const RideBooking = () => {
           </div>
         </motion.div>
         
-        {/* GPS Detection Overlay — with 7s zombie killer */}
-        {isDetectingLocation && <ZombieLocationOverlay
-            language={language}
-            onCancel={() => setIsDetectingLocation(false)}
-          />}
+        {/* GPS Detection Overlay */}
+        {isDetectingLocation && <div className="absolute inset-0 bg-background/60 backdrop-blur-sm flex items-center justify-center z-30">
+            <div className="bg-card/95 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col items-center gap-4 border border-white/10">
+              <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <p className="text-sm font-medium text-white">
+                {language === 'fr' ? 'Détection de votre position...' : 'Detecting your location...'}
+              </p>
+            </div>
+          </div>}
           
         {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
         <motion.div initial={{
@@ -2025,37 +1425,58 @@ const RideBooking = () => {
             
           </div>
           {/* Content layer */}
-          <div className="relative h-full p-5 pt-6 flex flex-col gap-4 z-10">
+          <div className="relative h-full p-5 pt-6 space-y-3 overflow-y-auto z-10">
             {/* Greeting */}
             <GreetingHeader />
-
-            {/* "Where to?" search bar — Uber style — navigates to map-free search */}
-            <div
-              className="flex items-center gap-3 px-4 py-4 rounded-2xl cursor-pointer hover:bg-white/10 transition-colors"
-              style={{
-                background: 'rgba(255, 255, 255, 0.92)',
-                boxShadow: '0 4px 24px rgba(0,0,0,0.35)',
-              }}
-              onClick={() => navigate('/search')}
-            >
-              <div className="h-5 w-5 text-gray-500 flex-shrink-0">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
+            
+            {/* Pickup Location Row */}
+            <div onClick={() => setShowFullInput(true)} className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer hover:bg-white/10 transition-colors" style={{
+            background: 'rgba(40, 20, 60, 0.7)',
+            border: '1.5px solid rgba(200, 50, 255, 0.6)',
+            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
+          }}>
+              <div className="h-9 w-9 rounded-full bg-lime-400/20 flex items-center justify-center flex-shrink-0">
+                <Navigation className="h-4 w-4 text-lime-400" />
               </div>
-              <span className="text-gray-500 text-lg font-medium select-none">
-                {language === 'fr' ? 'Où allez-vous ?' : 'Where to?'}
+              <span className="flex-1 text-white font-semibold truncate drop-shadow-sm">
+                {displayPickupAddress}
+              </span>
+              <span className="text-white font-medium text-sm flex-shrink-0 px-3 py-1 rounded-full bg-white/15">
+                {language === 'fr' ? 'Éditer' : 'Edit'}
               </span>
             </div>
 
+            {/* Destination Input - Where to? */}
+            <div className="rounded-xl" style={{
+            background: 'rgba(40, 20, 60, 0.7)',
+            border: '1.5px solid rgba(200, 50, 255, 0.6)',
+            boxShadow: '0 0 12px rgba(200, 50, 255, 0.25), inset 0 0 8px rgba(200, 50, 255, 0.1)'
+          }}>
+              <LocationInput type="dropoff" value={dropoffAddress} onChange={(addr, coords) => handleDropoffChange(addr, coords)} placeholder={language === 'fr' ? 'Où allez-vous ?' : 'Where to?'} />
+            </div>
+
+            {/* Quick Destinations - Top 2 Most Visited */}
+            {!dropoffAddress && <QuickDestinations onSelectDestination={dest => {
+            handleDropoffChange(dest.address, {
+              lat: dest.lat,
+              lng: dest.lng
+            });
+          }} />}
+
             {/* Get Estimate Button - shows when destination is selected */}
-            {dropoffAddress && pickup && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+            {dropoffAddress && pickup && <motion.div initial={{
+            opacity: 0,
+            y: 10
+          }} animate={{
+            opacity: 1,
+            y: 0
+          }} transition={{
+            delay: 0.1
+          }}>
                 <Button onClick={handleGetEstimate} className="w-full gradient-primary shadow-button py-5 text-lg font-semibold" disabled={!pickupAddress || !dropoffAddress}>
                   {language === 'fr' ? 'Obtenir un prix' : 'Get Estimate'}
                 </Button>
-              </motion.div>
-            )}
+              </motion.div>}
           </div>
         </motion.div>
 
@@ -2121,9 +1542,7 @@ const RideBooking = () => {
       <div className="pt-16 h-screen flex flex-col lg:flex-row">
         {/* Map */}
         <div className="flex-1 relative">
-          <Suspense fallback={<div className="h-full w-full bg-background" />}>
-            <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={driverLocation} routeMode="pickup-dropoff" />
-          </Suspense>
+          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={driverLocation} routeMode="pickup-dropoff" />
         </div>
 
         {/* Booking Panel */}
@@ -2149,14 +1568,11 @@ const RideBooking = () => {
               y: -20
             }} className="space-y-6">
                   <div className="flex items-center justify-between">
-                    <Button variant="ghost" size="icon" onClick={() => { resetBooking(); navigate('/search'); }}>
-                      <ArrowLeft className="h-5 w-5" />
-                    </Button>
                     <h2 className="font-display text-2xl font-bold fare-header-glow">
                       {t('pricing.estimated')}
                     </h2>
-                    <Button variant="ghost" size="sm" onClick={() => navigate('/search')} className="text-primary text-sm">
-                      {language === 'fr' ? 'Modifier' : 'Modify'}
+                    <Button variant="ghost" size="icon" onClick={() => setStep('input')}>
+                      <X className="h-5 w-5" />
                     </Button>
                   </div>
 
@@ -2316,7 +1732,7 @@ const RideBooking = () => {
                     repeat: Infinity,
                     ease: 'linear'
                   }} className="w-5 h-5 mr-2 rounded-full border-2 border-primary-foreground border-t-transparent" />
-                        {language === 'fr' ? 'Finalisation...' : 'Finalizing...'}
+                        Preparing payment...
                       </> : <>
                         <CreditCard className="h-5 w-5 mr-2" />
                         {t('booking.confirm')} & Pay
@@ -2453,8 +1869,8 @@ const RideBooking = () => {
                     </div>
                   </Card>
 
-                  <Button variant="outline" onClick={handleCancelRide} disabled={isCancelling} className="w-full text-destructive border-destructive/50 hover:bg-destructive/10">
-                    {isCancelling ? (language === 'fr' ? 'Annulation…' : 'Cancelling…') : `${t('common.cancel')} ${language === 'fr' ? 'la course' : 'Ride'}`}
+                  <Button variant="outline" onClick={handleCancelRide} className="w-full text-destructive border-destructive/50 hover:bg-destructive/10">
+                    {t('common.cancel')} {language === 'fr' ? 'la course' : 'Ride'}
                   </Button>
                 </motion.div>}
             </AnimatePresence>

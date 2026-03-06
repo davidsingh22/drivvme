@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff } from 'lucide-react';
@@ -6,6 +6,7 @@ import Logo from '@/components/Logo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import LanguageToggle from '@/components/LanguageToggle';
@@ -27,10 +28,9 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe] = useState(true); // Always stay signed in
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const justSignedIn = useRef(false);
 
   // If auth completes (even before routing), stop the button spinner
   useEffect(() => {
@@ -40,25 +40,30 @@ const Login = () => {
     if (user) setIsSubmitting(false);
   }, [isSubmitting, user]);
 
-  // After a fresh login (isSubmitting was true), route user based on roles
+  // After auth completes, route user based on roles
   useEffect(() => {
-    // Only redirect after the user has just signed in via this form
-    if (!user || !justSignedIn.current) return;
+    if (!user) return;
 
-    const routeByRole = () => {
-      justSignedIn.current = false;
-      if (isAdmin) navigate('/admin', { replace: true });
-      else if (isDriver) navigate('/driver', { replace: true });
-      else navigate('/rider-home', { replace: true });
-    };
-
+    // If roles are already loaded, route immediately
     if (roles.length > 0) {
-      routeByRole();
+      if (isAdmin) navigate('/admin', {
+        replace: true
+      });else if (isDriver) navigate('/driver', {
+        replace: true
+      });else if (isRider) navigate('/ride', {
+        replace: true
+      });else navigate('/ride', {
+        replace: true
+      }); // Default for new users
       return;
     }
 
     // Give roles a moment to load, then route with whatever we have
-    const timeout = setTimeout(routeByRole, 2000);
+    const timeout = setTimeout(() => {
+      if (isAdmin) navigate('/admin', { replace: true });
+      else if (isDriver) navigate('/driver', { replace: true });
+      else navigate('/ride', { replace: true });
+    }, 2000);
     return () => clearTimeout(timeout);
   }, [user, roles.length, isAdmin, isDriver, isRider, navigate]);
   const handleSubmit = async (e: React.FormEvent) => {
@@ -66,7 +71,6 @@ const Login = () => {
     setError('');
     setIsSubmitting(true);
     try {
-      justSignedIn.current = true;
       await signIn(email, password, rememberMe);
       // Navigation is handled by the effect above once roles are loaded
     } catch (err: any) {
@@ -142,7 +146,12 @@ const Login = () => {
                 </div>
               </div>
 
-              {/* Session is always persistent — no checkbox needed */}
+              <div className="flex items-center space-x-2">
+                <Checkbox id="rememberMe" checked={rememberMe} onCheckedChange={checked => setRememberMe(checked === true)} />
+                <Label htmlFor="rememberMe" className="text-sm font-normal text-muted-foreground cursor-pointer">
+                  Se souvenir de moi
+                </Label>
+              </div>
 
               {error && <p className="text-destructive text-sm text-center">{error}</p>}
 
