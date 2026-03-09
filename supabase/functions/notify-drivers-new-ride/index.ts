@@ -345,17 +345,11 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey!);
 
-    // EXCLUSIVE TEST DRIVER: Only notify this driver until access is granted to others
-    const EXCLUSIVE_TEST_DRIVER_ID = "b00916bd-66a5-4bbf-a587-bc8c710dbd57"; // davidsingh22@hotmail.com
-
     // Get all online drivers with their current location
-    const { data: allOnlineDrivers, error: driverError } = await supabase
+    const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
       .select("user_id, current_lat, current_lng")
       .eq("is_online", true);
-
-    // Filter to exclusive test driver only
-    const onlineDrivers = allOnlineDrivers?.filter(d => d.user_id === EXCLUSIVE_TEST_DRIVER_ID) || [];
 
     if (driverError) {
       console.error("Error fetching online drivers:", driverError);
