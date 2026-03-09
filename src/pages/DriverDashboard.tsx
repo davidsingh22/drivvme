@@ -1002,7 +1002,31 @@ const DriverDashboard = () => {
       )
       .subscribe();
 
+    // Polling fallback every 3s — catches cancellations that realtime misses
+    const pollTimer = setInterval(async () => {
+      try {
+        const { data } = await supabase
+          .from('rides')
+          .select('status')
+          .eq('id', currentRide.id)
+          .maybeSingle();
+
+        if (!data || data.status === 'cancelled') {
+          console.log('[ActiveRidePoll] Ride cancelled or gone:', data?.status);
+          setCurrentRide(null);
+          setRiderInfo(null);
+          setShowGPSNavigation(false);
+          toast({
+            title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+            description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+            variant: 'destructive',
+          });
+        }
+      } catch { /* network error, retry next interval */ }
+    }, 3000);
+
     return () => {
+      clearInterval(pollTimer);
       supabase.removeChannel(channel);
     };
   }, [currentRide?.id]);

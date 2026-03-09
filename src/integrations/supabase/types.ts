@@ -814,6 +814,7 @@ export type Database = {
           acceptance_time_seconds: number | null
           accepted_at: string | null
           actual_fare: number | null
+          cancel_reason: string | null
           cancellation_reason: string | null
           cancelled_at: string | null
           cancelled_by: string | null
@@ -851,6 +852,7 @@ export type Database = {
           acceptance_time_seconds?: number | null
           accepted_at?: string | null
           actual_fare?: number | null
+          cancel_reason?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -888,6 +890,7 @@ export type Database = {
           acceptance_time_seconds?: number | null
           accepted_at?: string | null
           actual_fare?: number | null
+          cancel_reason?: string | null
           cancellation_reason?: string | null
           cancelled_at?: string | null
           cancelled_by?: string | null
@@ -1111,6 +1114,53 @@ export type Database = {
       can_send_ride_message: {
         Args: { p_ride_id: string; p_user_id: string }
         Returns: boolean
+      }
+      cancel_ride: {
+        Args: { p_reason?: string; p_ride_id: string }
+        Returns: {
+          acceptance_time_seconds: number | null
+          accepted_at: string | null
+          actual_fare: number | null
+          cancel_reason: string | null
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          created_at: string
+          distance_km: number | null
+          driver_earnings: number | null
+          driver_id: string | null
+          dropoff_address: string
+          dropoff_at: string | null
+          dropoff_lat: number
+          dropoff_lng: number
+          estimated_duration_minutes: number | null
+          estimated_fare: number
+          gst_amount: number | null
+          id: string
+          last_notification_at: string | null
+          notification_tier: number | null
+          notified_driver_ids: string[] | null
+          pickup_address: string
+          pickup_at: string | null
+          pickup_lat: number
+          pickup_lng: number
+          platform_fee: number | null
+          promo_discount: number | null
+          qst_amount: number | null
+          requested_at: string
+          rider_id: string | null
+          status: Database["public"]["Enums"]["ride_status"]
+          subtotal_before_tax: number | null
+          tip_amount: number | null
+          tip_status: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "rides"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       debug_rider_locations_public_writes_enabled: {
         Args: never
