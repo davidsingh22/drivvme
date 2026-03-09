@@ -1463,6 +1463,14 @@ const RideBooking = () => {
             });
           }} />}
 
+            {/* Recent Destinations - Last 3 Visited */}
+            {!dropoffAddress && <RecentDestinations onSelectDestination={dest => {
+            handleDropoffChange(dest.address, {
+              lat: dest.lat,
+              lng: dest.lng
+            });
+          }} />}
+
             {/* Get Estimate Button - shows when destination is selected */}
             {dropoffAddress && pickup && <motion.div initial={{
             opacity: 0,
