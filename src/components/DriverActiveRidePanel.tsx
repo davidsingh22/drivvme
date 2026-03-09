@@ -352,34 +352,26 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     const previousRide = { ...activeRide };
     const riderIdForNotif = activeRide.rider_id;
     const rideIdForNotif = activeRide.id;
-    setActiveRide(null);
-    setRiderInfo(null);
-    onRideCompleted?.();
-    
-    toast({
-      title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-      description: language === 'fr' ? 'La course a été annulée.' : 'The ride has been cancelled.',
-      variant: 'destructive',
-    });
-
-    // Fire instant push (non-blocking)
-    fireInstantPush(rideIdForNotif, 'cancelled', previousRide.status, riderIdForNotif, driverId);
 
     // IMPORTANT: Insert cancellation notification for the rider BEFORE updating ride status.
     // RLS policy drivers_can_notify_rider_for_assigned_rides requires ride to still be active.
     if (riderIdForNotif) {
-      await supabase.from('notifications').insert({
-        user_id: riderIdForNotif,
-        ride_id: rideIdForNotif,
-        type: 'ride_cancelled',
-        title: language === 'fr' ? 'Course annulée ❌' : 'Ride Cancelled ❌',
-        message: language === 'fr' ? 'Le chauffeur a annulé cette course.' : 'The driver cancelled this ride.',
-      }).then(({ error: notifErr }) => {
-        if (notifErr) console.warn('[DriverActiveRidePanel] Failed to insert cancel notification for rider:', notifErr);
-        else console.log('[DriverActiveRidePanel] ✅ Cancellation notification inserted for rider');
-      });
+      try {
+        const { error: notifErr } = await supabase.from('notifications').insert({
+          user_id: riderIdForNotif,
+          ride_id: rideIdForNotif,
+          type: 'ride_cancelled',
+          title: language === 'fr' ? 'Course annulée ❌' : 'Ride Cancelled ❌',
+          message: language === 'fr' ? 'Le chauffeur a annulé cette course.' : 'The driver cancelled this ride.',
+        });
+        if (notifErr) console.warn('[DriverActiveRidePanel] Cancel notif insert err:', notifErr);
+        else console.log('[DriverActiveRidePanel] ✅ Cancel notification inserted for rider');
+      } catch (e) {
+        console.warn('[DriverActiveRidePanel] Cancel notif exception:', e);
+      }
     }
 
+    // ── STEP 1: AWAIT the database update — must succeed ──
     try {
       const { error } = await withTimeout(
         supabase
@@ -397,16 +389,32 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       );
 
       if (error) {
-        setActiveRide(previousRide);
+        console.error('[DriverActiveRidePanel] cancelRide DB error:', error);
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        setBusyAction(null);
+        return; // Do NOT clear UI if DB update failed
       }
     } catch (err) {
-      setActiveRide(previousRide);
       console.error('[DriverActiveRidePanel] cancelRide error:', err);
       toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
-    } finally {
       setBusyAction(null);
+      return; // Do NOT clear UI if DB update failed
     }
+
+    // ── STEP 2: DB confirmed — immediately clear UI ──
+    setActiveRide(null);
+    setRiderInfo(null);
+    onRideCompleted?.();
+    setBusyAction(null);
+
+    toast({
+      title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+      description: language === 'fr' ? 'La course a été annulée.' : 'The ride has been cancelled.',
+      variant: 'destructive',
+    });
+
+    // ── STEP 3: Background push notification (non-blocking) ──
+    fireInstantPush(rideIdForNotif, 'cancelled', previousRide.status, riderIdForNotif, driverId);
   };
 
   // Mark as arrived at pickup
