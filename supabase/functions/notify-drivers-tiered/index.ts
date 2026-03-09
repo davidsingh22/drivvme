@@ -323,22 +323,28 @@ serve(async (req) => {
       }
     }
 
-    // Tier configuration — expanding radius, small batch dispatch
+    // Tier configuration — closest-driver-first: only 1 driver per tier
     const tierConfig = {
-      1: { maxDistanceKm: 3, maxEta: 10, maxDrivers: 2, description: "3km radius, max 2 drivers" },
-      2: { maxDistanceKm: 5, maxEta: 15, maxDrivers: 3, description: "5km radius, max 3 drivers" },
-      3: { maxDistanceKm: 8, maxEta: 20, maxDrivers: 3, description: "8km radius, max 3 drivers" },
-      4: { maxDistanceKm: 12, maxEta: 30, maxDrivers: 3, description: "12km radius, max 3 drivers" },
+      1: { maxDistanceKm: 3, maxEta: 10, maxDrivers: 1, description: "3km radius, closest driver" },
+      2: { maxDistanceKm: 5, maxEta: 15, maxDrivers: 1, description: "5km radius, next closest" },
+      3: { maxDistanceKm: 8, maxEta: 20, maxDrivers: 1, description: "8km radius, next closest" },
+      4: { maxDistanceKm: 12, maxEta: 30, maxDrivers: 1, description: "12km radius, next closest" },
     };
 
     const config = tierConfig[tier as keyof typeof tierConfig] || tierConfig[1];
     const effectiveMaxEta = maxEtaMinutes ?? config.maxEta;
 
+    // EXCLUSIVE TEST DRIVER: Only notify this driver until access is granted to others
+    const EXCLUSIVE_TEST_DRIVER_ID = "b00916bd-66a5-4bbf-a587-bc8c710dbd57"; // davidsingh22@hotmail.com
+
     // Get all online drivers with their current location and priority status
-    const { data: onlineDrivers, error: driverError } = await supabase
+    const { data: allOnlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
       .select("user_id, current_lat, current_lng, priority_driver_until")
       .eq("is_online", true);
+
+    // Filter to exclusive test driver only
+    const onlineDrivers = allOnlineDrivers?.filter(d => d.user_id === EXCLUSIVE_TEST_DRIVER_ID) || [];
 
     if (driverError) {
       console.error("Error fetching online drivers:", driverError);
@@ -403,8 +409,9 @@ serve(async (req) => {
         };
       })
       .filter((d): d is DriverWithDistance => d !== null)
-      .filter(d => d.distance_km <= config.maxDistanceKm)
-      .filter(d => estimateEtaMinutes(d.distance_km) <= effectiveMaxEta)
+      // Skip distance/ETA filters for exclusive test driver
+      .filter(d => d.user_id === EXCLUSIVE_TEST_DRIVER_ID || d.distance_km <= config.maxDistanceKm)
+      .filter(d => d.user_id === EXCLUSIVE_TEST_DRIVER_ID || estimateEtaMinutes(d.distance_km) <= effectiveMaxEta)
       .sort((a, b) => {
         // Priority drivers first, then by distance
         if (a.is_priority && !b.is_priority) return -1;
@@ -527,9 +534,12 @@ serve(async (req) => {
             contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
             url: "/driver",
             priority: 10,
+            ttl: 0,
             ios_sound: "default",
             android_sound: "default",
             content_available: true,
+            mutable_content: true,
+            data: { ride_id: rideId, type: "new_ride" },
           };
 
           const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -563,9 +573,12 @@ serve(async (req) => {
               contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
               url: "/driver",
               priority: 10,
+              ttl: 0,
               ios_sound: "default",
               android_sound: "default",
               content_available: true,
+              mutable_content: true,
+              data: { ride_id: rideId, type: "new_ride" },
             };
 
             console.log(`[notify-drivers-tiered] Using tag-based targeting for uid: ${uid}`);

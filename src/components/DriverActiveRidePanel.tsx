@@ -28,6 +28,25 @@ import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import { withTimeout } from '@/lib/withTimeout';
 import DriverRideActionBar from '@/components/DriverRideActionBar';
 
+/** Fire push notification to rider immediately (don't wait for DB trigger) */
+const fireInstantPush = async (
+  rideId: string,
+  newStatus: string,
+  oldStatus: string,
+  riderId: string | null,
+  driverId: string | null,
+) => {
+  try {
+    const { error } = await supabase.functions.invoke('ride-status-push', {
+      body: { ride_id: rideId, new_status: newStatus, old_status: oldStatus, rider_id: riderId, driver_id: driverId },
+    });
+    if (error) console.warn('[InstantPush] edge fn error:', error);
+    else console.log('[InstantPush] sent for', newStatus);
+  } catch (e) {
+    console.warn('[InstantPush] failed (non-blocking):', e);
+  }
+};
+
 const PLATFORM_FEE = 5.00;
 
 interface ActiveRide {
@@ -107,6 +126,14 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         if (data.driver_id !== driverId) {
           setDriverMismatch(`Driver mismatch: ride.driver_id=${data.driver_id}, currentDriverId=${driverId}`);
           setActiveRide(null);
+          return;
+        }
+
+        // Never set completed/cancelled rides as active
+        if (data.status === 'completed' || data.status === 'cancelled') {
+          setActiveRide(null);
+          setRiderInfo(null);
+          setDriverMismatch(null);
           return;
         }
         
@@ -238,6 +265,9 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       description: language === 'fr' ? 'En route vers la destination.' : 'Heading to the destination.',
     });
 
+    // Fire instant push (non-blocking)
+    fireInstantPush(activeRide.id, 'in_progress', activeRide.status, activeRide.rider_id, driverId);
+
     try {
       const { error } = await withTimeout(
         supabase
@@ -282,6 +312,9 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         : `You earned ${formatCurrency(driverEarningsCalc, language)}`,
     });
 
+    // Fire instant push (non-blocking)
+    fireInstantPush(activeRide.id, 'completed', activeRide.status, activeRide.rider_id, driverId);
+
     try {
       const { error } = await withTimeout(
         supabase
@@ -317,6 +350,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     
     setBusyAction('cancel');
     const previousRide = { ...activeRide };
+    const riderIdForNotif = activeRide.rider_id;
+    const rideIdForNotif = activeRide.id;
     setActiveRide(null);
     setRiderInfo(null);
     onRideCompleted?.();
@@ -326,6 +361,24 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       description: language === 'fr' ? 'La course a été annulée.' : 'The ride has been cancelled.',
       variant: 'destructive',
     });
+
+    // Fire instant push (non-blocking)
+    fireInstantPush(rideIdForNotif, 'cancelled', previousRide.status, riderIdForNotif, driverId);
+
+    // IMPORTANT: Insert cancellation notification for the rider BEFORE updating ride status.
+    // RLS policy drivers_can_notify_rider_for_assigned_rides requires ride to still be active.
+    if (riderIdForNotif) {
+      await supabase.from('notifications').insert({
+        user_id: riderIdForNotif,
+        ride_id: rideIdForNotif,
+        type: 'ride_cancelled',
+        title: language === 'fr' ? 'Course annulée ❌' : 'Ride Cancelled ❌',
+        message: language === 'fr' ? 'Le chauffeur a annulé cette course.' : 'The driver cancelled this ride.',
+      }).then(({ error: notifErr }) => {
+        if (notifErr) console.warn('[DriverActiveRidePanel] Failed to insert cancel notification for rider:', notifErr);
+        else console.log('[DriverActiveRidePanel] ✅ Cancellation notification inserted for rider');
+      });
+    }
 
     try {
       const { error } = await withTimeout(
@@ -337,7 +390,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
             cancelled_by: driverId,
             cancellation_reason: 'Driver cancelled',
           })
-          .eq('id', activeRide.id)
+          .eq('id', rideIdForNotif)
           .eq('driver_id', driverId)
           .then(r => r),
         7000, 'Cancel ride'
@@ -372,6 +425,9 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         ? 'Le passager a été notifié de votre arrivée.' 
         : 'The rider has been notified of your arrival.',
     });
+
+    // Fire instant push (non-blocking, don't await)
+    fireInstantPush(activeRide.id, 'arrived', activeRide.status, activeRide.rider_id, driverId);
 
     try {
       const { error } = await withTimeout(

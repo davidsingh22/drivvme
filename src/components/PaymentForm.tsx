@@ -11,43 +11,79 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+
 import { Loader2, CreditCard, Shield, Smartphone } from 'lucide-react';
 import { SavedCardsSelector, SaveCardPrompt } from '@/components/SavedCardsSelector';
 import { Checkbox as CheckboxUI } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 
 // Global cache for Stripe instance to avoid re-fetching
 let cachedStripePromise: Promise<Stripe | null> | null = null;
+let stripePromiseInFlight = false;
 
-// Get or create Stripe promise (cached)
-const getStripePromise = (): Promise<Stripe | null> => {
+// Get or create Stripe promise (cached) — NEVER caches rejected promises
+const getStripePromise = async (): Promise<Stripe | null> => {
+  // Fast path: already resolved successfully
   if (cachedStripePromise) return cachedStripePromise;
-  
-  // Check sessionStorage first
+
+  // Check sessionStorage first (survives across calls but not browser restarts)
   const cached = sessionStorage.getItem('stripe_pk');
   if (cached) {
     cachedStripePromise = loadStripe(cached);
     return cachedStripePromise;
   }
-  
-  // Fetch from edge function and cache the promise
-  cachedStripePromise = (async () => {
-    const { data, error } = await supabase.functions.invoke('get-stripe-config');
-    if (error || !data?.publishableKey) {
-      cachedStripePromise = null; // Reset on error so we can retry
-      throw new Error('Failed to get Stripe config');
+
+  // Prevent parallel fetches
+  if (stripePromiseInFlight) {
+    // Wait a bit and retry
+    await new Promise(r => setTimeout(r, 500));
+    return getStripePromise();
+  }
+
+  stripePromiseInFlight = true;
+
+  try {
+    const accessToken = await getValidAccessToken();
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/get-stripe-config`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': ANON_KEY,
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    const contentType = res.headers.get('content-type');
+    if (!contentType?.includes('application/json')) {
+      const text = await res.text().catch(() => '');
+      console.error('[PaymentForm] Non-JSON response from get-stripe-config:', text.substring(0, 200));
+      throw new Error('Stripe config returned unexpected response');
     }
-    
+
+    const data = await res.json();
+    if (!data?.publishableKey) {
+      throw new Error(data?.error || 'Failed to get Stripe config');
+    }
+
     sessionStorage.setItem('stripe_pk', data.publishableKey);
-    return loadStripe(data.publishableKey);
-  })().then(stripe => stripe);
-  
-  return cachedStripePromise;
+    cachedStripePromise = loadStripe(data.publishableKey);
+    return cachedStripePromise;
+  } catch (err) {
+    // CRITICAL: Do NOT cache the failure — next call should retry
+    cachedStripePromise = null;
+    throw err;
+  } finally {
+    stripePromiseInFlight = false;
+  }
 };
 
-// Start prefetching immediately when this module loads
-getStripePromise().catch(console.error);
+// Do NOT prefetch at module load — session may not exist yet
 
 interface PaymentFormInnerProps {
   onSuccess: (paymentMethodId?: string) => void;
@@ -371,43 +407,70 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
 
     const initialize = async () => {
       try {
-        // Get cached stripe promise (doesn't await - just gets the promise)
+        console.log('[PaymentForm] STEP_3_INIT_START');
+
+        // Get stripe promise — retries on failure, never caches rejections
         const stripePromiseToUse = getStripePromise();
         setStripePromise(stripePromiseToUse);
         
-        // Create payment intent (retry a few times to handle transient backend latency)
-        let lastErr: unknown = null;
-        let paymentResult:
-          | { data: any; error: any }
-          | null = null;
-        for (let attempt = 0; attempt < 3; attempt++) {
-          paymentResult = await supabase.functions.invoke('create-payment-intent', {
-            body: { rideId, amount },
-          });
+        // Use session recovery to get a valid token (auto-refreshes if expired)
+        let accessToken: string;
+        try {
+          accessToken = await getValidAccessToken();
+        } catch {
+          throw new Error('No session found. Please sign in again.');
+        }
 
-          if (!paymentResult?.error && paymentResult?.data?.clientSecret) break;
-          lastErr = paymentResult?.error ?? new Error('No client secret returned');
+        // Create payment intent via raw fetch (retry a few times)
+        let lastErr: unknown = null;
+        let clientSecretResult: string | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          console.log(`[PaymentForm] STEP_3_PAYMENT_INTENT attempt ${attempt + 1}`, { rideId, amount });
+          try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 10000);
+            const res = await fetch(`${SUPABASE_URL}/functions/v1/create-payment-intent`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'apikey': ANON_KEY,
+                'Authorization': `Bearer ${accessToken}`,
+              },
+              body: JSON.stringify({ rideId, amount }),
+              signal: controller.signal,
+            });
+            clearTimeout(timeout);
+            const data = await res.json();
+            console.log(`[PaymentForm] attempt ${attempt + 1} result:`, data?.clientSecret ? 'has secret' : 'no secret', data?.error || 'OK');
+            if (data?.clientSecret) {
+              clientSecretResult = data.clientSecret;
+              break;
+            }
+            lastErr = new Error(data?.error || 'No client secret returned');
+          } catch (e: any) {
+            lastErr = e;
+            console.warn(`[PaymentForm] attempt ${attempt + 1} failed:`, e.message);
+          }
           await sleep(300 * Math.pow(2, attempt));
         }
 
         if (!isMounted) return;
 
-        if (paymentResult?.error) {
-          throw new Error(paymentResult.error.message || 'Failed to create payment');
-        }
-
-        if (!paymentResult?.data?.clientSecret) {
+        if (!clientSecretResult) {
           throw (lastErr instanceof Error ? lastErr : new Error('Failed to create payment'));
         }
 
-        setClientSecret(paymentResult.data.clientSecret);
+        console.log('[PaymentForm] STEP_3_PAYMENT_INTENT_CREATED');
+        setClientSecret(clientSecretResult);
       } catch (err: any) {
         if (!isMounted) return;
-        console.error('Error initializing payment:', err);
+        console.error('PAYMENT_FLOW_ERROR', err);
         setError(err.message);
+        // Reset initKey so the user can retry without needing a new ride
+        initKeyRef.current = null;
         toast({
-          title: 'Error',
-          description: 'Failed to initialize payment. Please try again.',
+          title: 'Payment error',
+          description: err.message || 'Failed to initialize payment. Please try again.',
           variant: 'destructive',
         });
       } finally {
@@ -429,14 +492,24 @@ const PaymentForm = ({ rideId, amount, onSuccess, onCancel }: PaymentFormProps) 
     
     setIsPayingWithSaved(true);
     try {
-      const { data, error } = await supabase.functions.invoke('manage-saved-cards', {
-        body: { 
+      const accessToken = await getValidAccessToken();
+      
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/manage-saved-cards`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': ANON_KEY,
+          'Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
           action: 'pay_with_saved',
           cardId: selectedCardId,
           rideId,
           amount,
-        },
+        }),
       });
+      const data = await res.json();
+      const error = !res.ok ? new Error(data?.error || 'Payment failed') : null;
 
       if (error) throw error;
       

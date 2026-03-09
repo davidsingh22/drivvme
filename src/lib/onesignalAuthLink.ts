@@ -1,11 +1,9 @@
 import { supabase } from "@/integrations/supabase/client";
+import { setPendingRideFromNotification } from "@/lib/pendingRideStore";
+import { broadcastNewRide } from "@/lib/rideBroadcast";
 
 let lastExternalId: string | null = null;
 
-/**
- * Wait for OneSignal SDK to be fully ready (login method available).
- * Polls every 300ms, rejects after timeoutMs.
- */
 function waitForOneSignal(timeoutMs = 30000): Promise<any> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
@@ -22,11 +20,19 @@ function waitForOneSignal(timeoutMs = 30000): Promise<any> {
   });
 }
 
-/**
- * Standalone OneSignal ↔ Supabase auth linker.
- * Waits for OneSignal SDK to be ready, then calls OneSignal.login(uid)
- * to set the External ID and merge subscriptions (including iOS devices).
- */
+/** Hard-reset localStorage and inject new ride_id */
+function forceSetNewRide(rideId: string) {
+  // FORCE-CLEAR first — every beep is a brand-new event
+  localStorage.removeItem('pendingRideFromPush');
+  localStorage.removeItem('last_notified_ride');
+  // Now set fresh
+  localStorage.setItem('pendingRideFromPush', rideId);
+  localStorage.setItem('last_notified_ride', rideId);
+  setPendingRideFromNotification(rideId);
+  broadcastNewRide(rideId);
+  console.log('🔔 OneSignal: force-set new ride:', rideId);
+}
+
 export function initOneSignalAuthLink() {
   supabase.auth.onAuthStateChange((_event, session) => {
     const uid = session?.user?.id;
@@ -44,20 +50,32 @@ export function initOneSignalAuthLink() {
           console.log("✅ OneSignal logged out");
         }
 
-        // Register notification click handler (web SDK)
         try {
           if (OneSignal.Notifications?.addEventListener) {
+            // --- Click handler (cold start / background tap) ---
             OneSignal.Notifications.addEventListener("click", (event: any) => {
               const data = event?.notification?.additionalData || event?.result?.notification?.additionalData || {};
               console.log("🔔 OneSignal notification clicked, data:", data);
               if (data.ride_id) {
-                window.location.href = "/ride";
+                forceSetNewRide(data.ride_id);
+                const lastRoute = localStorage.getItem('last_route');
+                window.location.href = lastRoute === '/driver' ? '/driver' : '/ride';
               }
             });
-            console.log("✅ OneSignal notification click handler registered");
+
+            // --- Foreground handler (app is open) ---
+            OneSignal.Notifications.addEventListener("foregroundWillDisplay", (event: any) => {
+              const data = event?.notification?.additionalData || {};
+              console.log("🔔 OneSignal foreground notification:", data);
+              if (data.ride_id) {
+                forceSetNewRide(data.ride_id);
+              }
+            });
+
+            console.log("✅ OneSignal click + foreground handlers registered");
           }
         } catch (e) {
-          console.log("OneSignal click handler registration failed (non-fatal):", e);
+          console.log("OneSignal handler registration failed (non-fatal):", e);
         }
       })
       .catch((e) => {
