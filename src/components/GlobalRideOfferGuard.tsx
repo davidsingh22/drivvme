@@ -166,11 +166,12 @@ export function GlobalRideOfferGuard() {
         const OS = (window as any).OneSignal;
         if (OS?.Notifications?.addEventListener) {
           OS.Notifications.addEventListener('foregroundWillDisplay', (event: any) => {
-            const data = event?.notification?.additionalData || {};
-            if (data.ride_id) {
-              console.log('[GlobalGuard] 🔔 Foreground notification:', data.ride_id);
-              handleNewRide(data.ride_id);
-              broadcastNewRide(data.ride_id);
+            const notification = event?.notification || event?.result?.notification || event;
+            const rideId = extractRideId(notification);
+            if (rideId) {
+              console.log('[GlobalGuard] 🔔 Foreground notification:', rideId);
+              handleNewRide(rideId);
+              broadcastNewRide(rideId);
             }
           });
           foregroundListenerRef.current = true;
