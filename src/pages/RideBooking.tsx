@@ -1634,19 +1634,28 @@ const RideBooking = () => {
       return; // Do NOT redirect if DB update failed
     }
 
-    // ── STEP 2: DB update confirmed — immediately clear UI and redirect ──
-    localStorage.removeItem('last_route');
-    localStorage.removeItem(`drivvme_active_ride:${userId}`);
-    setIsCancelling(false);
-    resetBooking();
+    // ── STEP 2: Send ALL notifications BEFORE navigating away ──
+    // (Dispatching after window.location.replace causes browsers to kill requests ~1/3 of the time)
 
-    // Use replace so back button doesn't return to stale ride
-    window.location.replace('/rider-home');
-
-    // ── STEP 3: Background notifications (fire-and-forget with keepalive) ──
     if (targetDriverId) {
-      // 3a) ride-status-push
+      // 2a) CRITICAL: Await the DB notification insert — driver's realtime listener depends on this
       try {
+        const notifRes = await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+          method: 'POST',
+          headers: { ...headers, 'Prefer': 'return=minimal' },
+          body: JSON.stringify({
+            user_id: targetDriverId,
+            ride_id: rideId,
+            type: 'ride_cancelled',
+            title: 'Ride Cancelled ❌',
+            message: 'The rider cancelled this ride.',
+          }),
+        });
+        console.log('[Cancel] DB notif:', notifRes.status);
+      } catch (e) { console.warn('[Cancel] DB notif err:', e); }
+
+      // 2b) Fire push notifications in parallel (don't await — but dispatch before navigation)
+      const pushPromises = [
         fetch(`${SUPABASE_URL}/functions/v1/ride-status-push`, {
           method: 'POST',
           headers: { ...headers, 'Prefer': '' },
@@ -1658,11 +1667,8 @@ const RideBooking = () => {
             old_status: oldStatus,
           }),
           keepalive: true,
-        }).then(r => console.log('[Cancel] ride-status-push:', r.status)).catch(e => console.warn('[Cancel] ride-status-push err:', e));
-      } catch (e) { console.warn('[Cancel] ride-status-push fetch err:', e); }
+        }).then(r => console.log('[Cancel] ride-status-push:', r.status)).catch(e => console.warn('[Cancel] ride-status-push err:', e)),
 
-      // 3b) Tag-based push fallback
-      try {
         fetch(`${SUPABASE_URL}/functions/v1/send-onesignal-notification`, {
           method: 'POST',
           headers: { ...headers, 'Prefer': '' },
@@ -1673,29 +1679,16 @@ const RideBooking = () => {
             url: '/driver',
           }),
           keepalive: true,
-        }).then(r => console.log('[Cancel] Tag push sent:', r.status)).catch(e => console.warn('[Cancel] Tag push err:', e));
-      } catch (e) { console.warn('[Cancel] Tag push fetch err:', e); }
+        }).then(r => console.log('[Cancel] Tag push sent:', r.status)).catch(e => console.warn('[Cancel] Tag push err:', e)),
+      ];
 
-      // 3c) DB notification — driver's realtime listener picks this up
-      try {
-        fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': 'return=minimal' },
-          body: JSON.stringify({
-            user_id: targetDriverId,
-            ride_id: rideId,
-            type: 'ride_cancelled',
-            title: 'Ride Cancelled ❌',
-            message: 'The rider cancelled this ride.',
-          }),
-          keepalive: true,
-        }).then(() => console.log('[Cancel] DB notif ok')).catch(e => console.warn('[Cancel] DB notif err:', e));
-      } catch (e) { console.warn('[Cancel] DB notif fetch err:', e); }
+      // Wait for push requests to be dispatched (not necessarily completed)
+      await Promise.allSettled(pushPromises);
 
       localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
     }
 
-    // 4) Clean up stale new_ride notifications
+    // Clean up stale new_ride notifications (fire-and-forget)
     try {
       fetch(`${SUPABASE_URL}/rest/v1/notifications?ride_id=eq.${rideId}&type=eq.new_ride`, {
         method: 'DELETE',
@@ -1703,6 +1696,13 @@ const RideBooking = () => {
         keepalive: true,
       }).catch(() => {});
     } catch { /* ignore */ }
+
+    // ── STEP 3: NOW clear UI and redirect — all network requests are dispatched ──
+    localStorage.removeItem('last_route');
+    localStorage.removeItem(`drivvme_active_ride:${userId}`);
+    setIsCancelling(false);
+    resetBooking();
+    window.location.replace('/rider-home');
   };
   const resetBooking = () => {
     setStep('input');
