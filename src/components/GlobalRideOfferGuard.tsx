@@ -52,6 +52,20 @@ function forceInjectRide(rideId: string) {
   setPendingRideFromNotification(rideId);
 }
 
+/** Accept ride_id from multiple payload shapes (OneSignal web/native/realtime) */
+function extractRideId(payload: any): string | null {
+  if (!payload) return null;
+  return (
+    payload?.ride_id ||
+    payload?.rideId ||
+    payload?.data?.ride_id ||
+    payload?.data?.rideId ||
+    payload?.additionalData?.ride_id ||
+    payload?.additionalData?.rideId ||
+    null
+  );
+}
+
 export function GlobalRideOfferGuard() {
   // Immediately check for a pending ride — no useEffect delay
   const [rideId, setRideId] = useState<string | null>(() => {
