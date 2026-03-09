@@ -214,6 +214,99 @@ export function GlobalRideOfferGuard() {
     };
   }, [handleNewRide]);
 
+  // Source 6: realtime notifications fallback (works even when SDK foreground events are flaky)
+  useEffect(() => {
+    let cancelled = false;
+    let currentUserId: string | null = null;
+    let currentChannel: ReturnType<typeof supabase.channel> | null = null;
+
+    const cleanupChannel = () => {
+      if (currentChannel) {
+        supabase.removeChannel(currentChannel);
+        currentChannel = null;
+      }
+    };
+
+    const fetchLatestUnreadRide = async (userId: string) => {
+      const { data } = await supabase
+        .from('notifications')
+        .select('ride_id, type, is_read, created_at')
+        .eq('user_id', userId)
+        .eq('type', 'new_ride')
+        .eq('is_read', false)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const rideId = extractRideId(data);
+      if (rideId) {
+        console.log('[GlobalGuard] 📬 Found unread new_ride notification:', rideId);
+        handleNewRide(rideId);
+        broadcastNewRide(rideId);
+      }
+    };
+
+    const subscribeForUser = async (userId: string) => {
+      if (!userId || cancelled) return;
+      if (currentUserId === userId && currentChannel) return;
+
+      cleanupChannel();
+      currentUserId = userId;
+
+      await fetchLatestUnreadRide(userId);
+      if (cancelled) return;
+
+      currentChannel = supabase
+        .channel(`global-ride-offers-${userId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            const notif = payload.new as any;
+            if (notif?.type !== 'new_ride') return;
+
+            const rideId = extractRideId(notif);
+            if (!rideId) return;
+
+            console.log('[GlobalGuard] 📡 Realtime new_ride notification:', rideId);
+            handleNewRide(rideId);
+            broadcastNewRide(rideId);
+          }
+        )
+        .subscribe();
+    };
+
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const uid = session?.user?.id;
+      if (uid) await subscribeForUser(uid);
+    })();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (cancelled) return;
+      const uid = session?.user?.id ?? null;
+
+      if (!uid) {
+        currentUserId = null;
+        cleanupChannel();
+        return;
+      }
+
+      await subscribeForUser(uid);
+    });
+
+    return () => {
+      cancelled = true;
+      cleanupChannel();
+      subscription.unsubscribe();
+    };
+  }, [handleNewRide]);
+
   // === ASYNC DATA ENRICHMENT — does NOT block modal display ===
   useEffect(() => {
     if (!rideId) return;
