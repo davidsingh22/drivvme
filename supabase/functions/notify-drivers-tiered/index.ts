@@ -494,102 +494,103 @@ serve(async (req) => {
     // Send push notifications via multiple channels
     const results: Array<{ id: string; success: boolean; reason?: string }> = [];
 
-    // --- Channel 1: OneSignal push notifications (primary via player_ids) ---
+    // --- Channel 1: OneSignal push notifications (primary + resilient fallbacks) ---
     const oneSignalApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
     if (oneSignalApiKey && driverUserIds.length > 0) {
       try {
-        // Look up player IDs from profiles for reliable native iOS delivery
-        const { data: driverProfiles } = await supabase
-          .from("profiles")
-          .select("user_id, onesignal_player_id")
-          .in("user_id", driverUserIds);
+        const deliveredUserIds = new Set<string>();
+        const notificationBase = {
+          app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
+          headings: { en: nearbyDrivers.some((d) => d.is_priority) ? "⚡ PRIORITY RIDE REQUEST" : "🚗 New Ride Request" },
+          contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
+          url: "/driver",
+          priority: 10,
+          ttl: 0,
+          ios_sound: "default",
+          android_sound: "default",
+          content_available: true,
+          mutable_content: true,
+          collapse_id: `ride-offer-${rideId}`,
+          data: { ride_id: rideId, type: "new_ride" },
+        };
 
-        const playerIds = (driverProfiles || [])
-          .map(p => p.onesignal_player_id)
-          .filter((id): id is string => !!id);
-
-        const driversMissingPlayerId = driverUserIds.filter(
-          uid => !driverProfiles?.find(p => p.user_id === uid && p.onesignal_player_id)
-        );
-
-        // Log per-driver targeting info
-        for (const uid of driverUserIds) {
-          const prof = driverProfiles?.find(p => p.user_id === uid);
-          console.log(`[notify-drivers-tiered] target user id: ${uid} | onesignal_player_id ${prof?.onesignal_player_id ? `found: ${prof.onesignal_player_id}` : "missing"}`);
-        }
-
-        // Send to drivers WITH player IDs (primary)
-        if (playerIds.length > 0) {
-          const playerPayload = {
-            app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
-            include_player_ids: playerIds,
-            headings: { en: nearbyDrivers.some(d => d.is_priority) ? "⚡ PRIORITY RIDE REQUEST" : "🚗 New Ride Request" },
-            contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
-            url: "/driver",
-            priority: 10,
-            ttl: 0,
-            ios_sound: "default",
-            android_sound: "default",
-            content_available: true,
-            mutable_content: true,
-            data: { ride_id: rideId, type: "new_ride" },
-          };
-
+        const sendOneSignal = async (targeting: Record<string, unknown>, label: string) => {
           const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
             method: "POST",
             headers: {
               "Content-Type": "application/json; charset=utf-8",
               "Authorization": `Basic ${oneSignalApiKey}`,
             },
-            body: JSON.stringify(playerPayload),
+            body: JSON.stringify({ ...notificationBase, ...targeting }),
           });
           const osData = await osRes.json();
-          console.log(`[notify-drivers-tiered] onesignal response status (player_ids): ${osRes.status}`, JSON.stringify(osData));
-          if (osRes.ok) {
-            results.push(...playerIds.map(id => ({ id, success: true })));
+          const recipients = Number(osData?.recipients || 0);
+          console.log(`[notify-drivers-tiered] onesignal response status (${label}): ${osRes.status}`, JSON.stringify(osData));
+          return { ok: osRes.ok, recipients };
+        };
+
+        // Look up player IDs
+        const { data: driverProfiles } = await supabase
+          .from("profiles")
+          .select("user_id, onesignal_player_id")
+          .in("user_id", driverUserIds);
+
+        const profilesByUserId = new Map<string, string>();
+        const playerIds: string[] = [];
+        (driverProfiles || []).forEach((p) => {
+          if (p.user_id && p.onesignal_player_id) {
+            profilesByUserId.set(p.user_id, p.onesignal_player_id);
+            playerIds.push(p.onesignal_player_id);
+          }
+        });
+
+        for (const uid of driverUserIds) {
+          const playerId = profilesByUserId.get(uid);
+          console.log(`[notify-drivers-tiered] target user id: ${uid} | onesignal_player_id ${playerId ? `found: ${playerId}` : "missing"}`);
+        }
+
+        // Attempt A: player ids
+        if (playerIds.length > 0) {
+          const rPlayer = await sendOneSignal({ include_player_ids: playerIds }, "player_ids");
+          if (rPlayer.recipients > 0) {
+            for (const uid of driverUserIds) {
+              if (profilesByUserId.has(uid)) deliveredUserIds.add(uid);
+            }
           }
         }
 
-        // Fallback: send to drivers WITHOUT player IDs via uid tag filters
-        if (driversMissingPlayerId.length > 0) {
-          // OneSignal filters don't support OR across multiple uids in one call,
-          // so we send one notification per driver using tag filter
-          for (const uid of driversMissingPlayerId) {
-            const fallbackPayload = {
-              app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
+        // Attempt B: external user ids (robust when stored player IDs are stale)
+        const rExternal = await sendOneSignal(
+          {
+            include_external_user_ids: driverUserIds,
+            channel_for_external_user_ids: "push",
+          },
+          "external_user_ids",
+        );
+        if (rExternal.recipients > 0) {
+          driverUserIds.forEach((uid) => deliveredUserIds.add(uid));
+        }
+
+        // Attempt C: per-user tag fallback for any still undelivered
+        const remaining = driverUserIds.filter((uid) => !deliveredUserIds.has(uid));
+        for (const uid of remaining) {
+          console.log(`[notify-drivers-tiered] Using tag-based targeting for uid: ${uid}`);
+          const rTag = await sendOneSignal(
+            {
               filters: [
                 { field: "tag", key: "uid", relation: "=", value: uid },
                 { operator: "AND" },
                 { field: "tag", key: "role", relation: "=", value: "driver" },
               ],
-              headings: { en: nearbyDrivers.some(d => d.is_priority) ? "⚡ PRIORITY RIDE REQUEST" : "🚗 New Ride Request" },
-              contents: { en: `${pickupAddress || "Pickup"} → ${dropoffAddress || "Dropoff"}${minimumEarnings ? ` • $${minimumEarnings.toFixed(2)}` : ""}` },
-              url: "/driver",
-              priority: 10,
-              ttl: 0,
-              ios_sound: "default",
-              android_sound: "default",
-              content_available: true,
-              mutable_content: true,
-              data: { ride_id: rideId, type: "new_ride" },
-            };
-
-            console.log(`[notify-drivers-tiered] Using tag-based targeting for uid: ${uid}`);
-            const osRes2 = await fetch("https://onesignal.com/api/v1/notifications", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json; charset=utf-8",
-                "Authorization": `Basic ${oneSignalApiKey}`,
-              },
-              body: JSON.stringify(fallbackPayload),
-            });
-            const osData2 = await osRes2.json();
-            console.log(`[notify-drivers-tiered] onesignal response status (tag fallback uid=${uid}): ${osRes2.status}`, JSON.stringify(osData2));
-            if (osRes2.ok) {
-              results.push({ id: uid, success: true });
-            }
+            },
+            `tag_fallback_uid=${uid}`,
+          );
+          if (rTag.recipients > 0) {
+            deliveredUserIds.add(uid);
           }
         }
+
+        deliveredUserIds.forEach((uid) => results.push({ id: uid, success: true }));
       } catch (osErr) {
         console.error("OneSignal push error:", osErr);
       }
