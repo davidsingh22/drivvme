@@ -403,9 +403,8 @@ serve(async (req) => {
         };
       })
       .filter((d): d is DriverWithDistance => d !== null)
-      // Skip distance/ETA filters for exclusive test driver
-      .filter(d => d.user_id === EXCLUSIVE_TEST_DRIVER_ID || d.distance_km <= config.maxDistanceKm)
-      .filter(d => d.user_id === EXCLUSIVE_TEST_DRIVER_ID || estimateEtaMinutes(d.distance_km) <= effectiveMaxEta)
+      .filter(d => d.distance_km <= config.maxDistanceKm)
+      .filter(d => estimateEtaMinutes(d.distance_km) <= effectiveMaxEta)
       .sort((a, b) => {
         // Priority drivers first, then by distance
         if (a.is_priority && !b.is_priority) return -1;

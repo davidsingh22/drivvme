@@ -373,14 +373,10 @@ serve(async (req) => {
     }
 
     // Filter drivers by proximity to pickup location
-    // Exclusive test driver bypasses distance filter — receives rides from anywhere
     let nearbyDrivers = onlineDrivers;
     
     if (pickupLat && pickupLng) {
       nearbyDrivers = onlineDrivers.filter(driver => {
-        // Test driver always gets notified regardless of distance
-        if (driver.user_id === EXCLUSIVE_TEST_DRIVER_ID) return true;
-
         // Include drivers without location data (they might have just gone online)
         if (!driver.current_lat || !driver.current_lng) {
           return true;
