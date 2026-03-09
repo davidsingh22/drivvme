@@ -1636,7 +1636,7 @@ const RideBooking = () => {
 
     // ── STEP 2: DB update confirmed — immediately clear UI and redirect ──
     localStorage.removeItem('last_route');
-    localStorage.removeItem(getActiveRideKey(userId || ''));
+    localStorage.removeItem(`drivvme_active_ride:${userId}`);
     setIsCancelling(false);
     resetBooking();
 
