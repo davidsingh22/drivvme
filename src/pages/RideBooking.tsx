@@ -132,6 +132,7 @@ const RideBooking = () => {
     roles,
     isRider,
     isDriver,
+    isAdmin,
     isLoading: authLoading,
     signOut
   } = useAuth();
