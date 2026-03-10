@@ -87,6 +87,9 @@ const DriverDashboard = () => {
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
   const [isOnline, setIsOnline] = useState(false);
+  // Track if driver manually went offline this session — prevents auto-online from re-triggering
+  const manuallyWentOfflineRef = useRef(false);
+  const autoOnlineFiredRef = useRef(false);
   // availableRides removed — push-only dispatch, no feed
   const [currentRide, setCurrentRide] = useState<RideRequest | null>(null);
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
