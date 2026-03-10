@@ -174,14 +174,14 @@ const DMNLiveMonitor: React.FC = () => {
 
   // ── Fetch initial riders ────────────────────────────────────────
   const fetchRiders = useCallback(async () => {
-    const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const cutoff = new Date(Date.now() - ACTIVE_THRESHOLD_S * 1000).toISOString();
     const { data: locs } = await supabase
       .from('rider_locations')
       .select('user_id, lat, lng, last_seen_at, is_online')
-      .eq('is_online', true)
       .gte('last_seen_at', cutoff);
 
-    if (!locs) return;
+    if (!locs) { setRiders([]); return; }
+    setLastDbUpdate(new Date().toLocaleTimeString());
     const enriched: OnlineRider[] = await Promise.all(
       locs.map(async l => ({
         user_id: l.user_id,
