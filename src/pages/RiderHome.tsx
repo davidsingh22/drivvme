@@ -171,23 +171,6 @@ const RiderHome = () => {
           <span className="relative z-10">Book a Ride</span>
         </motion.button>
 
-        {/* Sub-links */}
-        <div className="flex gap-6 text-white/60 text-sm">
-          <button
-            onClick={() => navigate('/history')}
-            className="hover:text-white transition-colors"
-          >
-            Past Rides
-          </button>
-          <span className="text-white/20">|</span>
-          <button
-            onClick={() => navigate('/login')}
-            className="hover:text-white transition-colors"
-          >
-            Sign Out
-          </button>
-        </div>
-
         {/* Admin shortcut — only visible to admin users */}
         {isAdmin && (
           <motion.button
@@ -207,6 +190,23 @@ const RiderHome = () => {
             Admin Dashboard
           </motion.button>
         )}
+
+        {/* Sub-links */}
+        <div className="flex gap-6 text-white/60 text-sm">
+          <button
+            onClick={() => navigate('/history')}
+            className="hover:text-white transition-colors"
+          >
+            Past Rides
+          </button>
+          <span className="text-white/20">|</span>
+          <button
+            onClick={() => navigate('/login')}
+            className="hover:text-white transition-colors"
+          >
+            Sign Out
+          </button>
+        </div>
       </motion.div>
     </div>
   );
