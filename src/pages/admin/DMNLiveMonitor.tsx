@@ -266,35 +266,21 @@ const DMNLiveMonitor: React.FC = () => {
       'postgres_changes',
       { event: '*', schema: 'public', table: 'rider_locations' },
       async (payload) => {
-        const row = (payload.new as any);
-        if (!row?.user_id) return;
+        appendRawMessage('rider_locations', payload, payload.eventType);
         setLastDbUpdate(new Date().toLocaleTimeString());
-        const lastSeen = row.last_seen_at ?? new Date().toISOString();
-        const active = isActive(lastSeen);
-        const name = await resolveName(row.user_id);
 
-        // Only care about timestamp — if seen within threshold, they're online
-        if (active) {
-          setRiders(prev => {
-            const exists = prev.find(r => r.user_id === row.user_id);
-            if (exists) {
-              return prev.map(r => r.user_id === row.user_id
-                ? { ...r, lat: row.lat, lng: row.lng, last_seen_at: lastSeen, is_active: true, name }
-                : r
-              );
-            }
-            // New rider appeared — toast + ping
-            playPing();
-            toast({ title: '🟢 New Rider Online', description: name });
-            recordOpen();
-            pushFeed('rider', <Eye className="w-3.5 h-3.5" />, `${name} opened the app`, gpsLabel(row.lat, row.lng));
-            return [{ user_id: row.user_id, name, lat: row.lat, lng: row.lng, last_seen_at: lastSeen, is_active: true }, ...prev];
-          });
+        const row = ((payload.new as any) ?? (payload.old as any));
+        if (row?.user_id) {
+          const name = await resolveName(row.user_id);
+          pushFeed('rider', <Eye className="w-3.5 h-3.5" />, `${name} heartbeat received`, gpsLabel(row.lat, row.lng));
         }
+
+        // Force immediate refresh from DB snapshot
+        await fetchRiders();
       }
     ).subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [isAdmin, resolveName, toast, pushFeed, recordOpen]);
+  }, [isAdmin, resolveName, pushFeed, fetchRiders, appendRawMessage]);
 
   // ── Realtime: driver_profiles (online/offline) ──────────────────
   useEffect(() => {
