@@ -34,6 +34,7 @@ const AdminDriverDocumentDetail = lazy(() => import("./pages/AdminDriverDocument
 const LiveDriversMap = lazy(() => import("@/pages/admin/LiveDriversMap"));
 const LiveRidersMap = lazy(() => import("@/pages/admin/LiveRidersMap"));
 const MSNDispatchCenter = lazy(() => import("@/pages/admin/MSNDispatchCenter"));
+const DMNLiveMonitor = lazy(() => import("@/pages/admin/DMNLiveMonitor"));
 const DriverLive = lazy(() => import("./pages/DriverLive"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Debug = lazy(() => import("./pages/Debug"));
@@ -229,6 +230,7 @@ const AppRoutes = () => {
         <Route path="/admin/drivers-live" element={<LiveDriversMap />} />
         <Route path="/admin/riders-live" element={<LiveRidersMap />} />
         <Route path="/admin/msn" element={<MSNDispatchCenter />} />
+        <Route path="/admin/live" element={<DMNLiveMonitor />} />
         <Route path="/admin/driver-documents" element={<AdminDriverDocuments />} />
         <Route path="/admin/driver-documents/:driverId" element={<AdminDriverDocumentDetail />} />
         <Route path="/driver-live" element={<DriverLive />} />

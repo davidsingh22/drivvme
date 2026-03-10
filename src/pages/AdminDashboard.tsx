@@ -883,6 +883,10 @@ const AdminDashboard = () => {
               <RefreshCw className="w-4 h-4" />
               Issue Refund
             </Button>
+            <Button onClick={() => navigate('/admin/live')} className="gap-2 bg-primary hover:bg-primary/80">
+              <Radio className="w-4 h-4" />
+              DMN Live
+            </Button>
           </div>
         </div>
 
