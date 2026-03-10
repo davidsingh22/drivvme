@@ -131,7 +131,7 @@ interface Stats {
 }
 
 const AdminDashboard = () => {
-  const { user, isLoading: authLoading, roles } = useAuth();
+  const { user, isLoading: authLoading, isAdmin } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   
