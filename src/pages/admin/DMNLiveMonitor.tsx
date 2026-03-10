@@ -223,6 +223,16 @@ const DMNLiveMonitor: React.FC = () => {
     fetchDrivers();
   }, [isAdmin, fetchRiders, fetchDrivers]);
 
+  // ── Polling fallback: re-fetch riders every 15s to catch missed realtime events
+  useEffect(() => {
+    if (!isAdmin) return;
+    const iv = setInterval(() => {
+      fetchRiders();
+      fetchDrivers();
+    }, 15_000);
+    return () => clearInterval(iv);
+  }, [isAdmin, fetchRiders, fetchDrivers]);
+
   // ── Heartbeat: re-evaluate active/inactive every 20s ────────────
   useEffect(() => {
     const iv = setInterval(() => {
