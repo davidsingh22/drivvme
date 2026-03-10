@@ -131,7 +131,7 @@ interface Stats {
 }
 
 const AdminDashboard = () => {
-  const { user, isLoading: authLoading, roles } = useAuth();
+  const { user, isLoading: authLoading, isAdmin } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   
@@ -200,7 +200,7 @@ const AdminDashboard = () => {
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [isAssigningDriver, setIsAssigningDriver] = useState(false);
 
-  const isAdmin = roles.includes('admin' as any);
+  
 
   useEffect(() => {
     if (!authLoading && !user) {
