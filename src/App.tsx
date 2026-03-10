@@ -34,6 +34,7 @@ const AdminDriverDocumentDetail = lazy(() => import("./pages/AdminDriverDocument
 const LiveDriversMap = lazy(() => import("@/pages/admin/LiveDriversMap"));
 const LiveRidersMap = lazy(() => import("@/pages/admin/LiveRidersMap"));
 const MSNDispatchCenter = lazy(() => import("@/pages/admin/MSNDispatchCenter"));
+const DMNLiveMonitor = lazy(() => import("@/pages/admin/DMNLiveMonitor"));
 const DriverLive = lazy(() => import("./pages/DriverLive"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Debug = lazy(() => import("./pages/Debug"));
