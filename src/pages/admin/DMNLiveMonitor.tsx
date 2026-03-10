@@ -251,6 +251,7 @@ const DMNLiveMonitor: React.FC = () => {
       async (payload) => {
         const row = (payload.new as any);
         if (!row?.user_id) return;
+        setLastDbUpdate(new Date().toLocaleTimeString());
         const name = await resolveName(row.user_id);
         const active = isActive(row.last_seen_at ?? new Date().toISOString());
 
