@@ -105,11 +105,14 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     }
 
     try {
+      // Only restore rides created within the last 6 hours to avoid zombie rides
+      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from('rides')
         .select('*')
         .eq('driver_id', driverId)
         .in('status', ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'])
+        .gte('created_at', sixHoursAgo)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
