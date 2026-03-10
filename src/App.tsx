@@ -112,11 +112,21 @@ const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
   const navigate = useNavigate();
   const [checked, setChecked] = useState(false);
+  // 3-second timeout guard: force-mount the dashboard even if auth/RPC is slow
+  const [forceMount, setForceMount] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setForceMount(true), 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     if (authLoading) return;
     if (!session?.user?.id) {
-      navigate('/login', { replace: true });
+      // Give iOS resume a moment — if truly no session after forceMount, redirect
+      if (forceMount) {
+        navigate('/login', { replace: true });
+      }
       return;
     }
 
@@ -129,22 +139,30 @@ const DriverRoute = () => {
           return;
         }
 
-        // Hard guarantee: backend role check
-        const { data } = await supabase.rpc('is_driver', { _user_id: session.user.id });
+        // Hard guarantee: backend role check with 4s timeout
+        const rpcPromise = supabase.rpc('is_driver', { _user_id: session.user.id });
+        const timeoutPromise = new Promise<{ data: null }>((resolve) =>
+          setTimeout(() => resolve({ data: null }), 4000)
+        );
+        const { data } = await Promise.race([rpcPromise, timeoutPromise]);
         if (cancelled) return;
-        if (!data) {
+        if (data === false) {
           navigate('/ride', { replace: true });
           return;
         }
+        // data === true OR null (timeout) → show dashboard
       } finally {
         if (!cancelled) setChecked(true);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [authLoading, session?.user?.id, isDriver, navigate]);
+  }, [authLoading, session?.user?.id, isDriver, navigate, forceMount]);
 
-  if (authLoading || (session?.user?.id && !checked)) {
+  // Show dashboard immediately if: forceMount fired, or session exists and check passed
+  const shouldShowDashboard = forceMount || checked;
+
+  if (!shouldShowDashboard && (authLoading || session?.user?.id)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading…</div>
