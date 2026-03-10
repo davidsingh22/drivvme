@@ -412,29 +412,29 @@ serve(async (req) => {
       });
     }
 
-    // Filter drivers by proximity to pickup location
-    let nearbyDrivers = onlineDrivers;
-    
-    if (pickupLat && pickupLng) {
-      nearbyDrivers = onlineDrivers.filter(driver => {
-        // Include drivers without location data (they might have just gone online)
-        if (!driver.current_lat || !driver.current_lng) {
-          return true;
+    // === SEQUENTIAL DISPATCH: Only notify the SINGLE closest driver ===
+    // Sort all online drivers by distance and pick only the closest one.
+    // The escalation function (notify-drivers-tiered) handles subsequent drivers.
+
+    let driversWithDistance = onlineDrivers
+      .map(driver => {
+        if (!pickupLat || !pickupLng || !driver.current_lat || !driver.current_lng) {
+          return { ...driver, distance_km: Infinity };
         }
-        
         const distance = calculateDistanceKm(
-          pickupLat, 
-          pickupLng, 
-          driver.current_lat, 
-          driver.current_lng
+          pickupLat, pickupLng,
+          driver.current_lat, driver.current_lng
         );
-        
         console.log(`Driver ${driver.user_id} is ${distance.toFixed(2)}km from pickup`);
-        return distance <= maxDistanceKm;
-      });
-      
-      console.log(`Filtered to ${nearbyDrivers.length} nearby drivers within ${maxDistanceKm}km`);
-    }
+        return { ...driver, distance_km: distance };
+      })
+      .filter(d => d.distance_km <= maxDistanceKm)
+      .sort((a, b) => a.distance_km - b.distance_km);
+
+    // Pick ONLY the single closest driver
+    const nearbyDrivers = driversWithDistance.slice(0, 1);
+
+    console.log(`Sequential dispatch: ${driversWithDistance.length} eligible, picked closest: ${nearbyDrivers.length > 0 ? nearbyDrivers[0].user_id : 'none'}`);
 
     if (nearbyDrivers.length === 0) {
       return new Response(JSON.stringify({ 
@@ -446,6 +446,16 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    // Update ride with the notified driver so escalation can exclude them
+    await supabase
+      .from("rides")
+      .update({
+        notification_tier: 1,
+        last_notification_at: new Date().toISOString(),
+        notified_driver_ids: nearbyDrivers.map(d => d.user_id),
+      })
+      .eq("id", rideId);
 
     const driverUserIds = nearbyDrivers.map(d => d.user_id);
 
