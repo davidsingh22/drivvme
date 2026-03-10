@@ -174,14 +174,14 @@ const DMNLiveMonitor: React.FC = () => {
 
   // ── Fetch initial riders ────────────────────────────────────────
   const fetchRiders = useCallback(async () => {
-    const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const cutoff = new Date(Date.now() - ACTIVE_THRESHOLD_S * 1000).toISOString();
     const { data: locs } = await supabase
       .from('rider_locations')
       .select('user_id, lat, lng, last_seen_at, is_online')
-      .eq('is_online', true)
       .gte('last_seen_at', cutoff);
 
-    if (!locs) return;
+    if (!locs) { setRiders([]); return; }
+    setLastDbUpdate(new Date().toLocaleTimeString());
     const enriched: OnlineRider[] = await Promise.all(
       locs.map(async l => ({
         user_id: l.user_id,
@@ -252,31 +252,27 @@ const DMNLiveMonitor: React.FC = () => {
         const row = (payload.new as any);
         if (!row?.user_id) return;
         setLastDbUpdate(new Date().toLocaleTimeString());
+        const lastSeen = row.last_seen_at ?? new Date().toISOString();
+        const active = isActive(lastSeen);
         const name = await resolveName(row.user_id);
-        const active = isActive(row.last_seen_at ?? new Date().toISOString());
 
-        setRiders(prev => {
-          const exists = prev.find(r => r.user_id === row.user_id);
-          if (exists) {
-            return prev.map(r => r.user_id === row.user_id
-              ? { ...r, lat: row.lat, lng: row.lng, last_seen_at: row.last_seen_at ?? r.last_seen_at, is_active: active, name }
-              : r
-            );
-          }
-          if (row.is_online) {
+        // Only care about timestamp — if seen within threshold, they're online
+        if (active) {
+          setRiders(prev => {
+            const exists = prev.find(r => r.user_id === row.user_id);
+            if (exists) {
+              return prev.map(r => r.user_id === row.user_id
+                ? { ...r, lat: row.lat, lng: row.lng, last_seen_at: lastSeen, is_active: true, name }
+                : r
+              );
+            }
             // New rider appeared — toast + ping
             playPing();
             toast({ title: '🟢 New Rider Online', description: name });
             recordOpen();
             pushFeed('rider', <Eye className="w-3.5 h-3.5" />, `${name} opened the app`, gpsLabel(row.lat, row.lng));
-            return [{ user_id: row.user_id, name, lat: row.lat, lng: row.lng, last_seen_at: row.last_seen_at ?? new Date().toISOString(), is_active: active }, ...prev];
-          }
-          return prev;
-        });
-
-        // Remove if went offline
-        if (row.is_online === false) {
-          setRiders(prev => prev.filter(r => r.user_id !== row.user_id));
+            return [{ user_id: row.user_id, name, lat: row.lat, lng: row.lng, last_seen_at: lastSeen, is_active: true }, ...prev];
+          });
         }
       }
     ).subscribe();
