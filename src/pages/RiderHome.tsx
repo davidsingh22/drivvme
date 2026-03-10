@@ -52,14 +52,37 @@ const RiderHome = () => {
 
     const pingRiderLocation = async () => {
       try {
-        await supabase.from('rider_locations').upsert({
-          user_id: user.id,
-          is_online: true,
-          last_seen_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          lat: 45.5017,
-          lng: -73.5673,
-        }, { onConflict: 'user_id', ignoreDuplicates: false });
+        // Try to use cached GPS coords
+        const cached = localStorage.getItem('drivveme_gps_warm');
+        const gps = cached ? JSON.parse(cached) : null;
+        const lat = gps?.lat ?? 45.5017;
+        const lng = gps?.lng ?? -73.5673;
+
+        // First check if row exists to avoid overwriting real coords with defaults
+        const { data: existing } = await supabase
+          .from('rider_locations')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (existing) {
+          // Row exists — only bump timestamps + online flag
+          await supabase.from('rider_locations').update({
+            is_online: true,
+            last_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }).eq('user_id', user.id);
+        } else {
+          // No row — insert with best available coords
+          await supabase.from('rider_locations').insert({
+            user_id: user.id,
+            is_online: true,
+            last_seen_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            lat,
+            lng,
+          });
+        }
       } catch { /* silent */ }
     };
 
