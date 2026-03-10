@@ -1,0 +1,1 @@
+UPDATE rides SET status = 'cancelled', cancelled_at = now(), cancel_reason = 'Auto-cancelled: stale searching ride' WHERE id = '53b9eac2-0e93-4c97-adad-2acada9c7400' AND status = 'searching';
