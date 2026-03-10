@@ -4,13 +4,14 @@ import { Car, Shield } from 'lucide-react';
 import { useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
+import { supabase } from '@/integrations/supabase/client';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 const RiderHome = () => {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const gpsStarted = useRef(false);
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
