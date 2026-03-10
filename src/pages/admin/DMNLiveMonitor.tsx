@@ -379,29 +379,54 @@ const DMNLiveMonitor: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [isAdmin, resolveName, pushFeed]);
 
+  // ── Derived feeds ────────────────────────────────────────────────
+  const riderFeed = feed.filter(e => e.role === 'rider');
+  const driverFeed = feed.filter(e => e.role === 'driver');
+
   // ── Render ──────────────────────────────────────────────────────
   if (!isAdmin) return null;
 
+  const now = new Date().toLocaleTimeString();
+
   return (
-    <div className="min-h-screen bg-[hsl(240,10%,6%)] text-foreground">
+    <div className="min-h-screen bg-[hsl(240,10%,4%)] text-foreground relative overflow-hidden">
+      {/* Animated background orbs */}
+      <div className="pointer-events-none fixed inset-0 z-0">
+        <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] rounded-full bg-[hsl(210,100%,50%)]/[0.04] blur-[120px] animate-pulse" />
+        <div className="absolute bottom-[-15%] right-[-10%] w-[500px] h-[500px] rounded-full bg-primary/[0.05] blur-[100px] animate-pulse" style={{ animationDelay: '1.5s' }} />
+        <div className="absolute top-[40%] right-[20%] w-[300px] h-[300px] rounded-full bg-green-500/[0.03] blur-[80px] animate-pulse" style={{ animationDelay: '3s' }} />
+      </div>
+
       {/* Header */}
-      <div className="sticky top-0 z-40 border-b border-white/5 bg-[hsl(240,10%,6%)]/90 backdrop-blur-xl">
+      <div className="sticky top-0 z-40 border-b border-white/[0.06] bg-[hsl(240,10%,4%)]/80 backdrop-blur-2xl">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="icon" onClick={() => navigate('/admin')} className="text-white/60 hover:text-white">
+            <Button variant="ghost" size="icon" onClick={() => navigate('/admin')} className="text-white/60 hover:text-white hover:bg-white/5">
               <ArrowLeft className="w-5 h-5" />
             </Button>
-            <div className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-primary animate-pulse" />
-              <h1 className="text-lg font-bold tracking-tight text-white">DMN Live Monitor</h1>
+            <div className="flex items-center gap-2.5">
+              <div className="relative">
+                <Zap className="w-5 h-5 text-primary" />
+                <div className="absolute inset-0 w-5 h-5 text-primary blur-md animate-pulse"><Zap className="w-5 h-5" /></div>
+              </div>
+              <h1 className="text-lg font-bold tracking-tight text-white font-display">DMN Live Monitor</h1>
             </div>
-            <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs animate-pulse">● LIVE</Badge>
+            <div className="relative">
+              <Badge className="bg-green-500/20 text-green-400 border-green-500/30 text-xs">● LIVE</Badge>
+              <div className="absolute inset-0 bg-green-400/20 rounded-full blur-md animate-pulse" />
+            </div>
           </div>
-          <span className="text-xs text-white/30 font-mono">{new Date().toLocaleTimeString()}</span>
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-1.5 text-xs text-white/20 font-mono">
+              <Activity className="w-3 h-3 animate-pulse text-green-400" />
+              <span>Realtime</span>
+            </div>
+            <span className="text-xs text-white/30 font-mono tabular-nums">{now}</span>
+          </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-4 space-y-4">
+      <div className="max-w-7xl mx-auto px-4 py-5 space-y-5 relative z-10">
         {/* ── Stats Bar ──────────────────────────────────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard label="Riders Online" value={riders.length} color="azure" icon={<Users className="w-4 h-4" />} />
@@ -413,29 +438,34 @@ const DMNLiveMonitor: React.FC = () => {
         {/* ── Two-Column Live Pulse ─────────────────────────────── */}
         <div className="grid md:grid-cols-2 gap-4">
           {/* Riders */}
-          <Card className="bg-white/[0.03] border-[hsl(210,100%,55%)]/20 backdrop-blur-md">
+          <Card className="bg-white/[0.02] border-[hsl(210,100%,55%)]/15 backdrop-blur-xl shadow-[0_0_40px_-12px_hsl(210,100%,50%,0.15)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold flex items-center gap-2 text-[hsl(210,100%,65%)]">
-                <Users className="w-4 h-4" />
+                <div className="p-1 rounded bg-[hsl(210,100%,55%)]/10"><Users className="w-3.5 h-3.5" /></div>
                 ONLINE RIDERS
-                <Badge variant="outline" className="ml-auto text-xs border-[hsl(210,100%,55%)]/30 text-[hsl(210,100%,65%)]">{riders.length}</Badge>
+                <Badge variant="outline" className="ml-auto text-xs border-[hsl(210,100%,55%)]/30 text-[hsl(210,100%,65%)] tabular-nums">{riders.length}</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <ScrollArea className="h-[200px]">
-                {riders.length === 0 && <p className="text-center text-xs text-white/30 py-8">No riders online</p>}
+              <ScrollArea className="h-[180px]">
+                {riders.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-10 text-white/20">
+                    <WifiOff className="w-6 h-6 mb-2 opacity-40" />
+                    <p className="text-xs">No riders online</p>
+                  </div>
+                )}
                 {riders.map(r => (
-                  <div key={r.user_id} className="flex items-center justify-between px-4 py-2 border-b border-white/5 hover:bg-white/[0.02]">
+                  <div key={r.user_id} className="flex items-center justify-between px-4 py-2 border-b border-white/[0.04] hover:bg-[hsl(210,100%,55%)]/[0.03] transition-colors">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.is_active ? 'bg-green-400 animate-pulse' : 'bg-yellow-500'}`} />
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.is_active ? 'bg-green-400 shadow-[0_0_6px_hsl(142,70%,50%,0.6)]' : 'bg-yellow-500/70'}`} />
                       <span className="text-sm text-white/90 truncate">{r.name}</span>
                       {r.lat && r.lng && (
-                        <span className="text-[10px] text-white/25 font-mono hidden md:inline">{gpsLabel(r.lat, r.lng)}</span>
+                        <span className="text-[10px] text-white/20 font-mono hidden md:inline">{gpsLabel(r.lat, r.lng)}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {!r.is_active && <Badge variant="outline" className="text-[10px] border-yellow-600/40 text-yellow-500">Inactive</Badge>}
-                      <span className="text-[10px] text-white/30">{ago(r.last_seen_at)}</span>
+                      {!r.is_active && <Badge variant="outline" className="text-[9px] border-yellow-600/30 text-yellow-500/80">IDLE</Badge>}
+                      <span className="text-[10px] text-white/25 tabular-nums">{ago(r.last_seen_at)}</span>
                     </div>
                   </div>
                 ))}
@@ -444,27 +474,32 @@ const DMNLiveMonitor: React.FC = () => {
           </Card>
 
           {/* Drivers */}
-          <Card className="bg-white/[0.03] border-primary/20 backdrop-blur-md">
+          <Card className="bg-white/[0.02] border-primary/15 backdrop-blur-xl shadow-[0_0_40px_-12px_hsl(var(--primary),0.15)]">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold flex items-center gap-2 text-primary">
-                <Car className="w-4 h-4" />
+                <div className="p-1 rounded bg-primary/10"><Car className="w-3.5 h-3.5" /></div>
                 ONLINE DRIVERS
-                <Badge variant="outline" className="ml-auto text-xs border-primary/30 text-primary">{drivers.length}</Badge>
+                <Badge variant="outline" className="ml-auto text-xs border-primary/30 text-primary tabular-nums">{drivers.length}</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <ScrollArea className="h-[200px]">
-                {drivers.length === 0 && <p className="text-center text-xs text-white/30 py-8">No drivers online</p>}
+              <ScrollArea className="h-[180px]">
+                {drivers.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-10 text-white/20">
+                    <WifiOff className="w-6 h-6 mb-2 opacity-40" />
+                    <p className="text-xs">No drivers online</p>
+                  </div>
+                )}
                 {drivers.map(d => (
-                  <div key={d.user_id} className="flex items-center justify-between px-4 py-2 border-b border-white/5 hover:bg-white/[0.02]">
+                  <div key={d.user_id} className="flex items-center justify-between px-4 py-2 border-b border-white/[0.04] hover:bg-primary/[0.03] transition-colors">
                     <div className="flex items-center gap-2 min-w-0">
                       <Wifi className="w-3 h-3 text-green-400 shrink-0" />
                       <span className="text-sm text-white/90 truncate">{d.name}</span>
                       {d.lat && d.lng && (
-                        <span className="text-[10px] text-white/25 font-mono hidden md:inline">{gpsLabel(d.lat, d.lng)}</span>
+                        <span className="text-[10px] text-white/20 font-mono hidden md:inline">{gpsLabel(d.lat, d.lng)}</span>
                       )}
                     </div>
-                    <span className="text-[10px] text-white/30 shrink-0">{ago(d.updated_at)}</span>
+                    <span className="text-[10px] text-white/25 shrink-0 tabular-nums">{ago(d.updated_at)}</span>
                   </div>
                 ))}
               </ScrollArea>
@@ -472,42 +507,88 @@ const DMNLiveMonitor: React.FC = () => {
           </Card>
         </div>
 
-        {/* ── Intent-Based Live Feed ───────────────────────────── */}
-        <Card className="bg-white/[0.03] border-white/10 backdrop-blur-md">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-2 text-white/80">
-              <Activity className="w-4 h-4 text-primary animate-pulse" />
-              LIVE FEED
-              <Badge variant="outline" className="ml-auto text-xs border-white/10 text-white/40">{feed.length} events</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-[340px]" ref={feedRef}>
-              {feed.length === 0 && <p className="text-center text-xs text-white/20 py-12">Waiting for events…</p>}
-              {feed.map(e => (
-                <div key={e.id} className="flex items-start gap-3 px-4 py-2.5 border-b border-white/5 hover:bg-white/[0.015]">
-                  <div className={`mt-0.5 shrink-0 ${e.role === 'rider' ? 'text-[hsl(210,100%,65%)]' : 'text-primary'}`}>
-                    {e.icon}
+        {/* ── Split Live Feeds ─────────────────────────────────── */}
+        <div className="grid md:grid-cols-2 gap-4">
+          {/* Rider Feed */}
+          <Card className="bg-white/[0.02] border-[hsl(210,100%,55%)]/10 backdrop-blur-xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-[hsl(210,100%,65%)]">
+                <div className="relative">
+                  <Activity className="w-4 h-4" />
+                  {riderFeed.length > 0 && <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-[hsl(210,100%,55%)] animate-pulse" />}
+                </div>
+                RIDER FEED
+                <Badge variant="outline" className="ml-auto text-[10px] border-[hsl(210,100%,55%)]/20 text-[hsl(210,100%,55%)]/60 tabular-nums">{riderFeed.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-[300px]" ref={feedRef}>
+                {riderFeed.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-16 text-white/15">
+                    <Clock className="w-5 h-5 mb-2 animate-pulse opacity-30" />
+                    <p className="text-xs">Waiting for rider events…</p>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm text-white/85 leading-snug">{e.message}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[10px] text-white/25">{e.ts.toLocaleTimeString()}</span>
-                      {e.gps && (
-                        <span className="text-[10px] text-white/20 font-mono flex items-center gap-0.5">
-                          <MapPin className="w-2.5 h-2.5" /> {e.gps}
-                        </span>
-                      )}
+                )}
+                {riderFeed.map(e => (
+                  <div key={e.id} className="flex items-start gap-3 px-4 py-2.5 border-b border-white/[0.03] hover:bg-[hsl(210,100%,55%)]/[0.02] transition-colors">
+                    <div className="mt-0.5 shrink-0 text-[hsl(210,100%,65%)]">{e.icon}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-white/80 leading-snug">{e.message}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-white/20 tabular-nums">{e.ts.toLocaleTimeString()}</span>
+                        {e.gps && (
+                          <span className="text-[10px] text-white/15 font-mono flex items-center gap-0.5">
+                            <MapPin className="w-2.5 h-2.5" /> {e.gps}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <Badge variant="outline" className={`text-[9px] shrink-0 ${e.role === 'rider' ? 'border-[hsl(210,100%,55%)]/30 text-[hsl(210,100%,60%)]' : 'border-primary/30 text-primary'}`}>
-                    {e.role === 'rider' ? 'RIDER' : 'DRIVER'}
-                  </Badge>
+                ))}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+
+          {/* Driver Feed */}
+          <Card className="bg-white/[0.02] border-primary/10 backdrop-blur-xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2 text-primary">
+                <div className="relative">
+                  <Activity className="w-4 h-4" />
+                  {driverFeed.length > 0 && <div className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />}
                 </div>
-              ))}
-            </ScrollArea>
-          </CardContent>
-        </Card>
+                DRIVER FEED
+                <Badge variant="outline" className="ml-auto text-[10px] border-primary/20 text-primary/60 tabular-nums">{driverFeed.length}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-[300px]">
+                {driverFeed.length === 0 && (
+                  <div className="flex flex-col items-center justify-center py-16 text-white/15">
+                    <Clock className="w-5 h-5 mb-2 animate-pulse opacity-30" />
+                    <p className="text-xs">Waiting for driver events…</p>
+                  </div>
+                )}
+                {driverFeed.map(e => (
+                  <div key={e.id} className="flex items-start gap-3 px-4 py-2.5 border-b border-white/[0.03] hover:bg-primary/[0.02] transition-colors">
+                    <div className="mt-0.5 shrink-0 text-primary">{e.icon}</div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-white/80 leading-snug">{e.message}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-white/20 tabular-nums">{e.ts.toLocaleTimeString()}</span>
+                        {e.gps && (
+                          <span className="text-[10px] text-white/15 font-mono flex items-center gap-0.5">
+                            <MapPin className="w-2.5 h-2.5" /> {e.gps}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
@@ -515,16 +596,21 @@ const DMNLiveMonitor: React.FC = () => {
 
 // ── Stat Card ──────────────────────────────────────────────────────
 function StatCard({ label, value, color, icon }: { label: string; value: number; color: 'azure' | 'purple'; icon: React.ReactNode }) {
-  const border = color === 'azure' ? 'border-[hsl(210,100%,55%)]/20' : 'border-primary/20';
-  const text = color === 'azure' ? 'text-[hsl(210,100%,65%)]' : 'text-primary';
+  const isAzure = color === 'azure';
+  const border = isAzure ? 'border-[hsl(210,100%,55%)]/15' : 'border-primary/15';
+  const text = isAzure ? 'text-[hsl(210,100%,65%)]' : 'text-primary';
+  const glow = isAzure ? 'shadow-[0_0_30px_-8px_hsl(210,100%,50%,0.2)]' : 'shadow-[0_0_30px_-8px_hsl(var(--primary),0.2)]';
+  const bg = isAzure ? 'bg-[hsl(210,100%,55%)]/5' : 'bg-primary/5';
   return (
-    <Card className={`bg-white/[0.03] ${border} backdrop-blur-md`}>
+    <Card className={`bg-white/[0.02] ${border} backdrop-blur-xl ${glow} hover:bg-white/[0.04] transition-all duration-300`}>
       <CardHeader className="pb-1 pt-3 px-4">
-        <p className="text-[10px] uppercase tracking-widest text-white/30">{label}</p>
+        <p className="text-[10px] uppercase tracking-[0.15em] text-white/25 font-medium">{label}</p>
       </CardHeader>
       <CardContent className="px-4 pb-3 flex items-end justify-between">
-        <span className={`text-2xl font-bold ${text}`}>{value}</span>
-        <span className={`${text} opacity-60`}>{icon}</span>
+        <span className={`text-3xl font-bold ${text} tabular-nums`}>{value}</span>
+        <div className={`p-1.5 rounded-md ${bg}`}>
+          <span className={`${text} opacity-70`}>{icon}</span>
+        </div>
       </CardContent>
     </Card>
   );
