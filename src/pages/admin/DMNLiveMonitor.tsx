@@ -468,14 +468,13 @@ const DMNLiveMonitor: React.FC = () => {
                 {riders.map(r => (
                   <div key={r.user_id} className="flex items-center justify-between px-4 py-2 border-b border-white/[0.04] hover:bg-[hsl(210,100%,55%)]/[0.03] transition-colors">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.is_active ? 'bg-green-400 shadow-[0_0_6px_hsl(142,70%,50%,0.6)]' : 'bg-yellow-500/70'}`} />
+                      <span className="w-2 h-2 rounded-full shrink-0 bg-green-400 shadow-[0_0_6px_hsl(142,70%,50%,0.6)]" />
                       <span className="text-sm text-white/90 truncate">{r.name}</span>
                       {r.lat && r.lng && (
                         <span className="text-[10px] text-white/20 font-mono hidden md:inline">{gpsLabel(r.lat, r.lng)}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {!r.is_active && <Badge variant="outline" className="text-[9px] border-yellow-600/30 text-yellow-500/80">IDLE</Badge>}
                       <span className="text-[10px] text-white/25 tabular-nums">{ago(r.last_seen_at)}</span>
                     </div>
                   </div>
