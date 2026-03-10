@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react
 import { withTimeout } from '@/lib/withTimeout';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -132,6 +132,7 @@ const RideBooking = () => {
     roles,
     isRider,
     isDriver,
+    isAdmin,
     isLoading: authLoading,
     signOut
   } = useAuth();
@@ -1984,6 +1985,18 @@ const RideBooking = () => {
                         {unreadSupportMessages}
                       </span>}
                   </button>
+                  {isAdmin && <>
+                    <div className="h-px bg-white/10" />
+                    <button onClick={() => navigate('/admin')} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                      <Shield className="h-5 w-5 text-primary" />
+                      <span className="text-white font-medium">Admin Dashboard</span>
+                    </button>
+                    <div className="h-px bg-white/10" />
+                    <button onClick={() => navigate('/admin/msn')} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                      <Shield className="h-5 w-5 text-accent" />
+                      <span className="text-white font-medium">MSN Command Center</span>
+                    </button>
+                  </>}
                   <div className="h-px bg-white/10" />
                   <button onClick={async () => {
                   await signOut();
