@@ -175,28 +175,41 @@ const DMNLiveMonitor: React.FC = () => {
     return () => clearInterval(iv);
   }, []);
 
-  // ── Fetch initial riders ────────────────────────────────────────
+  // ── Fetch riders (last 2 minutes only) ──────────────────────────
   const fetchRiders = useCallback(async () => {
-    const cutoff = new Date(Date.now() - ACTIVE_THRESHOLD_S * 1000).toISOString();
+    const cutoff = new Date(Date.now() - RIDER_WINDOW_S * 1000).toISOString();
     const { data: locs } = await supabase
       .from('rider_locations')
-      .select('user_id, lat, lng, last_seen_at, is_online')
-      .gte('last_seen_at', cutoff);
+      .select('user_id, lat, lng, last_seen_at')
+      .gte('last_seen_at', cutoff)
+      .order('last_seen_at', { ascending: false });
 
-    if (!locs) { setRiders([]); return; }
-    setLastDbUpdate(new Date().toLocaleTimeString());
-    const enriched: OnlineRider[] = await Promise.all(
-      locs.map(async l => ({
+    if (!locs || locs.length === 0) { setRiders([]); return; }
+
+    const userIds = Array.from(new Set(locs.map(l => l.user_id)));
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('user_id, first_name, last_name, email')
+      .in('user_id', userIds);
+
+    const profileMap = new Map((profiles ?? []).map(p => [p.user_id, p]));
+    profiles?.forEach((p) => {
+      profileCache.current.set(p.user_id, { first_name: p.first_name, last_name: p.last_name, email: p.email });
+    });
+
+    const enriched: OnlineRider[] = locs.map((l) => {
+      const profile = profileMap.get(l.user_id) ?? profileCache.current.get(l.user_id);
+      return {
         user_id: l.user_id,
-        name: await resolveName(l.user_id),
+        name: profile ? nameOf(profile) : l.user_id.slice(0, 8),
         lat: l.lat,
         lng: l.lng,
         last_seen_at: l.last_seen_at,
-        is_active: isActive(l.last_seen_at),
-      }))
-    );
+      };
+    });
+
     setRiders(enriched);
-  }, [resolveName]);
+  }, []);
 
   // ── Fetch initial drivers ───────────────────────────────────────
   const fetchDrivers = useCallback(async () => {
