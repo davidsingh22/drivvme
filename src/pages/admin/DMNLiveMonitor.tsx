@@ -58,7 +58,7 @@ interface Stats5m {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-const ACTIVE_THRESHOLD_S = 60;
+const RIDER_WINDOW_S = 120;
 
 function ago(dateStr: string): string {
   const s = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -66,10 +66,6 @@ function ago(dateStr: string): string {
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   return `${Math.floor(s / 3600)}h ago`;
-}
-
-function isActive(lastSeen: string): boolean {
-  return (Date.now() - new Date(lastSeen).getTime()) / 1000 < ACTIVE_THRESHOLD_S;
 }
 
 function nameOf(p: { first_name?: string | null; last_name?: string | null; email?: string | null }): string {
