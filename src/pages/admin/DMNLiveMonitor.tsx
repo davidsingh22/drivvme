@@ -109,6 +109,7 @@ const DMNLiveMonitor: React.FC = () => {
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [stats, setStats] = useState<Stats5m>({ totalOpens: 0, confirmedRides: 0 });
   const [lastDbUpdate, setLastDbUpdate] = useState<string | null>(null);
+  const [rawMessages, setRawMessages] = useState<Array<{ type: string; event: string; at: string; payload: unknown }>>([]);
 
   const feedRef = useRef<HTMLDivElement>(null);
   const profileCache = useRef<Map<string, { first_name: string | null; last_name: string | null; email: string | null }>>(new Map());
