@@ -63,11 +63,14 @@ export function useActiveRide(userId: string | undefined) {
         }
 
         // Always fetch fresh from DB to ensure accuracy
+        // Only restore rides created within the last 2 hours to avoid zombie rides
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
         const { data: rides, error } = await supabase
           .from('rides')
           .select('*')
           .eq('rider_id', userId)
           .not('status', 'in', '("completed","cancelled")')
+          .gte('created_at', twoHoursAgo)
           .order('created_at', { ascending: false })
           .limit(1);
 
