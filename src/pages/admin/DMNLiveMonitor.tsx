@@ -269,18 +269,36 @@ const DMNLiveMonitor: React.FC = () => {
         appendRawMessage('rider_locations', payload, payload.eventType);
         setLastDbUpdate(new Date().toLocaleTimeString());
 
-        const row = ((payload.new as any) ?? (payload.old as any));
-        if (row?.user_id) {
-          const name = await resolveName(row.user_id);
-          pushFeed('rider', <Eye className="w-3.5 h-3.5" />, `${name} heartbeat received`, gpsLabel(row.lat, row.lng));
-        }
+        const row = (payload.new as any);
+        if (!row?.user_id) return;
 
-        // Force immediate refresh from DB snapshot
-        await fetchRiders();
+        // Immediately update riders state from the payload (no re-query needed)
+        const userId = row.user_id as string;
+        const name = await resolveName(userId);
+
+        setRiders(prev => {
+          const existing = prev.findIndex(r => r.user_id === userId);
+          const entry: OnlineRider = {
+            user_id: userId,
+            name,
+            lat: row.lat ?? null,
+            lng: row.lng ?? null,
+            last_seen_at: row.last_seen_at ?? new Date().toISOString(),
+          };
+          if (existing >= 0) {
+            const copy = [...prev];
+            copy[existing] = entry;
+            return copy;
+          }
+          return [entry, ...prev];
+        });
+
+        // Push to Azure feed
+        pushFeed('rider', <Navigation className="w-3.5 h-3.5" />, `Rider ${name} updated location`, gpsLabel(row.lat, row.lng));
       }
     ).subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [isAdmin, resolveName, pushFeed, fetchRiders, appendRawMessage]);
+  }, [isAdmin, resolveName, pushFeed, appendRawMessage]);
 
   // ── Realtime: driver_profiles (online/offline) ──────────────────
   useEffect(() => {
