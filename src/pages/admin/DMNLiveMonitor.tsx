@@ -32,7 +32,6 @@ interface OnlineRider {
   lat: number | null;
   lng: number | null;
   last_seen_at: string;
-  is_active: boolean; // heartbeat within 60s
 }
 
 interface OnlineDriver {
