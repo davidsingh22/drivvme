@@ -228,6 +228,7 @@ const AppRoutes = () => {
         <Route path="/admin/ride-locations" element={<AdminRideLocations />} />
         <Route path="/admin/drivers-live" element={<LiveDriversMap />} />
         <Route path="/admin/riders-live" element={<LiveRidersMap />} />
+        <Route path="/admin/msn" element={<MSNDispatchCenter />} />
         <Route path="/admin/driver-documents" element={<AdminDriverDocuments />} />
         <Route path="/admin/driver-documents/:driverId" element={<AdminDriverDocumentDetail />} />
         <Route path="/driver-live" element={<DriverLive />} />
