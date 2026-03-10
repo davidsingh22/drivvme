@@ -134,6 +134,13 @@ const DMNLiveMonitor: React.FC = () => {
     setFeed(prev => [{ id: nextFeedId(), ts: new Date(), role, icon, message, gps }, ...prev].slice(0, 80));
   }, []);
 
+  const appendRawMessage = useCallback((type: string, payload: unknown, event?: string) => {
+    setRawMessages(prev => [
+      ...prev,
+      { type, payload, event: event ?? 'UNKNOWN', at: new Date().toLocaleTimeString() },
+    ].slice(-3));
+  }, []);
+
   // ── Auto-scroll feed ────────────────────────────────────────────
   useEffect(() => {
     feedRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
