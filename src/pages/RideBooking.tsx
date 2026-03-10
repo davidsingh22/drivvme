@@ -1985,6 +1985,18 @@ const RideBooking = () => {
                         {unreadSupportMessages}
                       </span>}
                   </button>
+                  {isAdmin && <>
+                    <div className="h-px bg-white/10" />
+                    <button onClick={() => navigate('/admin')} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                      <Shield className="h-5 w-5 text-primary" />
+                      <span className="text-white font-medium">Admin Dashboard</span>
+                    </button>
+                    <div className="h-px bg-white/10" />
+                    <button onClick={() => navigate('/admin/msn')} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                      <Shield className="h-5 w-5 text-accent" />
+                      <span className="text-white font-medium">MSN Command Center</span>
+                    </button>
+                  </>}
                   <div className="h-px bg-white/10" />
                   <button onClick={async () => {
                   await signOut();
