@@ -1115,6 +1115,11 @@ const DriverDashboard = () => {
     try {
       const newStatus = !isOnline;
       
+      // Track manual offline so auto-online doesn't re-trigger this session
+      if (!newStatus) {
+        manuallyWentOfflineRef.current = true;
+      }
+
       const { error } = await supabase
         .from('driver_profiles')
         .update({ is_online: newStatus })
@@ -1141,6 +1146,39 @@ const DriverDashboard = () => {
       toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
     }
   };
+
+  // ── Auto-Online: automatically go online once auth + driver profile are confirmed ──
+  useEffect(() => {
+    if (autoOnlineFiredRef.current) return;
+    if (manuallyWentOfflineRef.current) return;
+    if (!user || !session || authLoading) return;
+    if (!driverProfile) return; // wait for profile to be loaded
+
+    autoOnlineFiredRef.current = true;
+
+    // Already online in DB — just sync UI
+    if (driverProfile.is_online) {
+      setIsOnline(true);
+      return;
+    }
+
+    // Go online silently
+    (async () => {
+      console.log('[DriverDashboard] Auto-Online: setting driver online');
+      const { error } = await supabase
+        .from('driver_profiles')
+        .update({ is_online: true })
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('[DriverDashboard] Auto-Online failed:', error.message);
+        return;
+      }
+
+      setIsOnline(true);
+      void refreshDriverProfile();
+    })();
+  }, [user, session, authLoading, driverProfile]);
 
   const fetchRiderInfo = useCallback(async (riderId: string) => {
     const { data } = await supabase
