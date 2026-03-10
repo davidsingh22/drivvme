@@ -250,10 +250,11 @@ const DMNLiveMonitor: React.FC = () => {
     return () => clearInterval(iv);
   }, [isAdmin, fetchRiders, fetchDrivers]);
 
-  // ── Heartbeat: re-evaluate active/inactive every 20s ────────────
+  // ── Window prune: keep only riders seen in last 2 minutes ───────
   useEffect(() => {
     const iv = setInterval(() => {
-      setRiders(prev => prev.map(r => ({ ...r, is_active: isActive(r.last_seen_at) })));
+      const cutoffMs = Date.now() - RIDER_WINDOW_S * 1000;
+      setRiders(prev => prev.filter(r => new Date(r.last_seen_at).getTime() >= cutoffMs));
     }, 20_000);
     return () => clearInterval(iv);
   }, []);
