@@ -64,6 +64,7 @@ export function useActiveRide(userId: string | undefined) {
 
         // Always fetch fresh from DB to ensure accuracy
         // Only restore rides created within the last 2 hours to avoid zombie rides
+        // For 'searching' rides (unpaid/unmatched), use a stricter 3-minute cutoff
         const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
         const { data: rides, error } = await supabase
           .from('rides')
@@ -73,6 +74,16 @@ export function useActiveRide(userId: string | undefined) {
           .gte('created_at', twoHoursAgo)
           .order('created_at', { ascending: false })
           .limit(1);
+
+        // Filter out stale searching rides (older than 3 minutes)
+        const threeMinAgo = Date.now() - 3 * 60 * 1000;
+        const freshRides = (rides || []).filter(r => {
+          if (r.status === 'searching' || r.status === 'pending_payment') {
+            const createdAt = new Date(r.created_at).getTime();
+            return createdAt > threeMinAgo;
+          }
+          return true;
+        });
 
         if (error) {
           console.error('Error fetching active ride:', error);
