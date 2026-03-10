@@ -91,7 +91,7 @@ export function useActiveRide(userId: string | undefined) {
           return;
         }
 
-        const ride = rides?.[0] || null;
+        const ride = freshRides[0] || null;
         setActiveRide(ride);
         persistRide(ride);
       } catch (error) {
