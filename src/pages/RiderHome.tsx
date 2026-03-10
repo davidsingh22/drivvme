@@ -4,14 +4,13 @@ import { Car, Shield } from 'lucide-react';
 import { useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
-import { supabase } from '@/integrations/supabase/client';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 const RiderHome = () => {
   const navigate = useNavigate();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin } = useAuth();
   const gpsStarted = useRef(false);
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
@@ -45,54 +44,6 @@ const RiderHome = () => {
       /* GPS completely unavailable — no-op */
     }
   }, []);
-
-  // ── Immediate ping + 20s heartbeat to rider_locations ──────────
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const pingRiderLocation = async () => {
-      try {
-        // Try to use cached GPS coords
-        const cached = localStorage.getItem('drivveme_gps_warm');
-        const gps = cached ? JSON.parse(cached) : null;
-        const lat = gps?.lat ?? 45.5017;
-        const lng = gps?.lng ?? -73.5673;
-
-        // First check if row exists to avoid overwriting real coords with defaults
-        const { data: existing } = await supabase
-          .from('rider_locations')
-          .select('id')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (existing) {
-          // Row exists — only bump timestamps + online flag
-          await supabase.from('rider_locations').update({
-            is_online: true,
-            last_seen_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          }).eq('user_id', user.id);
-        } else {
-          // No row — insert with best available coords
-          await supabase.from('rider_locations').insert({
-            user_id: user.id,
-            is_online: true,
-            last_seen_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            lat,
-            lng,
-          });
-        }
-      } catch { /* silent */ }
-    };
-
-    // Immediate ping on mount
-    pingRiderLocation();
-
-    // Pulse every 20s
-    const iv = setInterval(pingRiderLocation, 20_000);
-    return () => clearInterval(iv);
-  }, [user?.id]);
 
   // 'Slap-Awake' Refresh: re-warm GPS + reset Mapbox cache on every app resume
   const lastHidden = useRef(Date.now());
