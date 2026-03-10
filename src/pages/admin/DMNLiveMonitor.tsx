@@ -335,44 +335,39 @@ const DMNLiveMonitor: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [isAdmin, resolveName, pushFeed, recordOpen, recordRide]);
 
-  // ── Realtime: rides (status changes for feed) ───────────────────
+  // ── Realtime: rides (all changes -> rider feed) ─────────────────
   useEffect(() => {
     if (!isAdmin) return;
     const ch = supabase.channel('dmn-rides').on(
       'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'rides' },
+      { event: '*', schema: 'public', table: 'rides' },
       async (payload) => {
-        const nw = (payload.new as any);
-        const old = (payload.old as any);
-        if (!nw || nw.status === old?.status) return;
+        appendRawMessage('rides', payload, payload.eventType);
 
-        const riderName = nw.rider_id ? await resolveName(nw.rider_id) : 'Rider';
-        const driverName = nw.driver_id ? await resolveName(nw.driver_id) : null;
+        const nw = (payload.new as any) ?? null;
+        const old = (payload.old as any) ?? null;
+        const source = nw ?? old;
+        if (!source) return;
 
-        switch (nw.status) {
-          case 'searching':
-            pushFeed('rider', <Search className="w-3.5 h-3.5" />, `Ride Paid — Searching for Driver (${riderName})`, gpsLabel(nw.pickup_lat, nw.pickup_lng));
-            break;
-          case 'driver_assigned':
-            if (driverName) pushFeed('driver', <CheckCircle className="w-3.5 h-3.5" />, `${driverName} accepted ride from ${riderName}`);
-            pushFeed('rider', <Navigation className="w-3.5 h-3.5" />, `Driver Found for ${riderName}`);
-            break;
-          case 'completed':
-            if (driverName) pushFeed('driver', <CheckCircle className="w-3.5 h-3.5" />, `${driverName} completed ride`);
-            pushFeed('rider', <CheckCircle className="w-3.5 h-3.5" />, `Ride Completed — ${riderName}`);
-            recordRide();
-            break;
-          case 'in_progress':
-            pushFeed('rider', <Car className="w-3.5 h-3.5" />, `${riderName} ride in progress`);
-            break;
-          case 'cancelled':
-            pushFeed('rider', <Activity className="w-3.5 h-3.5" />, `Ride cancelled — ${riderName}`);
-            break;
+        const riderName = source.rider_id ? await resolveName(source.rider_id) : 'Rider';
+        const eventLabel = (payload.eventType ?? 'UPDATE').toLowerCase();
+        const statusLabel = source.status ?? 'unknown';
+        const rideShort = String(source.id ?? 'unknown').slice(0, 8);
+
+        pushFeed(
+          'rider',
+          <Activity className="w-3.5 h-3.5" />,
+          `Ride ${rideShort} ${eventLabel} • ${statusLabel} • ${riderName}`,
+          gpsLabel(source.pickup_lat ?? null, source.pickup_lng ?? null)
+        );
+
+        if (nw?.status === 'completed' && old?.status !== 'completed') {
+          recordRide();
         }
       }
     ).subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [isAdmin, resolveName, pushFeed, recordRide]);
+  }, [isAdmin, resolveName, pushFeed, recordRide, appendRawMessage]);
 
   // ── Realtime: notifications (driver ride offers) ────────────────
   useEffect(() => {
