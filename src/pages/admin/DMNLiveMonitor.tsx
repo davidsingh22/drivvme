@@ -599,6 +599,27 @@ const DMNLiveMonitor: React.FC = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* ── Raw Data Stream ───────────────────────────────────── */}
+        <Card className="bg-white/[0.02] border-white/10 backdrop-blur-xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold text-white/80">Raw Data Stream</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="rounded-md border border-white/10 bg-black/20 p-3 space-y-2 max-h-40 overflow-auto">
+              {rawMessages.length === 0 ? (
+                <p className="text-xs text-white/40">No realtime payloads captured yet.</p>
+              ) : (
+                rawMessages.map((message, idx) => (
+                  <pre key={`${message.at}-${idx}`} className="text-[10px] leading-relaxed text-white/70 whitespace-pre-wrap break-all">
+                    [{message.at}] {message.type} ({message.event}){`\n`}
+                    {JSON.stringify(message.payload, null, 2)}
+                  </pre>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
