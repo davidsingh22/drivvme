@@ -191,24 +191,6 @@ const RiderHome = () => {
           </motion.button>
         )}
 
-        {isAdmin && (
-          <motion.button
-            onClick={() => navigate('/admin/msn')}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white/90 hover:text-white transition-colors"
-            style={{
-              background: 'rgba(255,255,255,0.1)',
-              backdropFilter: 'blur(8px)',
-              border: '1px solid rgba(255,255,255,0.15)',
-            }}
-            whileTap={{ scale: 0.95 }}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-          >
-            <Shield className="h-4 w-4" />
-            MSN Command Center
-          </motion.button>
-        )}
 
         {/* Sub-links */}
         <div className="flex gap-6 text-white/60 text-sm">
