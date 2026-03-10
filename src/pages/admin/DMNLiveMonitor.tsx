@@ -441,7 +441,12 @@ const DMNLiveMonitor: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 py-5 space-y-5 relative z-10">
         {/* ── Stats Bar ──────────────────────────────────────────── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard label="Riders Online" value={riders.length} color="azure" icon={<Users className="w-4 h-4" />} />
+          <div className="relative">
+            <StatCard label="Riders Online" value={riders.length} color="azure" icon={<Users className="w-4 h-4" />} />
+            {lastDbUpdate && (
+              <span className="absolute bottom-1 right-2 text-[9px] text-white/30 font-mono">Last DB: {lastDbUpdate}</span>
+            )}
+          </div>
           <StatCard label="Drivers Online" value={drivers.length} color="purple" icon={<Car className="w-4 h-4" />} />
           <StatCard label="Opens (5m)" value={stats.totalOpens} color="azure" icon={<Eye className="w-4 h-4" />} />
           <StatCard label="Rides (5m)" value={stats.confirmedRides} color="purple" icon={<CheckCircle className="w-4 h-4" />} />

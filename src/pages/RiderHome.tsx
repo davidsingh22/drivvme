@@ -46,6 +46,31 @@ const RiderHome = () => {
     }
   }, []);
 
+  // ── Immediate ping + 20s heartbeat to rider_locations ──────────
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const pingRiderLocation = async () => {
+      try {
+        await supabase.from('rider_locations').upsert({
+          user_id: user.id,
+          is_online: true,
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          lat: 45.5017,
+          lng: -73.5673,
+        }, { onConflict: 'user_id', ignoreDuplicates: false });
+      } catch { /* silent */ }
+    };
+
+    // Immediate ping on mount
+    pingRiderLocation();
+
+    // Pulse every 20s
+    const iv = setInterval(pingRiderLocation, 20_000);
+    return () => clearInterval(iv);
+  }, [user?.id]);
+
   // 'Slap-Awake' Refresh: re-warm GPS + reset Mapbox cache on every app resume
   const lastHidden = useRef(Date.now());
 
