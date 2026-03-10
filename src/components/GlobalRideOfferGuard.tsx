@@ -228,15 +228,28 @@ export function GlobalRideOfferGuard() {
     };
 
     const fetchLatestUnreadRide = async (userId: string) => {
+      // Only consider notifications created within the last 3 minutes
+      const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
       const { data } = await supabase
         .from('notifications')
         .select('ride_id, type, is_read, created_at')
         .eq('user_id', userId)
         .eq('type', 'new_ride')
         .eq('is_read', false)
+        .gte('created_at', threeMinAgo)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
+
+      // Also mark any OLD unread new_ride notifications as read so they never resurface
+      supabase
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', userId)
+        .eq('type', 'new_ride')
+        .eq('is_read', false)
+        .lt('created_at', threeMinAgo)
+        .then(() => {});
 
       const rideId = extractRideId(data);
       if (rideId) {

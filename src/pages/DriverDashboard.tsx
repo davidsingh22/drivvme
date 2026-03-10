@@ -594,15 +594,28 @@ const DriverDashboard = () => {
         // STEP 3: Query unread notifications
         console.log(`[Recovery] (attempt ${attempt}) 🔍 Querying unread new_ride notifications for user: ${effectiveUserId}`);
 
+        // Only consider notifications from the last 3 minutes — anything older is stale
+        const threeMinAgoISO = new Date(Date.now() - 3 * 60 * 1000).toISOString();
         const { data: pending, error: notifError } = await supabase
           .from('notifications')
           .select('ride_id, created_at')
           .eq('user_id', effectiveUserId)
           .eq('type', 'new_ride')
           .eq('is_read', false)
+          .gte('created_at', threeMinAgoISO)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
+
+        // Auto-cleanup: mark any old unread new_ride notifications as read
+        supabase
+          .from('notifications')
+          .update({ is_read: true })
+          .eq('user_id', effectiveUserId)
+          .eq('type', 'new_ride')
+          .eq('is_read', false)
+          .lt('created_at', threeMinAgoISO)
+          .then(() => {});
 
         if (notifError) {
           console.warn(`[Recovery] ❌ (attempt ${attempt}) Notification query error:`, notifError.message);
