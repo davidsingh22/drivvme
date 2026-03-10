@@ -343,8 +343,8 @@ export function GlobalRideOfferGuard() {
 
         if (data) {
           const age = (Date.now() - new Date(data.requested_at || data.created_at).getTime()) / 1000;
-          if (age > 90) {
-            console.log('[GlobalGuard] ⏰ Ride too old:', Math.round(age), 's');
+          if (age > 180) {
+            console.log('[GlobalGuard] ⏰ Ride too old (>3min):', Math.round(age), 's');
             cleanup();
             return;
           }
