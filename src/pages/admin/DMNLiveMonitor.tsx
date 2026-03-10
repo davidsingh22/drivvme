@@ -32,7 +32,6 @@ interface OnlineRider {
   lat: number | null;
   lng: number | null;
   last_seen_at: string;
-  is_active: boolean; // heartbeat within 60s
 }
 
 interface OnlineDriver {
@@ -59,7 +58,7 @@ interface Stats5m {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-const ACTIVE_THRESHOLD_S = 60;
+const RIDER_WINDOW_S = 120;
 
 function ago(dateStr: string): string {
   const s = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
@@ -67,10 +66,6 @@ function ago(dateStr: string): string {
   if (s < 60) return `${s}s ago`;
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   return `${Math.floor(s / 3600)}h ago`;
-}
-
-function isActive(lastSeen: string): boolean {
-  return (Date.now() - new Date(lastSeen).getTime()) / 1000 < ACTIVE_THRESHOLD_S;
 }
 
 function nameOf(p: { first_name?: string | null; last_name?: string | null; email?: string | null }): string {
@@ -114,6 +109,7 @@ const DMNLiveMonitor: React.FC = () => {
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [stats, setStats] = useState<Stats5m>({ totalOpens: 0, confirmedRides: 0 });
   const [lastDbUpdate, setLastDbUpdate] = useState<string | null>(null);
+  const [rawMessages, setRawMessages] = useState<Array<{ type: string; event: string; at: string; payload: unknown }>>([]);
 
   const feedRef = useRef<HTMLDivElement>(null);
   const profileCache = useRef<Map<string, { first_name: string | null; last_name: string | null; email: string | null }>>(new Map());
@@ -136,6 +132,13 @@ const DMNLiveMonitor: React.FC = () => {
   // ── Push to feed (max 80 entries) ───────────────────────────────
   const pushFeed = useCallback((role: FeedEntry['role'], icon: React.ReactNode, message: string, gps?: string) => {
     setFeed(prev => [{ id: nextFeedId(), ts: new Date(), role, icon, message, gps }, ...prev].slice(0, 80));
+  }, []);
+
+  const appendRawMessage = useCallback((type: string, payload: unknown, event?: string) => {
+    setRawMessages(prev => [
+      ...prev,
+      { type, payload, event: event ?? 'UNKNOWN', at: new Date().toLocaleTimeString() },
+    ].slice(-3));
   }, []);
 
   // ── Auto-scroll feed ────────────────────────────────────────────
@@ -172,28 +175,41 @@ const DMNLiveMonitor: React.FC = () => {
     return () => clearInterval(iv);
   }, []);
 
-  // ── Fetch initial riders ────────────────────────────────────────
+  // ── Fetch riders (last 2 minutes only) ──────────────────────────
   const fetchRiders = useCallback(async () => {
-    const cutoff = new Date(Date.now() - ACTIVE_THRESHOLD_S * 1000).toISOString();
+    const cutoff = new Date(Date.now() - RIDER_WINDOW_S * 1000).toISOString();
     const { data: locs } = await supabase
       .from('rider_locations')
-      .select('user_id, lat, lng, last_seen_at, is_online')
-      .gte('last_seen_at', cutoff);
+      .select('user_id, lat, lng, last_seen_at')
+      .gte('last_seen_at', cutoff)
+      .order('last_seen_at', { ascending: false });
 
-    if (!locs) { setRiders([]); return; }
-    setLastDbUpdate(new Date().toLocaleTimeString());
-    const enriched: OnlineRider[] = await Promise.all(
-      locs.map(async l => ({
+    if (!locs || locs.length === 0) { setRiders([]); return; }
+
+    const userIds = Array.from(new Set(locs.map(l => l.user_id)));
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('user_id, first_name, last_name, email')
+      .in('user_id', userIds);
+
+    const profileMap = new Map((profiles ?? []).map(p => [p.user_id, p]));
+    profiles?.forEach((p) => {
+      profileCache.current.set(p.user_id, { first_name: p.first_name, last_name: p.last_name, email: p.email });
+    });
+
+    const enriched: OnlineRider[] = locs.map((l) => {
+      const profile = profileMap.get(l.user_id) ?? profileCache.current.get(l.user_id);
+      return {
         user_id: l.user_id,
-        name: await resolveName(l.user_id),
+        name: profile ? nameOf(profile) : l.user_id.slice(0, 8),
         lat: l.lat,
         lng: l.lng,
         last_seen_at: l.last_seen_at,
-        is_active: isActive(l.last_seen_at),
-      }))
-    );
+      };
+    });
+
     setRiders(enriched);
-  }, [resolveName]);
+  }, []);
 
   // ── Fetch initial drivers ───────────────────────────────────────
   const fetchDrivers = useCallback(async () => {
@@ -234,10 +250,11 @@ const DMNLiveMonitor: React.FC = () => {
     return () => clearInterval(iv);
   }, [isAdmin, fetchRiders, fetchDrivers]);
 
-  // ── Heartbeat: re-evaluate active/inactive every 20s ────────────
+  // ── Window prune: keep only riders seen in last 2 minutes ───────
   useEffect(() => {
     const iv = setInterval(() => {
-      setRiders(prev => prev.map(r => ({ ...r, is_active: isActive(r.last_seen_at) })));
+      const cutoffMs = Date.now() - RIDER_WINDOW_S * 1000;
+      setRiders(prev => prev.filter(r => new Date(r.last_seen_at).getTime() >= cutoffMs));
     }, 20_000);
     return () => clearInterval(iv);
   }, []);
@@ -249,35 +266,21 @@ const DMNLiveMonitor: React.FC = () => {
       'postgres_changes',
       { event: '*', schema: 'public', table: 'rider_locations' },
       async (payload) => {
-        const row = (payload.new as any);
-        if (!row?.user_id) return;
+        appendRawMessage('rider_locations', payload, payload.eventType);
         setLastDbUpdate(new Date().toLocaleTimeString());
-        const lastSeen = row.last_seen_at ?? new Date().toISOString();
-        const active = isActive(lastSeen);
-        const name = await resolveName(row.user_id);
 
-        // Only care about timestamp — if seen within threshold, they're online
-        if (active) {
-          setRiders(prev => {
-            const exists = prev.find(r => r.user_id === row.user_id);
-            if (exists) {
-              return prev.map(r => r.user_id === row.user_id
-                ? { ...r, lat: row.lat, lng: row.lng, last_seen_at: lastSeen, is_active: true, name }
-                : r
-              );
-            }
-            // New rider appeared — toast + ping
-            playPing();
-            toast({ title: '🟢 New Rider Online', description: name });
-            recordOpen();
-            pushFeed('rider', <Eye className="w-3.5 h-3.5" />, `${name} opened the app`, gpsLabel(row.lat, row.lng));
-            return [{ user_id: row.user_id, name, lat: row.lat, lng: row.lng, last_seen_at: lastSeen, is_active: true }, ...prev];
-          });
+        const row = ((payload.new as any) ?? (payload.old as any));
+        if (row?.user_id) {
+          const name = await resolveName(row.user_id);
+          pushFeed('rider', <Eye className="w-3.5 h-3.5" />, `${name} heartbeat received`, gpsLabel(row.lat, row.lng));
         }
+
+        // Force immediate refresh from DB snapshot
+        await fetchRiders();
       }
     ).subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [isAdmin, resolveName, toast, pushFeed, recordOpen]);
+  }, [isAdmin, resolveName, pushFeed, fetchRiders, appendRawMessage]);
 
   // ── Realtime: driver_profiles (online/offline) ──────────────────
   useEffect(() => {
@@ -332,44 +335,39 @@ const DMNLiveMonitor: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [isAdmin, resolveName, pushFeed, recordOpen, recordRide]);
 
-  // ── Realtime: rides (status changes for feed) ───────────────────
+  // ── Realtime: rides (all changes -> rider feed) ─────────────────
   useEffect(() => {
     if (!isAdmin) return;
     const ch = supabase.channel('dmn-rides').on(
       'postgres_changes',
-      { event: 'UPDATE', schema: 'public', table: 'rides' },
+      { event: '*', schema: 'public', table: 'rides' },
       async (payload) => {
-        const nw = (payload.new as any);
-        const old = (payload.old as any);
-        if (!nw || nw.status === old?.status) return;
+        appendRawMessage('rides', payload, payload.eventType);
 
-        const riderName = nw.rider_id ? await resolveName(nw.rider_id) : 'Rider';
-        const driverName = nw.driver_id ? await resolveName(nw.driver_id) : null;
+        const nw = (payload.new as any) ?? null;
+        const old = (payload.old as any) ?? null;
+        const source = nw ?? old;
+        if (!source) return;
 
-        switch (nw.status) {
-          case 'searching':
-            pushFeed('rider', <Search className="w-3.5 h-3.5" />, `Ride Paid — Searching for Driver (${riderName})`, gpsLabel(nw.pickup_lat, nw.pickup_lng));
-            break;
-          case 'driver_assigned':
-            if (driverName) pushFeed('driver', <CheckCircle className="w-3.5 h-3.5" />, `${driverName} accepted ride from ${riderName}`);
-            pushFeed('rider', <Navigation className="w-3.5 h-3.5" />, `Driver Found for ${riderName}`);
-            break;
-          case 'completed':
-            if (driverName) pushFeed('driver', <CheckCircle className="w-3.5 h-3.5" />, `${driverName} completed ride`);
-            pushFeed('rider', <CheckCircle className="w-3.5 h-3.5" />, `Ride Completed — ${riderName}`);
-            recordRide();
-            break;
-          case 'in_progress':
-            pushFeed('rider', <Car className="w-3.5 h-3.5" />, `${riderName} ride in progress`);
-            break;
-          case 'cancelled':
-            pushFeed('rider', <Activity className="w-3.5 h-3.5" />, `Ride cancelled — ${riderName}`);
-            break;
+        const riderName = source.rider_id ? await resolveName(source.rider_id) : 'Rider';
+        const eventLabel = (payload.eventType ?? 'UPDATE').toLowerCase();
+        const statusLabel = source.status ?? 'unknown';
+        const rideShort = String(source.id ?? 'unknown').slice(0, 8);
+
+        pushFeed(
+          'rider',
+          <Activity className="w-3.5 h-3.5" />,
+          `Ride ${rideShort} ${eventLabel} • ${statusLabel} • ${riderName}`,
+          gpsLabel(source.pickup_lat ?? null, source.pickup_lng ?? null)
+        );
+
+        if (nw?.status === 'completed' && old?.status !== 'completed') {
+          recordRide();
         }
       }
     ).subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [isAdmin, resolveName, pushFeed, recordRide]);
+  }, [isAdmin, resolveName, pushFeed, recordRide, appendRawMessage]);
 
   // ── Realtime: notifications (driver ride offers) ────────────────
   useEffect(() => {
@@ -470,14 +468,13 @@ const DMNLiveMonitor: React.FC = () => {
                 {riders.map(r => (
                   <div key={r.user_id} className="flex items-center justify-between px-4 py-2 border-b border-white/[0.04] hover:bg-[hsl(210,100%,55%)]/[0.03] transition-colors">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${r.is_active ? 'bg-green-400 shadow-[0_0_6px_hsl(142,70%,50%,0.6)]' : 'bg-yellow-500/70'}`} />
+                      <span className="w-2 h-2 rounded-full shrink-0 bg-green-400 shadow-[0_0_6px_hsl(142,70%,50%,0.6)]" />
                       <span className="text-sm text-white/90 truncate">{r.name}</span>
                       {r.lat && r.lng && (
                         <span className="text-[10px] text-white/20 font-mono hidden md:inline">{gpsLabel(r.lat, r.lng)}</span>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      {!r.is_active && <Badge variant="outline" className="text-[9px] border-yellow-600/30 text-yellow-500/80">IDLE</Badge>}
                       <span className="text-[10px] text-white/25 tabular-nums">{ago(r.last_seen_at)}</span>
                     </div>
                   </div>
@@ -602,6 +599,27 @@ const DMNLiveMonitor: React.FC = () => {
             </CardContent>
           </Card>
         </div>
+
+        {/* ── Raw Data Stream ───────────────────────────────────── */}
+        <Card className="bg-white/[0.02] border-white/10 backdrop-blur-xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold text-white/80">Raw Data Stream</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="rounded-md border border-white/10 bg-black/20 p-3 space-y-2 max-h-40 overflow-auto">
+              {rawMessages.length === 0 ? (
+                <p className="text-xs text-white/40">No realtime payloads captured yet.</p>
+              ) : (
+                rawMessages.map((message, idx) => (
+                  <pre key={`${message.at}-${idx}`} className="text-[10px] leading-relaxed text-white/70 whitespace-pre-wrap break-all">
+                    [{message.at}] {message.type} ({message.event}){`\n`}
+                    {JSON.stringify(message.payload, null, 2)}
+                  </pre>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
