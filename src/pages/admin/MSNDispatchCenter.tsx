@@ -167,18 +167,43 @@ const MSNDispatchCenter: React.FC = () => {
   );
 
   const resolveRiderProfile = useCallback(async (userId: string, bypassCache = false) => {
-    if (!bypassCache && riderCacheRef.current[userId]?.email) return riderCacheRef.current[userId];
-    const { data } = await supabase
+    const cached = riderCacheRef.current[userId];
+    if (!bypassCache && cached?.email) return cached;
+
+    let profile: { first_name: string | null; last_name: string | null; email: string | null } | null = null;
+
+    const { data: byUserId, error: byUserIdError } = await supabase
       .from("profiles")
       .select("first_name, last_name, email")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (data) {
-      riderCacheRef.current[userId] = data;
-      setRiderDisplayVersion((v) => v + 1);
-      return data;
+    if (byUserIdError) {
+      console.warn("[MSN] profile lookup by user_id failed:", byUserIdError);
+    } else if (byUserId) {
+      profile = byUserId;
     }
+
+    if (!profile) {
+      const { data: byId, error: byIdError } = await supabase
+        .from("profiles")
+        .select("first_name, last_name, email")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (byIdError) {
+        console.warn("[MSN] profile lookup by id failed:", byIdError);
+      } else if (byId) {
+        profile = byId;
+      }
+    }
+
+    if (profile) {
+      riderCacheRef.current[userId] = profile;
+      setRiderDisplayVersion((v) => v + 1);
+      return profile;
+    }
+
     return null;
   }, []);
 
@@ -200,16 +225,34 @@ const MSNDispatchCenter: React.FC = () => {
         ];
       });
 
-      void resolveRiderProfile(userId)
+      const shouldForceIdentityFetch = !riderCacheRef.current[userId]?.email;
+      void resolveRiderProfile(userId, shouldForceIdentityFetch)
         .then((profile) => {
           if (!profile) return;
-          setRiders((prev) =>
-            prev.map((r) =>
-              r.user_id === userId
-                ? { ...r, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }
-                : r
-            )
-          );
+          setRiders((prev) => {
+            const idx = prev.findIndex((r) => r.user_id === userId);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = {
+                ...next[idx],
+                first_name: profile.first_name,
+                last_name: profile.last_name,
+                email: profile.email,
+              };
+              return next;
+            }
+            return [
+              {
+                user_id: userId,
+                first_name: profile.first_name,
+                last_name: profile.last_name,
+                email: profile.email,
+                last_seen_at: heartbeat,
+                is_online: true,
+              },
+              ...prev,
+            ];
+          });
         })
         .catch(() => undefined);
     },
@@ -342,7 +385,7 @@ const MSNDispatchCenter: React.FC = () => {
 
     const ch = supabase
       .channel("msn-rider-locations")
-      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, async (payload) => {
         if (payload.eventType === "DELETE") return;
 
         const row = (payload.new as any) ?? {};
@@ -350,23 +393,58 @@ const MSNDispatchCenter: React.FC = () => {
 
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
 
-        // Always resolve profile immediately on any event (bypass cache to get email)
-        void resolveRiderProfile(row.user_id, true).then((profile) => {
-          if (!profile) return;
-          setRiders((prev) =>
-            prev.map((r) =>
-              r.user_id === row.user_id
-                ? { ...r, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }
-                : r
-            )
-          );
-        });
+        // Identity Force: if email is missing, force immediate profile fetch now.
+        const shouldForceIdentityFetch = !riderCacheRef.current[row.user_id]?.email;
+        const profile = await resolveRiderProfile(row.user_id, shouldForceIdentityFetch);
+
+        if (profile) {
+          setRiders((prev) => {
+            const idx = prev.findIndex((r) => r.user_id === row.user_id);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = {
+                ...next[idx],
+                first_name: profile.first_name,
+                last_name: profile.last_name,
+                email: profile.email,
+              };
+              return next;
+            }
+            return [
+              {
+                user_id: row.user_id,
+                first_name: profile.first_name,
+                last_name: profile.last_name,
+                email: profile.email,
+                last_seen_at: updatedLastSeen,
+                is_online: row.is_online !== false,
+              },
+              ...prev,
+            ];
+          });
+        }
 
         // If is_online is explicitly false, mark offline instantly
         if (row.is_online === false) {
-          setRiders((prev) =>
-            prev.map((r) => (r.user_id === row.user_id ? { ...r, is_online: false, last_seen_at: updatedLastSeen } : r))
-          );
+          setRiders((prev) => {
+            const idx = prev.findIndex((r) => r.user_id === row.user_id);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = { ...next[idx], is_online: false, last_seen_at: updatedLastSeen };
+              return next;
+            }
+            return [
+              {
+                user_id: row.user_id,
+                first_name: profile?.first_name ?? null,
+                last_name: profile?.last_name ?? null,
+                email: profile?.email ?? null,
+                is_online: false,
+                last_seen_at: updatedLastSeen,
+              },
+              ...prev,
+            ];
+          });
           if (userStatusRef.current[row.user_id] !== "offline") {
             userStatusRef.current[row.user_id] = "offline";
             pushLog("system", `🔴 ${riderToken(row.user_id)} went Offline`);
