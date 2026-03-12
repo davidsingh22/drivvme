@@ -219,6 +219,10 @@ const MSNDispatchCenter: React.FC = () => {
         const row = (payload.new as any) ?? {};
         if (!row.user_id) return;
 
+        // Immediately resolve the real profile
+        const profile = await resolveRiderProfile(row.user_id);
+        const identity = profile.email || [profile.first_name, profile.last_name].filter(Boolean).join(" ") || row.user_id.slice(0, 8);
+
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
 
         setRiders((prev) => {
@@ -228,6 +232,9 @@ const MSNDispatchCenter: React.FC = () => {
             const next = [...prev];
             next[index] = {
               ...next[index],
+              first_name: profile.first_name ?? next[index].first_name,
+              last_name: profile.last_name ?? next[index].last_name,
+              email: profile.email ?? next[index].email,
               last_seen_at: updatedLastSeen,
               is_online: row.is_online ?? true,
             };
@@ -242,12 +249,13 @@ const MSNDispatchCenter: React.FC = () => {
             return next;
           }
 
+          // New user not in list — add with resolved identity
           return [
             {
               user_id: row.user_id,
-              first_name: "Guest",
-              last_name: "Active",
-              email: null,
+              first_name: profile.first_name ?? null,
+              last_name: profile.last_name ?? null,
+              email: profile.email ?? null,
               last_seen_at: updatedLastSeen,
               is_online: row.is_online ?? true,
             },
@@ -255,21 +263,9 @@ const MSNDispatchCenter: React.FC = () => {
           ];
         });
 
-        const profile = await resolveRiderProfile(row.user_id);
-        setRiders((prev) =>
-          prev.map((r) =>
-            r.user_id === row.user_id
-              ? {
-                  ...r,
-                  first_name: profile.first_name,
-                  last_name: profile.last_name,
-                  email: profile.email,
-                }
-              : r
-          )
-        );
-
-        pushLog("rider", `📶 Rider ping received: ${nameOf(profile)} is active`);
+        if (row.is_online) {
+          pushLog("rider", `🟢 ${identity} is Online (Triggered by RiderHome mount)`);
+        }
       })
       .subscribe();
 
