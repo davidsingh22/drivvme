@@ -187,6 +187,7 @@ const RideBooking = () => {
   const [followDriver, setFollowDriver] = useState(true);
   const paymentGateCheckedRef = useRef<string | null>(null);
   const rideCreatedRef = useRef(false);
+  const cancelInFlightRef = useRef(false);
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);

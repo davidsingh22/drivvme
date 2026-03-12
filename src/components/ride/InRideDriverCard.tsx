@@ -39,6 +39,7 @@ interface InRideDriverCardProps {
   onShareTrip: () => void;
   onSafetyPress: () => void;
   onCancelRide?: () => void;
+  isCancelling?: boolean;
 }
 
 const InRideDriverCard = ({
@@ -56,6 +57,7 @@ const InRideDriverCard = ({
   onShareTrip,
   onSafetyPress,
   onCancelRide,
+  isCancelling = false,
 }: InRideDriverCardProps) => {
   const { language } = useLanguage();
   const { toast } = useToast();
