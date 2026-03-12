@@ -459,20 +459,34 @@ const MSNDispatchCenter: React.FC = () => {
           <CardContent className="p-0">
             <ScrollArea className="h-[calc(50vh-80px)] lg:h-[calc(100vh-180px)]">
               <div className="divide-y divide-green-900/30">
-                {riders.map((r) => {
-                  const appOpen = isAppOpen(r.last_seen_at);
-                  return (
-                    <div key={r.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className={`h-2 w-2 rounded-full flex-shrink-0 ${appOpen ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" : "bg-gray-600"}`} />
-                        <span className="text-xs truncate text-gray-300">{nameOf(r)}</span>
-                      </div>
-                      <span className={`text-[10px] flex-shrink-0 ${appOpen ? "text-green-500" : "text-gray-600"}`}>
-                        {appOpen ? "APP OPEN" : "IDLE"}
-                      </span>
+                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-green-500">
+                  Online Riders ({onlineRiders.length})
+                </div>
+
+                {onlineRiders.map((r) => (
+                  <div key={r.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
+                      <span className="text-xs truncate text-gray-300">{nameOf(r)}</span>
                     </div>
-                  );
-                })}
+                    <span className="text-[10px] flex-shrink-0 text-green-500">APP OPEN</span>
+                  </div>
+                ))}
+
+                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-600 border-t border-green-900/30">
+                  Idle Riders ({idleRiders.length})
+                </div>
+
+                {idleRiders.map((r) => (
+                  <div key={r.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10 opacity-70">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="h-2 w-2 rounded-full flex-shrink-0 bg-gray-600" />
+                      <span className="text-xs truncate text-gray-300">{nameOf(r)}</span>
+                    </div>
+                    <span className="text-[10px] flex-shrink-0 text-gray-600">IDLE</span>
+                  </div>
+                ))}
+
                 {riders.length === 0 && <div className="p-3 text-xs text-gray-600">No riders found</div>}
               </div>
             </ScrollArea>
