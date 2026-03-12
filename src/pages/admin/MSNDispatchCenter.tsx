@@ -286,9 +286,9 @@ const MSNDispatchCenter: React.FC = () => {
         );
         const name = driverCacheRef.current[row.user_id] || row.user_id.slice(0, 8);
         if (row.is_online && !(payload.old as any)?.is_online) {
-          pushLog("system", `🟢 DRIVER ${name} came ONLINE`);
+          pushLog("driver", `🟢 ${name} came online`);
         } else if (!row.is_online && (payload.old as any)?.is_online) {
-          pushLog("system", `🔴 DRIVER ${name} went OFFLINE`);
+          pushLog("driver", `🔴 ${name} went offline`);
         }
       })
       .subscribe();
