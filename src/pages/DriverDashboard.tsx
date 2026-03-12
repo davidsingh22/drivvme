@@ -394,30 +394,69 @@ const DriverDashboard = () => {
     restoreActiveRide();
   }, [session?.user?.id]);
 
-  // Safety guard: periodically validate that currentRide is still active in DB.
-  // Prevents stale ride state from persisting due to missed realtime events.
+  // Safety guard: realtime subscription + aggressive polling to catch cancellations INSTANTLY.
   useEffect(() => {
     if (!currentRide?.id || !session?.user?.id) return;
 
+    const rideId = currentRide.id;
+    let cleared = false;
+
+    const clearRide = (source: string) => {
+      if (cleared) return;
+      cleared = true;
+      console.log(`[DriverDashboard] 🚫 Ride cleared (${source}):`, rideId);
+      setCurrentRide(null);
+      setRiderInfo(null);
+      setShowGPSNavigation(false);
+      toast({
+        title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+        description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+        variant: 'destructive',
+      });
+    };
+
+    // Layer 1: Direct realtime subscription on the ride row itself
+    const channel = supabase
+      .channel(`active-ride-watch-${rideId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rides',
+          filter: `id=eq.${rideId}`,
+        },
+        (payload) => {
+          const updated = payload.new as any;
+          if (updated.status === 'cancelled' || updated.status === 'completed') {
+            clearRide('realtime-ride-update: ' + updated.status);
+          }
+        }
+      )
+      .subscribe();
+
+    // Layer 2: Aggressive polling every 2 seconds
     const validate = async () => {
+      if (cleared) return;
       const { data } = await supabase
         .from('rides')
         .select('status')
-        .eq('id', currentRide.id)
+        .eq('id', rideId)
         .maybeSingle();
 
       if (!data || data.status === 'completed' || data.status === 'cancelled') {
-        console.log('[DriverDashboard] Safety guard: clearing stale currentRide', currentRide.id, data?.status);
-        setCurrentRide(null);
-        setRiderInfo(null);
-        setShowGPSNavigation(false);
+        clearRide('poll: ' + (data?.status || 'not found'));
       }
     };
 
-    // Validate immediately and then every 5 seconds
     validate();
-    const interval = window.setInterval(validate, 5000);
-    return () => window.clearInterval(interval);
+    const interval = window.setInterval(validate, 2000);
+
+    return () => {
+      cleared = true;
+      window.clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
   }, [currentRide?.id, session?.user?.id]);
 
   // GPS location is now handled by useDriverGPSStreaming hook
