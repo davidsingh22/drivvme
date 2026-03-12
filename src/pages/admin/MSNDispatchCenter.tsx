@@ -40,7 +40,7 @@ interface DriverEntry {
 interface LogEntry {
   id: string;
   ts: Date;
-  type: "rider" | "dispatch" | "system" | "cancel";
+  type: "rider" | "driver" | "dispatch" | "system" | "cancel";
   message: string;
   ride_id?: string;
 }
@@ -219,6 +219,10 @@ const MSNDispatchCenter: React.FC = () => {
         const row = (payload.new as any) ?? {};
         if (!row.user_id) return;
 
+        // Immediately resolve the real profile
+        const profile = await resolveRiderProfile(row.user_id);
+        const identity = profile.email || [profile.first_name, profile.last_name].filter(Boolean).join(" ") || row.user_id.slice(0, 8);
+
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
 
         setRiders((prev) => {
@@ -228,6 +232,9 @@ const MSNDispatchCenter: React.FC = () => {
             const next = [...prev];
             next[index] = {
               ...next[index],
+              first_name: profile.first_name ?? next[index].first_name,
+              last_name: profile.last_name ?? next[index].last_name,
+              email: profile.email ?? next[index].email,
               last_seen_at: updatedLastSeen,
               is_online: row.is_online ?? true,
             };
@@ -242,12 +249,13 @@ const MSNDispatchCenter: React.FC = () => {
             return next;
           }
 
+          // New user not in list — add with resolved identity
           return [
             {
               user_id: row.user_id,
-              first_name: "Guest",
-              last_name: "Active",
-              email: null,
+              first_name: profile.first_name ?? null,
+              last_name: profile.last_name ?? null,
+              email: profile.email ?? null,
               last_seen_at: updatedLastSeen,
               is_online: row.is_online ?? true,
             },
@@ -255,21 +263,9 @@ const MSNDispatchCenter: React.FC = () => {
           ];
         });
 
-        const profile = await resolveRiderProfile(row.user_id);
-        setRiders((prev) =>
-          prev.map((r) =>
-            r.user_id === row.user_id
-              ? {
-                  ...r,
-                  first_name: profile.first_name,
-                  last_name: profile.last_name,
-                  email: profile.email,
-                }
-              : r
-          )
-        );
-
-        pushLog("rider", `📶 Rider ping received: ${nameOf(profile)} is active`);
+        if (row.is_online) {
+          pushLog("rider", `🟢 ${identity} is Online (Triggered by RiderHome mount)`);
+        }
       })
       .subscribe();
 
@@ -290,9 +286,9 @@ const MSNDispatchCenter: React.FC = () => {
         );
         const name = driverCacheRef.current[row.user_id] || row.user_id.slice(0, 8);
         if (row.is_online && !(payload.old as any)?.is_online) {
-          pushLog("system", `🟢 DRIVER ${name} came ONLINE`);
+          pushLog("driver", `🟢 ${name} came online`);
         } else if (!row.is_online && (payload.old as any)?.is_online) {
-          pushLog("system", `🔴 DRIVER ${name} went OFFLINE`);
+          pushLog("driver", `🔴 ${name} went offline`);
         }
       })
       .subscribe();
@@ -308,20 +304,18 @@ const MSNDispatchCenter: React.FC = () => {
         const ride = payload.new as any;
         setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
 
-        // Resolve rider name
         const { data: rp } = await supabase
           .from("profiles")
           .select("first_name, last_name, email")
           .eq("user_id", ride.rider_id)
           .maybeSingle();
-        const riderName = rp ? [rp.first_name, rp.last_name].filter(Boolean).join(" ") || rp.email : ride.rider_id?.slice(0, 8);
-        pushLog("rider", `🚕 RIDER ${riderName} is requesting a ride now → ${ride.pickup_address} ➜ ${ride.dropoff_address}`, ride.id);
+        const riderEmail = rp?.email || [rp?.first_name, rp?.last_name].filter(Boolean).join(" ") || ride.rider_id?.slice(0, 8);
+        pushLog("rider", `🚗 ${riderEmail} is searching for a ride (Triggered by ride 'requested')`, ride.id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
         const old = payload.old as any;
 
-        // Update active rides map
         if (["completed", "cancelled"].includes(ride.status)) {
           setActiveRides((prev) => {
             const next = { ...prev };
@@ -332,27 +326,37 @@ const MSNDispatchCenter: React.FC = () => {
           setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
         }
 
-        // Status change events
         if (ride.status !== old.status) {
+          const { data: rp } = await supabase
+            .from("profiles")
+            .select("first_name, last_name, email")
+            .eq("user_id", ride.rider_id)
+            .maybeSingle();
+          const riderEmail = rp?.email || [rp?.first_name, rp?.last_name].filter(Boolean).join(" ") || ride.rider_id?.slice(0, 8);
+
           if (ride.status === "driver_assigned" && ride.driver_id) {
             const dn = await resolveDriverName(ride.driver_id);
-            pushLog("dispatch", `✅ DRIVER ${dn} ACCEPTED ride ${ride.id.slice(0, 8)}`, ride.id);
+            pushLog("dispatch", `✅ ${riderEmail} ride accepted by ${dn}`, ride.id);
           } else if (ride.status === "cancelled") {
-            pushLog("cancel", `❌ Ride ${ride.id.slice(0, 8)} CANCELLED`, ride.id);
+            pushLog("cancel", `❌ ${riderEmail} ride cancelled`, ride.id);
           } else if (ride.status === "in_progress") {
-            pushLog("system", `🚗 Ride ${ride.id.slice(0, 8)} IN PROGRESS`);
+            pushLog("rider", `🚗 ${riderEmail} ride in progress`, ride.id);
           } else if (ride.status === "completed") {
-            pushLog("system", `🏁 Ride ${ride.id.slice(0, 8)} COMPLETED`);
+            pushLog("rider", `🏁 ${riderEmail} ride completed`, ride.id);
+          } else if (ride.status === "driver_en_route") {
+            pushLog("driver", `🚙 Driver en route to ${riderEmail}`, ride.id);
+          } else if (ride.status === "arrived") {
+            pushLog("driver", `📍 Driver arrived for ${riderEmail}`, ride.id);
           }
         }
 
-        // Dispatch notifications (notified_driver_ids changed)
+        // Dispatch notifications
         const oldIds: string[] = old.notified_driver_ids ?? [];
         const newIds: string[] = ride.notified_driver_ids ?? [];
         const freshIds = newIds.filter((id: string) => !oldIds.includes(id));
         for (const dId of freshIds) {
           const dn = await resolveDriverName(dId);
-          pushLog("dispatch", `📡 SYSTEM: Sending Ride Request to DRIVER ${dn} — (25s timer started)`, ride.id);
+          pushLog("dispatch", `📡 Ride request sent to ${dn} (25s timer)`, ride.id);
         }
       })
       .subscribe();
@@ -411,7 +415,8 @@ const MSNDispatchCenter: React.FC = () => {
   if (!isAdmin) return null;
 
   const logColor: Record<string, string> = {
-    rider: "text-cyan-400",
+    rider: "text-sky-400",
+    driver: "text-purple-400",
     dispatch: "text-yellow-400",
     system: "text-green-400",
     cancel: "text-red-400",
@@ -464,12 +469,12 @@ const MSNDispatchCenter: React.FC = () => {
                 </div>
 
                 {onlineRiders.map((r) => (
-                  <div key={r.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10">
+                  <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
-                      <span className="text-xs truncate text-gray-300">{nameOf(r)}</span>
+                      <span className="text-[11px] truncate text-sky-400">{r.email || nameOf(r)}</span>
                     </div>
-                    <span className="text-[10px] flex-shrink-0 text-green-500">APP OPEN</span>
+                    <span className="text-[9px] flex-shrink-0 text-green-500">APP OPEN</span>
                   </div>
                 ))}
 
@@ -478,12 +483,12 @@ const MSNDispatchCenter: React.FC = () => {
                 </div>
 
                 {idleRiders.map((r) => (
-                  <div key={r.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10 opacity-70">
+                  <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10 opacity-70">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="h-2 w-2 rounded-full flex-shrink-0 bg-gray-600" />
-                      <span className="text-xs truncate text-gray-300">{nameOf(r)}</span>
+                      <span className="text-[11px] truncate text-gray-400">{r.email || nameOf(r)}</span>
                     </div>
-                    <span className="text-[10px] flex-shrink-0 text-gray-600">IDLE</span>
+                    <span className="text-[9px] flex-shrink-0 text-gray-600">IDLE</span>
                   </div>
                 ))}
 
@@ -504,10 +509,10 @@ const MSNDispatchCenter: React.FC = () => {
             <ScrollArea className="h-[calc(50vh-80px)] lg:h-[calc(100vh-180px)]">
               <div className="divide-y divide-green-900/30">
                 {drivers.map((d) => (
-                  <div key={d.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10">
+                  <div key={d.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className={`h-2 w-2 rounded-full flex-shrink-0 ${d.is_online ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" : "bg-gray-600"}`} />
-                      <span className="text-xs truncate text-gray-300">{nameOf(d)}</span>
+                      <span className={`text-[11px] truncate ${d.is_online ? "text-purple-400" : "text-gray-400"}`}>{d.email || nameOf(d)}</span>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className={`text-[10px] ${d.is_online ? "text-green-500" : "text-gray-600"}`}>
@@ -571,18 +576,18 @@ const MSNDispatchCenter: React.FC = () => {
             )}
 
             {/* Log feed */}
-            <ScrollArea className="flex-1 p-2">
-              <div className="space-y-0.5">
+            <ScrollArea className="flex-1 px-2 py-1">
+              <div className="space-y-px">
                 {logs.map((log) => (
-                  <div key={log.id} className="flex gap-2 text-[11px] leading-relaxed">
-                    <span className="text-gray-600 flex-shrink-0">[{fmtTime(log.ts)}]</span>
+                  <div key={log.id} className="flex gap-1.5 text-[10px] leading-tight py-px">
+                    <span className="text-gray-600 flex-shrink-0 tabular-nums">[{fmtTime(log.ts)}]</span>
                     <span className={logColor[log.type] ?? "text-gray-400"}>{log.message}</span>
                   </div>
                 ))}
                 <div ref={logEndRef} />
               </div>
               {logs.length === 0 && (
-                <div className="text-gray-600 text-xs py-4 text-center">Waiting for events...</div>
+                <div className="text-gray-600 text-[10px] py-4 text-center">Waiting for events...</div>
               )}
             </ScrollArea>
           </CardContent>
