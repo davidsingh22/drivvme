@@ -1595,8 +1595,475 @@ const RideBooking = () => {
     clearRide();
     navigate('/rider-home');
   };
+  const isTransientCancelError = (error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : '';
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('load failed') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('network') ||
+      normalized.includes('timeout') ||
+      normalized.includes('timed out') ||
+      normalized.includes('abort')
+    );
+  };
 
+  const handleCancelRide = async () => {
+    // Single guard — never block forever
+    if (cancelInFlightRef.current) return;
+    if (!currentRide) return;
 
+    const rideId = currentRide.id;
+    const userId = user?.id;
+    const targetDriverId =
+      currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
+
+    if (!userId) {
+      toast({
+        title: language === 'fr' ? 'Session expirée' : 'Session expired',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    cancelInFlightRef.current = true;
+    setIsCancelling(true);
+
+    const cleanup = () => {
+      cancelInFlightRef.current = false;
+      setIsCancelling(false);
+    };
+
+    let cancelled = false;
+
+    // Attempt 1: RPC (fast 5s timeout)
+    try {
+      const { data: rpcRide, error: rpcError } = await withTimeout(
+        supabase.rpc('cancel_ride', { p_ride_id: rideId, p_reason: 'Cancelled by rider' }).then(r => r),
+        5000,
+        'Cancel RPC'
+      );
+      if (!rpcError && rpcRide?.status === 'cancelled') cancelled = true;
+    } catch (e) {
+      console.warn('[Cancel] RPC failed:', e);
+    }
+
+    // Attempt 2: Direct REST PATCH if RPC didn't confirm
+    if (!cancelled) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (token) {
+          const controller = new AbortController();
+          const tm = window.setTimeout(() => controller.abort(), 5000);
+          try {
+            const res = await fetch(
+              `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${userId}&select=id,status`,
+              {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  apikey: ANON_KEY,
+                  Authorization: `Bearer ${token}`,
+                  Prefer: 'return=representation',
+                },
+                body: JSON.stringify({
+                  status: 'cancelled',
+                  cancelled_at: new Date().toISOString(),
+                  cancelled_by: userId,
+                  cancel_reason: 'Cancelled by rider',
+                  cancellation_reason: 'Cancelled by rider',
+                }),
+                signal: controller.signal,
+              }
+            );
+            if (res.ok) {
+              const rows = await res.json().catch(() => []);
+              if (Array.isArray(rows) && rows[0]?.status === 'cancelled') cancelled = true;
+            }
+          } finally {
+            window.clearTimeout(tm);
+          }
+        }
+      } catch (e) {
+        console.warn('[Cancel] REST fallback failed:', e);
+      }
+    }
+
+    // Attempt 3: blind update — just fire and don't wait for response
+    if (!cancelled) {
+      try {
+        supabase.from('rides').update({
+          status: 'cancelled' as any,
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: userId,
+          cancel_reason: 'Cancelled by rider',
+        }).eq('id', rideId).then(() => {});
+        // Assume success — redirect anyway
+        cancelled = true;
+      } catch (_) {}
+    }
+
+    // Best-effort push notification (non-blocking)
+    if (targetDriverId) {
+      void supabase.functions.invoke('ride-status-push', {
+        body: {
+          ride_id: rideId,
+          rider_id: userId,
+          driver_id: targetDriverId,
+          new_status: 'cancelled',
+          old_status: currentRide.status,
+        },
+      });
+      localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+    }
+
+    void supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride');
+
+    // Always redirect — don't leave user stuck
+    cleanup();
+    resetBooking();
+    window.location.href = '/rider-home';
+  };
+  const resetBooking = () => {
+    setStep('input');
+    setPickup(null);
+    setDropoff(null);
+    setPickupAddress('');
+    setDropoffAddress('');
+    setFareEstimate(null);
+    setCurrentRide(null);
+    setDriverInfo(null);
+    driverInfoRef.current = null;
+    driverInfoFetchedForId.current = null;
+    setDriverLocation(null);
+    clearRide(); // Clear from localStorage
+    hasRestoredRide.current = false;
+  };
+
+  // isActiveRidePhase already declared above for realtime tracking
+  // Use ride notifications hook (must be before any returns)
+  useRideNotifications({
+    phase: isActiveRidePhase ? step as 'matched' | 'arriving' | 'arrived' | 'inProgress' : 'matched',
+    driverName: driverInfo?.first_name || 'Driver',
+    minutesAway,
+    language
+  });
+
+  // Calculate minutes away from target
+  useEffect(() => {
+    if (!driverLocation || !mapboxToken) {
+      setMinutesAway(null);
+      return;
+    }
+    const targetLocation = step === 'inProgress' ? dropoff : pickup;
+    if (!targetLocation) return;
+    const controller = new AbortController();
+    const fetchETA = async () => {
+      try {
+        const response = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving/${driverLocation.lng},${driverLocation.lat};${targetLocation.lng},${targetLocation.lat}?access_token=${mapboxToken}`, {
+          signal: controller.signal
+        });
+        const data = await response.json();
+        if (data.routes?.[0]) {
+          setMinutesAway(Math.round(data.routes[0].duration / 60));
+        }
+      } catch (err) {
+        if ((err as any)?.name !== 'AbortError') {
+          console.error('ETA fetch error:', err);
+        }
+      }
+    };
+    fetchETA();
+    return () => controller.abort();
+  }, [driverLocation?.lat, driverLocation?.lng, step, pickup, dropoff, mapboxToken]);
+
+  // Avoid blocking the whole page during background token refreshes.
+  // Show loading while redirecting to prevent black screen flash
+  if (isRedirecting || (authLoading && roles.length === 0)) {
+    return <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">{t('common.loading')}</div>
+      </div>;
+  }
+
+  // Share trip handler
+  const handleShareTrip = async () => {
+    if (!currentRide || !driverInfo) return;
+    const shareData = {
+      title: language === 'fr' ? 'Mon trajet Drivvme' : 'My Drivvme Trip',
+      text: language === 'fr' ? `Je suis en route avec ${driverInfo.first_name}. Véhicule: ${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}, Plaque: ${driverInfo.license_plate}` : `I'm on my way with ${driverInfo.first_name}. Vehicle: ${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}, Plate: ${driverInfo.license_plate}`,
+      url: window.location.href
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (err) {
+        console.log('Share cancelled');
+      }
+    } else {
+      await navigator.clipboard.writeText(shareData.text);
+      toast({
+        title: language === 'fr' ? 'Copié!' : 'Copied!',
+        description: language === 'fr' ? 'Infos du trajet copiées' : 'Trip info copied to clipboard'
+      });
+    }
+  };
+  // Check if debug mode is enabled
+  const showDebug = typeof window !== 'undefined' && (() => {
+    try {
+      return localStorage.getItem('DEBUG_RIDE') === '1';
+    } catch {
+      return false;
+    }
+  })();
+
+  // FULLSCREEN ACTIVE RIDE EXPERIENCE
+  // Never block rendering on driverInfo (RLS/network delays can otherwise cause a blank screen)
+  if (isActiveRidePhase) {
+    return <div className="h-screen w-screen relative overflow-hidden">
+        {/* Fullscreen Map */}
+        <Suspense fallback={<div className="h-full w-full bg-background" />}>
+          <MapComponent pickup={pickup} dropoff={dropoff} driverLocation={effectiveDriverLocation} riderLocation={riderLiveLocation} routeMode={step === 'arriving' || step === 'arrived' ? 'driver-to-pickup' : step === 'inProgress' ? 'driver-to-dropoff' : 'pickup-dropoff'} followDriver={step === 'arriving' || step === 'arrived' || step === 'inProgress'} />
+        </Suspense>
+
+        {/* Debug Bar Overlay - ONLY visible if localStorage.DEBUG_RIDE === "1" */}
+        {showDebug && <Suspense fallback={null}>
+            <div className="absolute top-4 left-4 right-4 z-20 max-w-md">
+              <RideDebugBar rideId={currentRide?.id ?? null} rideStatus={currentRide?.status ?? null} driverLocation={realtimeDriverLocation ? {
+            lat: realtimeDriverLocation.lat,
+            lng: realtimeDriverLocation.lng,
+            speed: realtimeDriverLocation.speed,
+            accuracy: realtimeDriverLocation.accuracy,
+            heading: realtimeDriverLocation.heading,
+            updatedAt: realtimeDriverLocation.updatedAt
+          } : null} lastUpdateSeconds={lastUpdateSeconds} dataSource={dataSource} isConnected={!!realtimeDriverLocation} hasError={hasNoUpdatesError} />
+              
+              {/* Location History Table */}
+              <div className="mt-2">
+                <RideLocationHistory rideId={currentRide?.id ?? null} enabled={isActiveRidePhase} />
+              </div>
+            </div>
+          </Suspense>}
+
+        {/* Connecting to driver message - shown when no updates for 10+ seconds */}
+        {hasNoUpdatesError && !showDebug && <div className="absolute top-4 left-4 right-4 z-20">
+            <div className="bg-muted/90 backdrop-blur-sm rounded-lg px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-4 w-4 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+                <span className="text-sm text-muted-foreground">
+                  {isReconnecting ? language === 'fr' ? 'Reconnexion…' : 'Reconnecting…' : language === 'fr' ? 'Connexion à la position du chauffeur…' : 'Connecting to driver location…'}
+                </span>
+              </div>
+              {/* Manual retry button */}
+              <button onClick={resubscribe} className="text-xs text-primary hover:underline">
+                {language === 'fr' ? 'Réessayer' : 'Retry'}
+              </button>
+            </div>
+          </div>}
+
+        {/* Status Bar Overlay */}
+        <InRideStatusBar phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} driverLocation={effectiveDriverLocation} pickupLocation={pickup} dropoffLocation={dropoff} lastUpdateSeconds={lastUpdateSeconds} />
+
+        {/* Driver Card at Bottom — always render with fallback values to prevent hanging */}
+        <InRideDriverCard driverInfo={driverInfo || {
+          first_name: language === 'fr' ? 'Chauffeur' : 'Driver',
+          last_name: '',
+          phone_number: null,
+          avatar_url: null,
+          vehicle_make: '',
+          vehicle_model: '',
+          vehicle_color: '',
+          license_plate: '—',
+          average_rating: 5
+        }} driverId={currentRide?.driver_id || ''} pickupAddress={pickup?.address || currentRide?.pickup_address || ''} dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''} estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0} distanceKm={distanceKm || currentRide?.distance_km || 0} durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0} rideId={currentRide?.id || ''} rideStatus={currentRide?.status || ''} phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} minutesAway={minutesAway} onShareTrip={handleShareTrip} onSafetyPress={() => setSafetySheetOpen(true)} onCancelRide={handleCancelRide} isCancelling={isCancelling} />
+
+        {/* Safety Sheet */}
+        <SafetySheet open={safetySheetOpen} onOpenChange={setSafetySheetOpen} rideId={currentRide?.id || ''} driverName={driverInfo?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver')} vehicleInfo={driverInfo ? `${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}` : ''} licensePlate={driverInfo?.license_plate || ''} onShareLocation={handleShareTrip} />
+
+        {/* Cancel button is now inside InRideDriverCard trip details */}
+      </div>;
+  }
+
+  // TRIP COMPLETION SCREEN
+  if (step === 'completed' && currentRide) {
+    return <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="pt-20 pb-12 container mx-auto px-4 max-w-md">
+          <TripCompletionScreen rideId={currentRide.id} driverId={currentRide.driver_id} riderId={user?.id || ''} driverInfo={driverInfo || { first_name: language === 'fr' ? 'Chauffeur' : 'Driver', last_name: '', phone_number: null, avatar_url: null, vehicle_make: '', vehicle_model: '', vehicle_color: '', license_plate: '—', average_rating: 5 }} actualFare={currentRide.actual_fare || fareEstimate?.total || 0} estimatedFare={fareEstimate?.total || currentRide.estimated_fare || 0} savings={fareEstimate?.savings || 0} ride={currentRide} onComplete={() => { resetBooking(); window.location.href = '/rider-home'; }} />
+        </div>
+      </div>;
+  }
+
+  // Show loading screen while auto-estimating from search → estimate transition
+  if (step === 'input' && isAutoEstimating) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p className="text-sm text-muted-foreground">
+            {language === 'fr' ? 'Calcul de votre trajet...' : 'Calculating your ride...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // DEFAULT BOOKING FLOW - MAP-CENTRIC DESIGN
+  if (step === 'input') {
+    // Extract short address for display - always show real address, never generic label
+    const displayPickupAddress = pickupAddress && !['Detecting...', 'Détection...', 'Current location', 'Position actuelle'].includes(pickupAddress) ? pickupAddress.split(',')[0] : isDetectingLocation ? language === 'fr' ? 'Détection...' : 'Detecting...' : pickupAddress?.split(',')[0] || '';
+    return <div className="min-h-screen bg-background relative overflow-hidden">
+        {/* Full-page background image */}
+        <div className="absolute inset-0 z-0" style={{
+        backgroundImage: `url(${rideBg})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center center'
+      }} />
+        {/* Gradient overlay for better contrast */}
+        <div className="absolute inset-0 z-0" style={{
+        background: 'linear-gradient(to bottom, rgba(10, 10, 25, 0.3) 0%, rgba(60, 30, 100, 0.4) 50%, rgba(10, 10, 25, 0.6) 100%)'
+      }} />
+            
+        {/* Compact Frosted Top Bar */}
+        <motion.div initial={{
+        y: -100,
+        opacity: 0
+      }} animate={{
+        y: 0,
+        opacity: 1
+      }} className="absolute z-20" style={{
+        top: '12px',
+        left: '12px',
+        right: '12px'
+      }}>
+          <div className="flex items-center justify-between px-5" style={{
+          height: '58px',
+          borderRadius: '16px',
+          background: 'rgba(10, 10, 15, 0.55)',
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          border: '1px solid rgba(255, 255, 255, 0.10)',
+          boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)'
+        }}>
+            {/* Logo with flash animation */}
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg bg-primary flex items-center justify-center logo-icon-pulse">
+                <Car className="h-4 w-4 text-primary-foreground" />
+              </div>
+              <span className="font-display font-bold text-xl logo-flash">
+                Drivveme
+              </span>
+            </div>
+            
+            {/* Menu Button with Dropdown */}
+            <div className="relative group">
+              <button className="p-2 rounded-lg hover:bg-white/10 transition-colors flex items-center gap-1">
+                <div className="flex flex-col gap-1">
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
+                  <div className="w-5 h-0.5 bg-white rounded-full" />
+                </div>
+              </button>
+              
+              {/* Dropdown Menu */}
+              <div className="absolute right-0 top-full mt-2 w-48 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                <div className="rounded-xl overflow-hidden" style={{
+                background: 'rgba(20, 10, 35, 0.95)',
+                backdropFilter: 'blur(16px)',
+                WebkitBackdropFilter: 'blur(16px)',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5)'
+              }}>
+                  <button onClick={() => navigate('/history')} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                    <History className="h-5 w-5 text-primary" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Mes trajets' : 'Past Rides'}
+                    </span>
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button onClick={() => {
+                  // Force a full page refresh to reset everything
+                  window.location.href = '/ride';
+                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                    <Car className="h-5 w-5 text-accent" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Réserver' : 'Book a Ride'}
+                    </span>
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button onClick={() => {
+                  setHelpDialogOpen(true);
+                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left relative">
+                    <div className="relative">
+                      <HelpCircle className="h-5 w-5 text-primary" />
+                      {unreadSupportMessages > 0 && <span className="absolute -top-1 -right-1 h-3 w-3 bg-destructive rounded-full animate-pulse" />}
+                    </div>
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Aide' : 'Help'}
+                    </span>
+                    {unreadSupportMessages > 0 && <span className="ml-auto bg-destructive text-destructive-foreground text-xs font-bold px-2 py-0.5 rounded-full animate-pulse">
+                        {unreadSupportMessages}
+                      </span>}
+                  </button>
+                  <div className="h-px bg-white/10" />
+                  <button onClick={async () => {
+                  await signOut();
+                  window.location.href = '/';
+                }} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
+                    <LogOut className="h-5 w-5 text-destructive" />
+                    <span className="text-white font-medium">
+                      {language === 'fr' ? 'Déconnexion' : 'Log Out'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <HelpDialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen} />
+          </div>
+        </motion.div>
+        
+        {/* GPS Detection Overlay — with 7s zombie killer */}
+        {isDetectingLocation && <ZombieLocationOverlay
+            language={language}
+            onCancel={() => setIsDetectingLocation(false)}
+          />}
+          
+        {/* Bottom Frosted Glass Sheet (40vh) with cityscape background */}
+        <motion.div initial={{
+        y: 100,
+        opacity: 0
+      }} animate={{
+        y: 0,
+        opacity: 1
+      }} className="absolute z-20 overflow-hidden" style={{
+        left: '12px',
+        right: '12px',
+        bottom: '12px',
+        height: 'min(65vh, calc(100dvh - 200px))',
+        borderRadius: '20px',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        boxShadow: '0 18px 50px rgba(0, 0, 0, 0.45)'
+      }}>
+          {/* Background image layer */}
+          <div className="absolute inset-0" style={{
+          backgroundImage: `url(${welcomeBg})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center top'
+        }} />
+          {/* Frosted glass overlay */}
+          <div className="absolute inset-0" style={{
+          background: 'linear-gradient(135deg, rgba(60, 30, 100, 0.3) 0%, rgba(30, 15, 60, 0.4) 50%, rgba(60, 30, 100, 0.3) 100%)'
+        }} />
+          {/* Glowing logo + brand name at top center */}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center">
+            
+            
           </div>
           {/* Content layer */}
           <div className="relative h-full p-5 pt-6 flex flex-col gap-4 z-10">
