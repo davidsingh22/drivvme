@@ -449,20 +449,6 @@ const MSNDispatchCenter: React.FC = () => {
     return () => clearInterval(iv);
   }, []);
 
-  // ─── Force Reset ride ──────────────────────────────────────────────
-  const forceResetRide = async (rideId: string) => {
-    const { error } = await supabase
-      .from("rides")
-      .update({ status: "cancelled" as any, cancelled_at: new Date().toISOString(), cancel_reason: "Admin force reset via MSN" })
-      .eq("id", rideId);
-    if (error) {
-      toast.error("Force reset failed: " + error.message);
-    } else {
-      toast.success("Ride force-cancelled");
-      pushLog("cancel", `💀 ADMIN force-cancelled ride ${rideId.slice(0, 8)}`);
-    }
-  };
-
   // ─── Force Offline driver ─────────────────────────────────────────
   const forceOffline = async (driverUserId: string) => {
     const { error } = await supabase
