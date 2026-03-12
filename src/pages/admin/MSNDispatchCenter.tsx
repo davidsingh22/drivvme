@@ -496,8 +496,26 @@ const MSNDispatchCenter: React.FC = () => {
     cancel: "text-red-400",
   };
 
-  const onlineRiders = riders.filter((r) => r.is_online || isAppOpen(r.last_seen_at));
-  const idleRiders = riders.filter((r) => !(r.is_online || isAppOpen(r.last_seen_at)));
+  const riderMap = new Map(riders.map((r) => [r.user_id, r]));
+  const heartbeatIds = riders.filter((r) => hasFreshHeartbeat(r.last_seen_at)).map((r) => r.user_id);
+  const onlineRiderIds = Array.from(new Set([...activeRiderIds, ...heartbeatIds]));
+
+  const onlineRiders = onlineRiderIds
+    .map((userId) =>
+      riderMap.get(userId) ?? {
+        user_id: userId,
+        first_name: null,
+        last_name: null,
+        email: null,
+        last_seen_at: new Date().toISOString(),
+        is_online: true,
+      }
+    )
+    .sort(
+      (a, b) =>
+        (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
+        (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
+    );
 
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono p-4">
