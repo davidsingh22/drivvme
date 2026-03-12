@@ -427,6 +427,39 @@ serve(async (req) => {
       return { enabled: true, escalatedTiers };
     };
 
+    // Atomic tier-1 claim: prevents duplicate initial dispatch from parallel triggers/calls
+    const { data: tierOneClaimRows, error: tierOneClaimError } = await supabase
+      .from("rides")
+      .update({
+        notification_tier: 1,
+        last_notification_at: new Date().toISOString(),
+      })
+      .eq("id", rideId)
+      .eq("status", "searching")
+      .is("driver_id", null)
+      .or("notification_tier.is.null,notification_tier.eq.0")
+      .select("id, notified_driver_ids")
+      .limit(1);
+
+    if (tierOneClaimError) {
+      console.error("Failed to claim tier 1 dispatch:", tierOneClaimError);
+      return new Response(JSON.stringify({ error: "Failed to claim initial dispatch" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!tierOneClaimRows || tierOneClaimRows.length === 0) {
+      return new Response(JSON.stringify({
+        message: "Initial dispatch already claimed by another process",
+        sent: 0,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const existingNotifiedDriverIds = (tierOneClaimRows[0]?.notified_driver_ids ?? []) as string[];
+
     // Get all online drivers with their current location
     const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
