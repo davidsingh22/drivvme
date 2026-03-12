@@ -1594,6 +1594,61 @@ const RideBooking = () => {
     clearRide();
     navigate('/rider-home');
   };
+  const isTransientCancelError = (error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : '';
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('load failed') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('network') ||
+      normalized.includes('timeout') ||
+      normalized.includes('timed out') ||
+      normalized.includes('abort')
+    );
+  };
+
+  const verifyCancellation = async (rideId: string, attempts = 4) => {
+    let driverId: string | null = null;
+
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const { data, error } = await withTimeout(
+          supabase
+            .from('rides')
+            .select('status, driver_id')
+            .eq('id', rideId)
+            .maybeSingle()
+            .then((r) => r),
+          4000,
+          'Verify cancellation'
+        );
+
+        if (error) {
+          throw error;
+        }
+
+        driverId = data?.driver_id ?? driverId;
+
+        if (data?.status === 'cancelled') {
+          return { confirmed: true, driverId };
+        }
+      } catch {
+        // Keep retrying verification for transient read failures
+      }
+
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+
+    return { confirmed: false, driverId };
+  };
+
   const handleCancelRide = async () => {
     console.log('STARTING CANCEL');
     if (!currentRide || isCancelling) return;
@@ -1616,78 +1671,95 @@ const RideBooking = () => {
     toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
 
     try {
-      // 1) Primary path: atomic DB cancel via RPC (row-locked + auth-checked)
-      try {
-        const { error: rpcError } = await withTimeout(
-          supabase
-            .rpc('cancel_ride', {
-              p_ride_id: rideId,
-              p_reason: 'Cancelled by rider',
-            })
-            .then((r) => r),
-          8000,
-          'Cancel ride (RPC)'
-        );
+      let cancelConfirmed = false;
+      let confirmedDriverId: string | null = targetDriverId;
+      let lastError: unknown = null;
 
-        if (rpcError) {
-          throw rpcError;
-        }
-      } catch (rpcErr) {
-        // 2) Fallback path: direct REST patch for WebView resilience
-        console.warn('[Cancel] RPC failed, trying REST fallback:', rpcErr);
-
-        const token = await getValidAccessToken();
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-
+      for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const res = await fetch(
-            `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${userId}&select=id,status,driver_id`,
-            {
-              method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                apikey: ANON_KEY,
-                Authorization: `Bearer ${token}`,
-                Prefer: 'return=representation',
-              },
-              body: JSON.stringify({
-                status: 'cancelled',
-                cancelled_at: new Date().toISOString(),
-                cancelled_by: userId,
-                cancellation_reason: 'Cancelled by rider',
-              }),
-              signal: controller.signal,
-            }
+          const { error: rpcError } = await withTimeout(
+            supabase
+              .rpc('cancel_ride', {
+                p_ride_id: rideId,
+                p_reason: 'Cancelled by rider',
+              })
+              .then((r) => r),
+            10000,
+            `Cancel ride (RPC) attempt ${attempt}`
           );
 
-          if (!res.ok) {
-            const body = await res.text();
-            throw new Error(`Fallback cancel failed (${res.status}): ${body}`);
+          if (rpcError) {
+            throw rpcError;
           }
-        } finally {
-          clearTimeout(timeout);
+        } catch (rpcErr) {
+          console.warn('[Cancel] RPC failed, trying REST fallback:', rpcErr);
+          lastError = rpcErr;
+
+          const token = await getValidAccessToken();
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 10000);
+
+          try {
+            const res = await fetch(
+              `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${userId}&select=id,status,driver_id`,
+              {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  apikey: ANON_KEY,
+                  Authorization: `Bearer ${token}`,
+                  Prefer: 'return=representation',
+                },
+                body: JSON.stringify({
+                  status: 'cancelled',
+                  cancelled_at: new Date().toISOString(),
+                  cancelled_by: userId,
+                  cancellation_reason: 'Cancelled by rider',
+                }),
+                signal: controller.signal,
+              }
+            );
+
+            if (!res.ok) {
+              const body = await res.text();
+              throw new Error(`Fallback cancel failed (${res.status}): ${body}`);
+            }
+          } catch (fallbackErr) {
+            lastError = fallbackErr;
+          } finally {
+            clearTimeout(timeout);
+          }
         }
+
+        const verification = await verifyCancellation(rideId, 5);
+        confirmedDriverId = verification.driverId ?? confirmedDriverId;
+
+        if (verification.confirmed) {
+          cancelConfirmed = true;
+          break;
+        }
+
+        const retryable = isTransientCancelError(lastError);
+        if (attempt < 3 && retryable) {
+          await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+          continue;
+        }
+
+        break;
       }
 
-      // 3) Verify cancellation actually persisted before redirecting
-      const { data: verifiedRide, error: verifyError } = await withTimeout(
-        supabase
-          .from('rides')
-          .select('id, status, driver_id')
-          .eq('id', rideId)
-          .maybeSingle()
-          .then((r) => r),
-        5000,
-        'Verify cancellation'
-      );
-
-      if (verifyError || !verifiedRide || verifiedRide.status !== 'cancelled') {
-        throw new Error(verifyError?.message || 'Cancellation was not confirmed');
+      if (!cancelConfirmed) {
+        throw new Error(
+          lastError instanceof Error
+            ? lastError.message
+            : language === 'fr'
+              ? 'Annulation non confirmée, veuillez réessayer.'
+              : 'Cancellation was not confirmed, please try again.'
+        );
       }
 
-      // 4) Best-effort notifications after cancellation is confirmed
-      const driverIdForNotify = targetDriverId || verifiedRide.driver_id || null;
+      // Best-effort notifications after cancellation is confirmed
+      const driverIdForNotify = confirmedDriverId || targetDriverId || null;
       if (driverIdForNotify) {
         void supabase.functions.invoke('ride-status-push', {
           body: {
@@ -1702,7 +1774,7 @@ const RideBooking = () => {
         localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
       }
 
-      // 5) Cleanup stale offer notifications (best-effort)
+      // Cleanup stale offer notifications (best-effort)
       void supabase
         .from('notifications')
         .delete()
