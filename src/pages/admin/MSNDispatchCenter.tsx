@@ -81,14 +81,55 @@ const MSNDispatchCenter: React.FC = () => {
     }
   }, [authLoading, isAdmin, navigate]);
 
+  // ─── Identity helpers ───────────────────────────────────────────────
+  const riderDisplay = useCallback(
+    (userId: string) => {
+      const cached = riderCacheRef.current[userId];
+      const fullName = [cached?.first_name, cached?.last_name].filter(Boolean).join(" ");
+      return cached?.email || fullName || riderFallback(userId);
+    },
+    []
+  );
+
+  const riderLabel = useCallback(
+    (entry: RiderEntry) => entry.email || [entry.first_name, entry.last_name].filter(Boolean).join(" ") || riderFallback(entry.user_id),
+    []
+  );
+
+  const renderTimelineMessage = useCallback(
+    (message: string) => {
+      const tokenRegex = /\{\{rider:([^}]+)\}\}/g;
+      const parts: React.ReactNode[] = [];
+      let lastIndex = 0;
+      let tokenMatch: RegExpExecArray | null = null;
+
+      while ((tokenMatch = tokenRegex.exec(message))) {
+        const [rawToken, tokenUserId] = tokenMatch;
+        if (tokenMatch.index > lastIndex) {
+          parts.push(<span key={`txt-${tokenMatch.index}`}>{message.slice(lastIndex, tokenMatch.index)}</span>);
+        }
+        parts.push(
+          <span key={`rider-${tokenMatch.index}`} className="text-sky-400">
+            {riderDisplay(tokenUserId)}
+          </span>
+        );
+        lastIndex = tokenMatch.index + rawToken.length;
+      }
+
+      if (lastIndex < message.length) {
+        parts.push(<span key="txt-end">{message.slice(lastIndex)}</span>);
+      }
+
+      return parts.length ? parts : message;
+    },
+    [riderDisplay]
+  );
+
   // ─── Push log helper ───────────────────────────────────────────────
   const pushLog = useCallback(
     (type: LogEntry["type"], message: string, ride_id?: string) => {
       logIdCounter.current += 1;
-      setLogs((prev) => [
-        ...prev.slice(-199),
-        { id: `log-${logIdCounter.current}`, ts: new Date(), type, message, ride_id },
-      ]);
+      setLogs((prev) => [{ id: `log-${logIdCounter.current}`, ts: new Date(), type, message, ride_id }, ...prev].slice(0, 200));
     },
     []
   );
@@ -124,7 +165,7 @@ const MSNDispatchCenter: React.FC = () => {
       return data;
     }
 
-    return { first_name: "Guest", last_name: "Active", email: null };
+    return null;
   }, []);
 
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
