@@ -278,54 +278,47 @@ const MSNDispatchCenter: React.FC = () => {
     return () => clearInterval(iv);
   }, []);
 
-  // ─── Fetch riders ─────────────────────────────────────────────────
+  // ─── Fetch riders (single query via msn_dispatch_view) ─────────────
   const fetchRiders = useCallback(async () => {
-    const { data: locations } = await supabase
-      .from("rider_locations")
-      .select("user_id, last_seen_at, is_online")
+    const { data, error } = await supabase
+      .from("msn_dispatch_view")
+      .select("user_id, is_online, last_seen_at, email")
       .order("last_seen_at", { ascending: false })
       .limit(500);
 
-    const locationRows = locations ?? [];
-    const allIds = Array.from(new Set(locationRows.map((l) => l.user_id)));
+    if (error) {
+      console.error("[MSN] msn_dispatch_view fetch failed:", error);
+      return;
+    }
 
-    if (!allIds.length) { setRiders([]); return; }
-
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("user_id, first_name, last_name, email")
-      .in("user_id", allIds);
-
-    const profileMap = new Map((profiles ?? []).map((p) => [p.user_id, p]));
-
-    const nextRiders = locationRows.map((loc) => {
-      const profile = profileMap.get(loc.user_id);
-      if (profile) {
-        riderCacheRef.current[loc.user_id] = {
-          first_name: profile.first_name,
-          last_name: profile.last_name,
-          email: profile.email,
-        };
-      }
-      return {
-        user_id: loc.user_id,
-        first_name: profile?.first_name ?? null,
-        last_name: profile?.last_name ?? null,
-        email: profile?.email ?? null,
-        last_seen_at: loc.last_seen_at ?? null,
-        is_online: loc.is_online === true,
-      };
-    });
+    const rows = data ?? [];
 
     // Deduplicate by user_id
     const seen = new Set<string>();
-    const deduped = nextRiders.filter((r) => {
-      if (seen.has(r.user_id)) return false;
+    const deduped = rows.filter((r) => {
+      if (!r.user_id || seen.has(r.user_id)) return false;
       seen.add(r.user_id);
       return true;
     });
 
-    deduped.sort((a, b) => {
+    const nextRiders: RiderEntry[] = deduped.map((row) => {
+      // Populate cache for identity resolution in logs
+      riderCacheRef.current[row.user_id!] = {
+        first_name: null,
+        last_name: null,
+        email: row.email ?? null,
+      };
+      return {
+        user_id: row.user_id!,
+        first_name: null,
+        last_name: null,
+        email: row.email ?? null,
+        last_seen_at: row.last_seen_at ?? null,
+        is_online: row.is_online === true,
+      };
+    });
+
+    nextRiders.sort((a, b) => {
       if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
       return (
         (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
@@ -333,7 +326,7 @@ const MSNDispatchCenter: React.FC = () => {
       );
     });
 
-    setRiders(deduped);
+    setRiders(nextRiders);
     setRiderDisplayVersion((v) => v + 1);
   }, []);
 

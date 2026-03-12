@@ -781,7 +781,9 @@ export type Database = {
           is_online: boolean
           last_seen_at: string
           lat: number
+          latitude: number | null
           lng: number
+          longitude: number | null
           updated_at: string
           user_id: string
         }
@@ -792,7 +794,9 @@ export type Database = {
           is_online?: boolean
           last_seen_at?: string
           lat: number
+          latitude?: number | null
           lng: number
+          longitude?: number | null
           updated_at?: string
           user_id: string
         }
@@ -803,7 +807,9 @@ export type Database = {
           is_online?: boolean
           last_seen_at?: string
           lat?: number
+          latitude?: number | null
           lng?: number
+          longitude?: number | null
           updated_at?: string
           user_id?: string
         }
@@ -1096,7 +1102,15 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      msn_dispatch_view: {
+        Row: {
+          email: string | null
+          is_online: boolean | null
+          last_seen_at: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       accept_ride: {
