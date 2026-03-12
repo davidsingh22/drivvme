@@ -299,10 +299,13 @@ const InRideDriverCard = ({
                   <Button
                     variant="outline"
                     onClick={onCancelRide}
+                    disabled={isCancelling}
                     className="w-full mt-3 text-destructive border-destructive/50 hover:bg-destructive/10"
                   >
                     <X className="h-4 w-4 mr-2" />
-                    {language === 'fr' ? 'Annuler la course' : 'Cancel Ride'}
+                    {isCancelling
+                      ? (language === 'fr' ? 'Annulation…' : 'Cancelling…')
+                      : (language === 'fr' ? 'Annuler la course' : 'Cancel Ride')}
                   </Button>
                 )}
               </div>
