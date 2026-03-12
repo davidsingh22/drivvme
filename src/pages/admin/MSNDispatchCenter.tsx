@@ -317,18 +317,28 @@ const MSNDispatchCenter: React.FC = () => {
       return true;
     });
 
+    const missingEmailUserIds: string[] = [];
+
     const nextRiders: RiderEntry[] = deduped.map((row) => {
-      // Populate cache for identity resolution in logs
-      riderCacheRef.current[row.user_id!] = {
-        first_name: null,
-        last_name: null,
-        email: row.email ?? null,
+      const userId = row.user_id!;
+      const cached = riderCacheRef.current[userId];
+      const nextEmail = row.email ?? cached?.email ?? null;
+      const nextFirstName = cached?.first_name ?? null;
+      const nextLastName = cached?.last_name ?? null;
+
+      riderCacheRef.current[userId] = {
+        first_name: nextFirstName,
+        last_name: nextLastName,
+        email: nextEmail,
       };
+
+      if (!nextEmail) missingEmailUserIds.push(userId);
+
       return {
-        user_id: row.user_id!,
-        first_name: null,
-        last_name: null,
-        email: row.email ?? null,
+        user_id: userId,
+        first_name: nextFirstName,
+        last_name: nextLastName,
+        email: nextEmail,
         last_seen_at: row.last_seen_at ?? null,
         is_online: row.is_online === true,
       };
@@ -344,7 +354,29 @@ const MSNDispatchCenter: React.FC = () => {
 
     setRiders(nextRiders);
     setRiderDisplayVersion((v) => v + 1);
-  }, []);
+
+    if (missingEmailUserIds.length > 0) {
+      missingEmailUserIds.forEach((userId) => {
+        void resolveRiderProfile(userId, true)
+          .then((profile) => {
+            if (!profile?.email) return;
+            setRiders((prev) =>
+              prev.map((entry) =>
+                entry.user_id === userId
+                  ? {
+                      ...entry,
+                      first_name: profile.first_name,
+                      last_name: profile.last_name,
+                      email: profile.email,
+                    }
+                  : entry
+              )
+            );
+          })
+          .catch(() => undefined);
+      });
+    }
+  }, [resolveRiderProfile]);
 
   // ─── Fetch drivers ─────────────────────────────────────────────────
   const fetchDrivers = useCallback(async () => {
