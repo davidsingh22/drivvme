@@ -629,7 +629,7 @@ const MSNDispatchCenter: React.FC = () => {
                   <div key={d.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className={`h-2 w-2 rounded-full flex-shrink-0 ${d.is_online ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" : "bg-gray-600"}`} />
-                      <span className={`text-[11px] truncate ${d.is_online ? "text-purple-400" : "text-gray-400"}`}>{d.email || nameOf(d)}</span>
+                      <span className={`text-[13px] truncate ${d.is_online ? "text-purple-400" : "text-gray-400"}`}>{d.email || nameOf(d)}</span>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className={`text-[10px] ${d.is_online ? "text-green-500" : "text-gray-600"}`}>
