@@ -60,7 +60,7 @@ const nameOf = (e: { first_name: string | null; last_name: string | null; email:
   [e.first_name, e.last_name].filter(Boolean).join(" ") || e.email || "Unknown";
 
 const riderToken = (userId: string) => `{{rider:${userId}}}`;
-const riderFallback = (userId: string) => userId.slice(0, 6);
+const riderUnknownLabel = "unknown rider";
 
 // ─── Component ──────────────────────────────────────────────────────────
 const MSNDispatchCenter: React.FC = () => {
@@ -90,16 +90,17 @@ const MSNDispatchCenter: React.FC = () => {
   const riderDisplay = useCallback(
     (userId: string) => {
       const cached = riderCacheRef.current[userId];
-      return cached?.email || [cached?.first_name, cached?.last_name].filter(Boolean).join(" ") || riderFallback(userId);
+      const fullName = [cached?.first_name, cached?.last_name].filter(Boolean).join(" ");
+      return cached?.email || fullName || riderUnknownLabel;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [riderDisplayVersion]
   );
 
-  const riderLabel = useCallback(
-    (entry: RiderEntry) => entry.email || [entry.first_name, entry.last_name].filter(Boolean).join(" ") || riderFallback(entry.user_id),
-    []
-  );
+  const riderLabel = useCallback((entry: RiderEntry) => {
+    const fullName = [entry.first_name, entry.last_name].filter(Boolean).join(" ");
+    return entry.email || fullName || riderUnknownLabel;
+  }, []);
 
   const renderTimelineMessage = useCallback(
     (message: string) => {
