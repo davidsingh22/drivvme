@@ -703,12 +703,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Mark rider offline in rider_locations BEFORE clearing state
     const currentUserId = userRef.current?.id;
     if (currentUserId) {
-      supabase
-        .from("rider_locations")
-        .update({ is_online: false, last_seen_at: new Date().toISOString() })
-        .eq("user_id", currentUserId)
-        .then(() => console.log("[Auth] rider_locations marked offline"))
-        .catch(() => {});
+      void (async () => {
+        try {
+          await supabase
+            .from("rider_locations")
+            .update({ is_online: false, last_seen_at: new Date().toISOString() })
+            .eq("user_id", currentUserId);
+          console.log("[Auth] rider_locations marked offline");
+        } catch {}
+      })();
     }
 
     // Clear local state IMMEDIATELY for instant UI feedback
