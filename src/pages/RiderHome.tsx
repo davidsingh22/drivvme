@@ -284,7 +284,7 @@ const RiderHome = () => {
           </button>
           <span className="text-white/20">|</span>
           <button
-            onClick={() => navigate('/login')}
+            onClick={handleLogout}
             className="hover:text-white transition-colors"
           >
             Sign Out
