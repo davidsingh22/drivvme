@@ -1597,107 +1597,130 @@ const RideBooking = () => {
   const handleCancelRide = async () => {
     console.log('STARTING CANCEL');
     if (!currentRide || isCancelling) return;
-    setIsCancelling(true);
 
     const rideId = currentRide.id;
     const userId = user?.id;
     const targetDriverId = currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
 
+    if (!userId) {
+      toast({
+        title: language === 'fr' ? 'Session expirée' : 'Session expired',
+        description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsCancelling(true);
     console.log('[Cancel] rideId:', rideId, 'driverId:', targetDriverId);
     toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
 
-    // ── CRITICAL: Use raw fetch with keepalive so requests survive page navigation ──
-    let token = '';
-    try { token = await getValidAccessToken(); } catch { /* use empty, will fail gracefully */ }
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'apikey': ANON_KEY,
-      'Authorization': `Bearer ${token}`,
-      'Prefer': 'return=minimal',
-    };
-
-    // 1) Update ride status — keepalive ensures it completes even after unmount
     try {
-      fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}`, {
-        method: 'PATCH',
-        headers,
-        body: JSON.stringify({
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-          cancelled_by: userId,
-          cancellation_reason: 'Cancelled by rider',
-        }),
-        keepalive: true,
-      }).then(r => console.log('[Cancel] Ride DB updated:', r.status)).catch(e => console.warn('[Cancel] Ride update err:', e));
-    } catch (e) { console.warn('[Cancel] Ride fetch err:', e); }
-
-    // 2) Notify driver via MULTIPLE channels for reliability
-    if (targetDriverId) {
-      // 2a) ride-status-push — battle-tested, does proper driver lookup & player ID resolution
+      // 1) Primary path: atomic DB cancel via RPC (row-locked + auth-checked)
       try {
-        fetch(`${SUPABASE_URL}/functions/v1/ride-status-push`, {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': '' },
-          body: JSON.stringify({
+        const { error: rpcError } = await withTimeout(
+          supabase
+            .rpc('cancel_ride', {
+              p_ride_id: rideId,
+              p_reason: 'Cancelled by rider',
+            })
+            .then((r) => r),
+          8000,
+          'Cancel ride (RPC)'
+        );
+
+        if (rpcError) {
+          throw rpcError;
+        }
+      } catch (rpcErr) {
+        // 2) Fallback path: direct REST patch for WebView resilience
+        console.warn('[Cancel] RPC failed, trying REST fallback:', rpcErr);
+
+        const token = await getValidAccessToken();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+
+        try {
+          const res = await fetch(
+            `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${userId}&select=id,status,driver_id`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: ANON_KEY,
+                Authorization: `Bearer ${token}`,
+                Prefer: 'return=representation',
+              },
+              body: JSON.stringify({
+                status: 'cancelled',
+                cancelled_at: new Date().toISOString(),
+                cancelled_by: userId,
+                cancellation_reason: 'Cancelled by rider',
+              }),
+              signal: controller.signal,
+            }
+          );
+
+          if (!res.ok) {
+            const body = await res.text();
+            throw new Error(`Fallback cancel failed (${res.status}): ${body}`);
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      // 3) Verify cancellation actually persisted before redirecting
+      const { data: verifiedRide, error: verifyError } = await withTimeout(
+        supabase
+          .from('rides')
+          .select('id, status, driver_id')
+          .eq('id', rideId)
+          .maybeSingle()
+          .then((r) => r),
+        5000,
+        'Verify cancellation'
+      );
+
+      if (verifyError || !verifiedRide || verifiedRide.status !== 'cancelled') {
+        throw new Error(verifyError?.message || 'Cancellation was not confirmed');
+      }
+
+      // 4) Best-effort notifications after cancellation is confirmed
+      const driverIdForNotify = targetDriverId || verifiedRide.driver_id || null;
+      if (driverIdForNotify) {
+        void supabase.functions.invoke('ride-status-push', {
+          body: {
             ride_id: rideId,
             rider_id: userId,
-            driver_id: targetDriverId,
+            driver_id: driverIdForNotify,
             new_status: 'cancelled',
             old_status: currentRide.status,
-          }),
-          keepalive: true,
-        }).then(r => console.log('[Cancel] ride-status-push:', r.status)).catch(e => console.warn('[Cancel] ride-status-push err:', e));
-      } catch (e) { console.warn('[Cancel] ride-status-push fetch err:', e); }
+          },
+        });
 
-      // 2b) Tag-based push (most reliable fallback — works even if external ID not set)
-      try {
-        fetch(`${SUPABASE_URL}/functions/v1/send-onesignal-notification`, {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': '' },
-          body: JSON.stringify({
-            tagUids: [targetDriverId],
-            title: 'Ride Cancelled ❌',
-            message: 'The rider cancelled this ride.',
-            url: '/driver',
-          }),
-          keepalive: true,
-        }).then(r => console.log('[Cancel] Tag push sent:', r.status)).catch(e => console.warn('[Cancel] Tag push err:', e));
-      } catch (e) { console.warn('[Cancel] Tag push fetch err:', e); }
+        localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+      }
 
-      // 3) DB notification (keepalive) — driver's realtime listener picks this up
-      try {
-        fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': 'return=minimal' },
-          body: JSON.stringify({
-            user_id: targetDriverId,
-            ride_id: rideId,
-            type: 'ride_cancelled',
-            title: 'Ride Cancelled ❌',
-            message: 'The rider cancelled this ride.',
-          }),
-          keepalive: true,
-        }).then(() => console.log('[Cancel] DB notif ok')).catch(e => console.warn('[Cancel] DB notif err:', e));
-      } catch (e) { console.warn('[Cancel] DB notif fetch err:', e); }
+      // 5) Cleanup stale offer notifications (best-effort)
+      void supabase
+        .from('notifications')
+        .delete()
+        .eq('ride_id', rideId)
+        .eq('type', 'new_ride');
 
-      localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
-    }
-
-    // 4) Clean up stale new_ride notifications
-    try {
-      fetch(`${SUPABASE_URL}/rest/v1/notifications?ride_id=eq.${rideId}&type=eq.new_ride`, {
-        method: 'DELETE',
-        headers,
-        keepalive: true,
-      }).catch(() => {});
-    } catch { /* ignore */ }
-
-    // One click = exit after 1.5s — requests already in flight with keepalive
-    window.setTimeout(() => {
-      setIsCancelling(false);
       resetBooking();
       window.location.href = '/rider-home';
-    }, 1500);
+    } catch (err: any) {
+      console.error('[RideBooking] Cancel ride failed:', err);
+      toast({
+        title: language === 'fr' ? 'Échec de l’annulation' : 'Cancel failed',
+        description: err?.message || (language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.'),
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCancelling(false);
+    }
   };
   const resetBooking = () => {
     setStep('input');
