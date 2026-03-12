@@ -505,15 +505,6 @@ serve(async (req) => {
     console.log(`Tier ${tier}: Found ${nearbyDrivers.length} eligible drivers (${config.description})`);
 
     if (nearbyDrivers.length === 0) {
-      // Update ride with current tier for escalation tracking
-      await supabase
-        .from("rides")
-        .update({ 
-          notification_tier: tier,
-          last_notification_at: new Date().toISOString(),
-        })
-        .eq("id", rideId);
-
       return new Response(JSON.stringify({ 
         message: `No nearby drivers found for tier ${tier}`, 
         sent: 0,
@@ -529,15 +520,15 @@ serve(async (req) => {
 
     const driverUserIds = nearbyDrivers.map(d => d.user_id);
 
-    // Update ride with notified drivers
+    // Persist deduplicated notified drivers for subsequent tiers
     await supabase
       .from("rides")
       .update({ 
-        notification_tier: tier,
         last_notification_at: new Date().toISOString(),
         notified_driver_ids: [...new Set([...mergedExcludedDriverIds, ...driverUserIds])],
       })
-      .eq("id", rideId);
+      .eq("id", rideId)
+      .eq("notification_tier", tier);
 
     // Get push subscriptions for nearby online drivers
     const { data: subscriptions, error: subError } = await supabase
