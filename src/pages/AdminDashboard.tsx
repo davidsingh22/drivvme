@@ -951,6 +951,11 @@ const AdminDashboard = () => {
           </Card>
         </div>
 
+        {/* MSN Dispatch Center */}
+        <div className="mb-8">
+          <MSNDispatchPanel />
+        </div>
+
         {/* Main Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <div className="flex flex-col sm:flex-row justify-between gap-4">
