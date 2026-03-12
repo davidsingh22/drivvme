@@ -114,32 +114,37 @@ const RiderLocationTracker = () => {
 const InstantPresenceSignal = () => {
   const { user, isDriver, isAdmin } = useAuth();
 
-  const sendPulse = useCallback(() => {
-    if (!user?.id || isDriver || isAdmin) return;
-    const now = new Date().toISOString();
-    supabase
-      .from('rider_locations')
-      .upsert(
-        {
-          user_id: user.id,
-          lat: 45.5017,
-          lng: -73.5673,
-          accuracy: 10000,
-          is_online: true,
-          last_seen_at: now,
-          updated_at: now,
-        },
-        { onConflict: 'user_id' }
-      )
-      .then(({ error }) => {
-        if (error) console.warn('[InstantPresence] upsert failed:', error);
-        else console.log('🟢 Instant presence signal sent for:', user.email ?? user.id);
-      });
-  }, [user?.id, user?.email, isDriver, isAdmin]);
+  const sendPulse = useCallback(
+    async (overrideUserId?: string, overrideEmail?: string | null) => {
+      const targetUserId = overrideUserId ?? user?.id;
+      const targetEmail = overrideEmail ?? user?.email ?? null;
+      if (!targetUserId || isDriver || isAdmin) return;
 
-  // Fire on mount
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('rider_locations')
+        .upsert(
+          {
+            user_id: targetUserId,
+            lat: 45.5017,
+            lng: -73.5673,
+            accuracy: 10000,
+            is_online: true,
+            last_seen_at: now,
+            updated_at: now,
+          },
+          { onConflict: 'user_id' }
+        );
+
+      if (error) console.warn('[InstantPresence] upsert failed:', error);
+      else console.log('🟢 Instant presence signal sent for:', targetEmail ?? targetUserId);
+    },
+    [user?.id, user?.email, isDriver, isAdmin]
+  );
+
+  // Fire immediately when the component mounts with an authenticated rider
   useEffect(() => {
-    sendPulse();
+    void sendPulse();
   }, [sendPulse]);
 
   // Re-fire on visibility resume + periodic heartbeat every 30s
@@ -147,15 +152,33 @@ const InstantPresenceSignal = () => {
     if (!user?.id || isDriver || isAdmin) return;
 
     const onVisChange = () => {
-      if (document.visibilityState === 'visible') sendPulse();
+      if (document.visibilityState === 'visible') void sendPulse();
     };
     document.addEventListener('visibilitychange', onVisChange);
 
-    const iv = setInterval(sendPulse, 30_000);
+    const iv = setInterval(() => {
+      void sendPulse();
+    }, 30_000);
 
     return () => {
       document.removeEventListener('visibilitychange', onVisChange);
       clearInterval(iv);
+    };
+  }, [user?.id, isDriver, isAdmin, sendPulse]);
+
+  // Fire again exactly when auth establishes or restores a session
+  useEffect(() => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session?.user?.id) return;
+      if (event !== 'SIGNED_IN' && event !== 'INITIAL_SESSION') return;
+      if (session.user.id !== user?.id || isDriver || isAdmin) return;
+      void sendPulse(session.user.id, session.user.email ?? null);
+    });
+
+    return () => {
+      subscription.unsubscribe();
     };
   }, [user?.id, isDriver, isAdmin, sendPulse]);
 

@@ -60,7 +60,7 @@ const nameOf = (e: { first_name: string | null; last_name: string | null; email:
   [e.first_name, e.last_name].filter(Boolean).join(" ") || e.email || "Unknown";
 
 const riderToken = (userId: string) => `{{rider:${userId}}}`;
-const riderFallback = (userId: string) => userId.slice(0, 6);
+const riderUnknownLabel = "unknown rider";
 
 // ─── Component ──────────────────────────────────────────────────────────
 const MSNDispatchCenter: React.FC = () => {
@@ -90,16 +90,17 @@ const MSNDispatchCenter: React.FC = () => {
   const riderDisplay = useCallback(
     (userId: string) => {
       const cached = riderCacheRef.current[userId];
-      return cached?.email || [cached?.first_name, cached?.last_name].filter(Boolean).join(" ") || riderFallback(userId);
+      const fullName = [cached?.first_name, cached?.last_name].filter(Boolean).join(" ");
+      return cached?.email || fullName || riderUnknownLabel;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [riderDisplayVersion]
   );
 
-  const riderLabel = useCallback(
-    (entry: RiderEntry) => entry.email || [entry.first_name, entry.last_name].filter(Boolean).join(" ") || riderFallback(entry.user_id),
-    []
-  );
+  const riderLabel = useCallback((entry: RiderEntry) => {
+    const fullName = [entry.first_name, entry.last_name].filter(Boolean).join(" ");
+    return entry.email || fullName || riderUnknownLabel;
+  }, []);
 
   const renderTimelineMessage = useCallback(
     (message: string) => {
@@ -211,16 +212,31 @@ const MSNDispatchCenter: React.FC = () => {
     (userId: string, lastSeenAt?: string | null) => {
       if (!userId) return;
       const heartbeat = lastSeenAt ?? new Date().toISOString();
+      const cached = riderCacheRef.current[userId];
 
       setRiders((prev) => {
         const idx = prev.findIndex((r) => r.user_id === userId);
         if (idx >= 0) {
           const next = [...prev];
-          next[idx] = { ...next[idx], last_seen_at: heartbeat, is_online: true };
+          next[idx] = {
+            ...next[idx],
+            first_name: next[idx].first_name ?? cached?.first_name ?? null,
+            last_name: next[idx].last_name ?? cached?.last_name ?? null,
+            email: next[idx].email ?? cached?.email ?? null,
+            last_seen_at: heartbeat,
+            is_online: true,
+          };
           return next;
         }
         return [
-          { user_id: userId, first_name: null, last_name: null, email: null, last_seen_at: heartbeat, is_online: true },
+          {
+            user_id: userId,
+            first_name: cached?.first_name ?? null,
+            last_name: cached?.last_name ?? null,
+            email: cached?.email ?? null,
+            last_seen_at: heartbeat,
+            is_online: true,
+          },
           ...prev,
         ];
       });
@@ -301,18 +317,28 @@ const MSNDispatchCenter: React.FC = () => {
       return true;
     });
 
+    const missingEmailUserIds: string[] = [];
+
     const nextRiders: RiderEntry[] = deduped.map((row) => {
-      // Populate cache for identity resolution in logs
-      riderCacheRef.current[row.user_id!] = {
-        first_name: null,
-        last_name: null,
-        email: row.email ?? null,
+      const userId = row.user_id!;
+      const cached = riderCacheRef.current[userId];
+      const nextEmail = row.email ?? cached?.email ?? null;
+      const nextFirstName = cached?.first_name ?? null;
+      const nextLastName = cached?.last_name ?? null;
+
+      riderCacheRef.current[userId] = {
+        first_name: nextFirstName,
+        last_name: nextLastName,
+        email: nextEmail,
       };
+
+      if (!nextEmail) missingEmailUserIds.push(userId);
+
       return {
-        user_id: row.user_id!,
-        first_name: null,
-        last_name: null,
-        email: row.email ?? null,
+        user_id: userId,
+        first_name: nextFirstName,
+        last_name: nextLastName,
+        email: nextEmail,
         last_seen_at: row.last_seen_at ?? null,
         is_online: row.is_online === true,
       };
@@ -328,7 +354,29 @@ const MSNDispatchCenter: React.FC = () => {
 
     setRiders(nextRiders);
     setRiderDisplayVersion((v) => v + 1);
-  }, []);
+
+    if (missingEmailUserIds.length > 0) {
+      missingEmailUserIds.forEach((userId) => {
+        void resolveRiderProfile(userId, true)
+          .then((profile) => {
+            if (!profile?.email) return;
+            setRiders((prev) =>
+              prev.map((entry) =>
+                entry.user_id === userId
+                  ? {
+                      ...entry,
+                      first_name: profile.first_name,
+                      last_name: profile.last_name,
+                      email: profile.email,
+                    }
+                  : entry
+              )
+            );
+          })
+          .catch(() => undefined);
+      });
+    }
+  }, [resolveRiderProfile]);
 
   // ─── Fetch drivers ─────────────────────────────────────────────────
   const fetchDrivers = useCallback(async () => {
