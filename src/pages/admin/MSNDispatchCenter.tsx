@@ -565,12 +565,7 @@ const MSNDispatchCenter: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [ensureRiderVisible, isAdmin, pushLog, resolveDriverName]);
 
-  // ─── Tick for UI refresh ──────────────────────────────────────────
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const iv = setInterval(() => setTick((t) => t + 1), 10000);
-    return () => clearInterval(iv);
-  }, []);
+  // UI timestamps refresh removed — relying 100% on realtime events
 
   // ─── Force Offline driver ─────────────────────────────────────────
   const forceOffline = async (driverUserId: string) => {
