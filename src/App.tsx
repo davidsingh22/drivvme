@@ -110,16 +110,12 @@ const RiderLocationTracker = () => {
 };
 
 // Instant Entry Signal: upsert rider_locations the millisecond auth is confirmed
+// Also re-fires on visibility change (app resume) to keep presence fresh
 const InstantPresenceSignal = () => {
   const { user, isDriver, isAdmin } = useAuth();
-  const sentRef = useRef<string | null>(null);
 
-  useEffect(() => {
+  const sendPulse = useCallback(() => {
     if (!user?.id || isDriver || isAdmin) return;
-    // Only fire once per user session
-    if (sentRef.current === user.id) return;
-    sentRef.current = user.id;
-
     const now = new Date().toISOString();
     supabase
       .from('rider_locations')
@@ -140,6 +136,28 @@ const InstantPresenceSignal = () => {
         else console.log('🟢 Instant presence signal sent for:', user.email ?? user.id);
       });
   }, [user?.id, user?.email, isDriver, isAdmin]);
+
+  // Fire on mount
+  useEffect(() => {
+    sendPulse();
+  }, [sendPulse]);
+
+  // Re-fire on visibility resume + periodic heartbeat every 30s
+  useEffect(() => {
+    if (!user?.id || isDriver || isAdmin) return;
+
+    const onVisChange = () => {
+      if (document.visibilityState === 'visible') sendPulse();
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+
+    const iv = setInterval(sendPulse, 30_000);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisChange);
+      clearInterval(iv);
+    };
+  }, [user?.id, isDriver, isAdmin, sendPulse]);
 
   return null;
 };
