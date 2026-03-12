@@ -321,60 +321,23 @@ const MSNDispatchCenter: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) return;
 
-    const sortByPresence = (list: RiderEntry[]) => {
-      const next = [...list];
-      next.sort((a, b) => {
-        const aOnline = a.is_online || isAppOpen(a.last_seen_at);
-        const bOnline = b.is_online || isAppOpen(b.last_seen_at);
-        if (aOnline !== bOnline) return aOnline ? -1 : 1;
-        return (
-          (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
-          (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
-        );
-      });
-      return next;
-    };
-
     const ch = supabase
       .channel("msn-rider-locations")
       .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
+        toast.success("Data Received!");
+
         if (payload.eventType === "DELETE") return;
 
         const row = (payload.new as any) ?? {};
         if (!row.user_id) return;
 
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
-        const nextIsOnline = row.is_online ?? true;
 
-        // Golden rule: show the rider immediately, even before profile/email fetch resolves.
-        setRiders((prev) => {
-          const index = prev.findIndex((r) => r.user_id === row.user_id);
-          if (index >= 0) {
-            const next = [...prev];
-            next[index] = {
-              ...next[index],
-              last_seen_at: updatedLastSeen,
-              is_online: nextIsOnline,
-            };
-            return sortByPresence(next);
-          }
-
-          return sortByPresence([
-            {
-              user_id: row.user_id,
-              first_name: null,
-              last_name: null,
-              email: null,
-              last_seen_at: updatedLastSeen,
-              is_online: nextIsOnline,
-            },
-            ...prev,
-          ]);
-        });
+        ensureRiderVisible(row.user_id, updatedLastSeen);
 
         const oldLastSeen = (payload.old as any)?.last_seen_at;
-        if (nextIsOnline && (payload.eventType === "INSERT" || oldLastSeen !== updatedLastSeen)) {
-          pushLog("system", `🟢 ${riderToken(row.user_id)} is now Online`);
+        if (payload.eventType === "INSERT" || oldLastSeen !== updatedLastSeen) {
+          pushLog("system", `🟢 ${riderToken(row.user_id)} is Online`);
         }
 
         // Identity hot-swap in background (list + timeline update automatically via token rendering).
@@ -383,17 +346,15 @@ const MSNDispatchCenter: React.FC = () => {
             if (!profile) return;
             riderCacheRef.current[row.user_id] = profile;
             setRiders((prev) =>
-              sortByPresence(
-                prev.map((r) =>
-                  r.user_id === row.user_id
-                    ? {
-                        ...r,
-                        first_name: profile.first_name,
-                        last_name: profile.last_name,
-                        email: profile.email,
-                      }
-                    : r
-                )
+              prev.map((r) =>
+                r.user_id === row.user_id
+                  ? {
+                      ...r,
+                      first_name: profile.first_name,
+                      last_name: profile.last_name,
+                      email: profile.email,
+                    }
+                  : r
               )
             );
           })
@@ -404,7 +365,7 @@ const MSNDispatchCenter: React.FC = () => {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [isAdmin, pushLog, resolveRiderProfile]);
+  }, [ensureRiderVisible, isAdmin, pushLog, resolveRiderProfile]);
 
   // ─── Realtime: driver_profiles (online status) ─────────────────────
   useEffect(() => {
