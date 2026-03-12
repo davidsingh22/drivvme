@@ -364,12 +364,18 @@ const MSNDispatchCenter: React.FC = () => {
     setActiveRides(map);
   }, []);
 
-  // ─── Initial load (no system noise) ───────────────────────────────
+  // ─── Initial load + polling fallback every 10s ─────────────────────
   useEffect(() => {
     if (!isAdmin) return;
     fetchRiders();
     fetchDrivers();
     fetchActiveRides();
+
+    const iv = setInterval(() => {
+      fetchRiders();
+      fetchActiveRides();
+    }, 10_000);
+    return () => clearInterval(iv);
   }, [isAdmin, fetchRiders, fetchDrivers, fetchActiveRides]);
 
   // ─── Realtime: rider_locations ─────────────────────────────────────
