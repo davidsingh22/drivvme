@@ -128,6 +128,17 @@ const RiderHome = () => {
   const handleVisibilityChange = useCallback(() => {
     if (document.visibilityState === 'hidden') {
       lastHidden.current = Date.now();
+      void (async () => {
+        try {
+          const { data } = await supabase.auth.getUser();
+          const authUser = data.user;
+          if (authUser?.id) {
+            await upsertRiderPresence({ id: authUser.id, email: authUser.email }, false);
+          }
+        } catch (error) {
+          console.warn('[RiderHome] Hidden offline signal failed:', error);
+        }
+      })();
       return;
     }
 
@@ -159,7 +170,7 @@ const RiderHome = () => {
         );
       } catch { /* no-op */ }
     }
-  }, []);
+  }, [upsertRiderPresence]);
 
   useEffect(() => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
