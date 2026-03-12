@@ -166,8 +166,8 @@ const MSNDispatchCenter: React.FC = () => {
     []
   );
 
-  const resolveRiderProfile = useCallback(async (userId: string) => {
-    if (riderCacheRef.current[userId]?.email) return riderCacheRef.current[userId];
+  const resolveRiderProfile = useCallback(async (userId: string, bypassCache = false) => {
+    if (!bypassCache && riderCacheRef.current[userId]?.email) return riderCacheRef.current[userId];
     const { data } = await supabase
       .from("profiles")
       .select("first_name, last_name, email")
