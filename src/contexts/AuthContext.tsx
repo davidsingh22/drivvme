@@ -734,10 +734,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionStorage.removeItem('drivvme_session_active');
     } catch {}
 
-    // Fire-and-forget the actual signOut call to Supabase
-    supabase.auth.signOut().catch((error: any) => {
+    // Complete auth signout after offline signal is persisted
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        throw error;
+      }
+    } catch (error: any) {
       console.error('Error signing out:', error);
-    });
+    }
 
     toast({
       title: 'Signed out',
