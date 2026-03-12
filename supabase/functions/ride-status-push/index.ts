@@ -225,14 +225,34 @@ serve(async (req) => {
 
     const result = await sendPush(config.targetUserId, config.title, config.message, pushData);
 
-    // For cancelled rides, also notify the rider
-    if (payload.new_status === "cancelled" && payload.rider_id) {
-      await sendPush(
-        payload.rider_id,
-        "Ride Cancelled ❌",
-        "Your ride has been cancelled.",
-        { ride_id: payload.ride_id, status: "cancelled" },
-      );
+    // For cancelled rides, create in-app notification for the driver AND notify the rider
+    if (payload.new_status === "cancelled") {
+      // Insert a ride_cancelled notification for the driver so their realtime listener clears the ride instantly
+      if (payload.driver_id) {
+        const supabase = getSupabase();
+        const { error: notifErr } = await supabase.from("notifications").insert({
+          user_id: payload.driver_id,
+          ride_id: payload.ride_id,
+          type: "ride_cancelled",
+          title: "Ride Cancelled ❌",
+          message: "The rider has cancelled the ride.",
+        });
+        if (notifErr) {
+          console.error("[ride-status-push] Failed to insert ride_cancelled notification for driver:", notifErr.message);
+        } else {
+          console.log("[ride-status-push] Inserted ride_cancelled notification for driver:", payload.driver_id);
+        }
+      }
+
+      // Also push-notify the rider
+      if (payload.rider_id) {
+        await sendPush(
+          payload.rider_id,
+          "Ride Cancelled ❌",
+          "Your ride has been cancelled.",
+          { ride_id: payload.ride_id, status: "cancelled" },
+        );
+      }
     }
 
     return new Response(JSON.stringify({ success: true, onesignal: result.data }), {
