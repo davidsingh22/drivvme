@@ -43,6 +43,9 @@ interface LogEntry {
   ride_id?: string;
 }
 
+// Track last known status per user to de-duplicate feed
+type UserStatus = "online" | "searching" | "accepted" | "in_progress" | "completed" | "cancelled" | "offline";
+
 // ─── Helpers ────────────────────────────────────────────────────────────
 const HEARTBEAT_WINDOW_MS = 5 * 60 * 1000;
 
@@ -73,6 +76,8 @@ const MSNDispatchCenter: React.FC = () => {
   const logIdCounter = useRef(0);
   const driverCacheRef = useRef<Record<string, string>>({});
   const riderCacheRef = useRef<Record<string, { first_name: string | null; last_name: string | null; email: string | null }>>({});
+  const userStatusRef = useRef<Record<string, UserStatus>>({});
+  const [riderDisplayVersion, setRiderDisplayVersion] = useState(0);
 
   // ─── Gate ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -110,7 +115,7 @@ const MSNDispatchCenter: React.FC = () => {
           parts.push(<span key={`txt-${tokenMatch.index}`}>{message.slice(lastIndex, tokenMatch.index)}</span>);
         }
         parts.push(
-          <span key={`rider-${tokenMatch.index}`} className="text-sky-400">
+          <span key={`rider-${tokenMatch.index}`} className="text-sky-400 text-[13px]">
             {riderDisplay(tokenUserId)}
           </span>
         );
@@ -123,7 +128,8 @@ const MSNDispatchCenter: React.FC = () => {
 
       return parts.length ? parts : message;
     },
-    [riderDisplay]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [riderDisplay, riderDisplayVersion]
   );
 
   // ─── Push log helper ───────────────────────────────────────────────
@@ -343,23 +349,22 @@ const MSNDispatchCenter: React.FC = () => {
     const ch = supabase
       .channel("msn-rider-locations")
       .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
-        toast.success("Data Received!");
-
         if (payload.eventType === "DELETE") return;
 
         const row = (payload.new as any) ?? {};
         if (!row.user_id) return;
 
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
-
         ensureRiderVisible(row.user_id, updatedLastSeen);
 
-        const oldLastSeen = (payload.old as any)?.last_seen_at;
-        if (payload.eventType === "INSERT" || oldLastSeen !== updatedLastSeen) {
+        // Only log "Online" once — skip duplicate GPS pings
+        const prevStatus = userStatusRef.current[row.user_id];
+        if (prevStatus !== "online" && prevStatus !== "searching" && prevStatus !== "accepted" && prevStatus !== "in_progress") {
+          userStatusRef.current[row.user_id] = "online";
           pushLog("system", `🟢 ${riderToken(row.user_id)} is Online`);
         }
 
-        // Identity hot-swap in background (list + timeline update automatically via token rendering).
+        // Identity hot-swap
         void resolveRiderProfile(row.user_id)
           .then((profile) => {
             if (!profile) return;
@@ -367,15 +372,12 @@ const MSNDispatchCenter: React.FC = () => {
             setRiders((prev) =>
               prev.map((r) =>
                 r.user_id === row.user_id
-                  ? {
-                      ...r,
-                      first_name: profile.first_name,
-                      last_name: profile.last_name,
-                      email: profile.email,
-                    }
+                  ? { ...r, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }
                   : r
               )
             );
+            // Force re-render of timeline tokens
+            setRiderDisplayVersion((v) => v + 1);
           })
           .catch(() => undefined);
       })
@@ -421,9 +423,12 @@ const MSNDispatchCenter: React.FC = () => {
 
         if (ride.rider_id) {
           ensureRiderVisible(ride.rider_id, new Date().toISOString());
+          const prev = userStatusRef.current[ride.rider_id];
+          if (prev !== "searching") {
+            userStatusRef.current[ride.rider_id] = "searching";
+            pushLog("rider", `🚕 ${riderRef(ride)} is searching for a ride`, ride.id);
+          }
         }
-
-        pushLog("rider", `🚗 ${riderRef(ride)} is searching...`, ride.id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
@@ -443,20 +448,34 @@ const MSNDispatchCenter: React.FC = () => {
           setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
         }
 
+        // Only log on actual status transitions
         if (ride.status !== old.status) {
+          const riderId = ride.rider_id;
           if (ride.status === "driver_assigned" && ride.driver_id) {
+            if (riderId) userStatusRef.current[riderId] = "accepted";
             const dn = await resolveDriverName(ride.driver_id);
             pushLog("dispatch", `✅ ${riderRef(ride)} ride accepted by ${dn}`, ride.id);
           } else if (ride.status === "cancelled") {
+            if (riderId) userStatusRef.current[riderId] = "cancelled";
             pushLog("cancel", `❌ ${riderRef(ride)} ride cancelled`, ride.id);
           } else if (ride.status === "in_progress") {
+            if (riderId) userStatusRef.current[riderId] = "in_progress";
             pushLog("rider", `🚗 ${riderRef(ride)} ride in progress`, ride.id);
           } else if (ride.status === "completed") {
+            if (riderId) userStatusRef.current[riderId] = "completed";
             pushLog("rider", `🏁 ${riderRef(ride)} ride completed`, ride.id);
           } else if (ride.status === "driver_en_route") {
             pushLog("driver", `🚙 Driver en route to ${riderRef(ride)}`, ride.id);
           } else if (ride.status === "arrived") {
             pushLog("driver", `📍 Driver arrived for ${riderRef(ride)}`, ride.id);
+          } else if (ride.status === "searching") {
+            if (riderId) {
+              const prevS = userStatusRef.current[riderId];
+              if (prevS !== "searching") {
+                userStatusRef.current[riderId] = "searching";
+                pushLog("rider", `🚕 ${riderRef(ride)} is searching for a ride`, ride.id);
+              }
+            }
           }
         }
 
@@ -583,7 +602,7 @@ const MSNDispatchCenter: React.FC = () => {
                   <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
-                      <span className="text-[11px] truncate text-sky-400">{riderLabel(r)}</span>
+                      <span className="text-[13px] truncate text-sky-400">{riderLabel(r)}</span>
                     </div>
                     <span className="text-[9px] flex-shrink-0 text-green-500">ONLINE</span>
                   </div>
@@ -611,7 +630,7 @@ const MSNDispatchCenter: React.FC = () => {
                   <div key={d.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className={`h-2 w-2 rounded-full flex-shrink-0 ${d.is_online ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" : "bg-gray-600"}`} />
-                      <span className={`text-[11px] truncate ${d.is_online ? "text-purple-400" : "text-gray-400"}`}>{d.email || nameOf(d)}</span>
+                      <span className={`text-[13px] truncate ${d.is_online ? "text-purple-400" : "text-gray-400"}`}>{d.email || nameOf(d)}</span>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <span className={`text-[10px] ${d.is_online ? "text-green-500" : "text-gray-600"}`}>
