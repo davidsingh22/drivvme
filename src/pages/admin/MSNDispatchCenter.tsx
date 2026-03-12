@@ -313,7 +313,7 @@ const MSNDispatchCenter: React.FC = () => {
         last_name: profile?.last_name ?? null,
         email: profile?.email ?? null,
         last_seen_at: loc.last_seen_at ?? null,
-        is_online: hasFreshHeartbeat(loc.last_seen_at),
+        is_online: loc.is_online === true,
       };
     });
 
@@ -565,12 +565,7 @@ const MSNDispatchCenter: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [ensureRiderVisible, isAdmin, pushLog, resolveDriverName]);
 
-  // ─── Tick for UI refresh ──────────────────────────────────────────
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const iv = setInterval(() => setTick((t) => t + 1), 10000);
-    return () => clearInterval(iv);
-  }, []);
+  // UI timestamps refresh removed — relying 100% on realtime events
 
   // ─── Force Offline driver ─────────────────────────────────────────
   const forceOffline = async (driverUserId: string) => {
@@ -605,9 +600,9 @@ const MSNDispatchCenter: React.FC = () => {
     cancel: "text-red-400",
   };
 
-  // Online = fresh heartbeat within 2 min
-  const onlineRiders = riders.filter((r) => hasFreshHeartbeat(r.last_seen_at));
-  const offlineRiders = riders.filter((r) => !hasFreshHeartbeat(r.last_seen_at));
+  // Online = is_online flag from realtime (instant, no heartbeat delay)
+  const onlineRiders = riders.filter((r) => r.is_online);
+  const offlineRiders = riders.filter((r) => !r.is_online);
 
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono p-4">

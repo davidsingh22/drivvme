@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useState, useRef, lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -109,6 +109,41 @@ const RiderLocationTracker = () => {
   return null;
 };
 
+// Instant Entry Signal: upsert rider_locations the millisecond auth is confirmed
+const InstantPresenceSignal = () => {
+  const { user, isDriver, isAdmin } = useAuth();
+  const sentRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id || isDriver || isAdmin) return;
+    // Only fire once per user session
+    if (sentRef.current === user.id) return;
+    sentRef.current = user.id;
+
+    const now = new Date().toISOString();
+    supabase
+      .from('rider_locations')
+      .upsert(
+        {
+          user_id: user.id,
+          lat: 45.5017,
+          lng: -73.5673,
+          accuracy: 10000,
+          is_online: true,
+          last_seen_at: now,
+          updated_at: now,
+        },
+        { onConflict: 'user_id' }
+      )
+      .then(({ error }) => {
+        if (error) console.warn('[InstantPresence] upsert failed:', error);
+        else console.log('🟢 Instant presence signal sent for:', user.email ?? user.id);
+      });
+  }, [user?.id, user?.email, isDriver, isAdmin]);
+
+  return null;
+};
+
 // /driver is a driver screen. Riders should always be redirected to /ride.
 const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
@@ -198,6 +233,7 @@ const AppRoutes = () => {
         <DriverFloatingGPSButton />
       </Suspense>
       <RiderLocationTracker />
+      <InstantPresenceSignal />
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
