@@ -317,7 +317,7 @@ export default function LiveMonitor() {
       if (!allUsersLatest.has(row.user_id)) {
         allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
       }
-
+    });
 
     const allUserIds = [...allUsersLatest.keys()];
     await upsertProfileNames(allUserIds);
