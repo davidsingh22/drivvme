@@ -576,18 +576,18 @@ const MSNDispatchCenter: React.FC = () => {
             )}
 
             {/* Log feed */}
-            <ScrollArea className="flex-1 p-2">
-              <div className="space-y-0.5">
+            <ScrollArea className="flex-1 px-2 py-1">
+              <div className="space-y-px">
                 {logs.map((log) => (
-                  <div key={log.id} className="flex gap-2 text-[11px] leading-relaxed">
-                    <span className="text-gray-600 flex-shrink-0">[{fmtTime(log.ts)}]</span>
+                  <div key={log.id} className="flex gap-1.5 text-[10px] leading-tight py-px">
+                    <span className="text-gray-600 flex-shrink-0 tabular-nums">[{fmtTime(log.ts)}]</span>
                     <span className={logColor[log.type] ?? "text-gray-400"}>{log.message}</span>
                   </div>
                 ))}
                 <div ref={logEndRef} />
               </div>
               {logs.length === 0 && (
-                <div className="text-gray-600 text-xs py-4 text-center">Waiting for events...</div>
+                <div className="text-gray-600 text-[10px] py-4 text-center">Waiting for events...</div>
               )}
             </ScrollArea>
           </CardContent>
