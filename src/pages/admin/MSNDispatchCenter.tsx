@@ -63,13 +63,12 @@ const riderFallback = (userId: string) => userId.slice(0, 6);
 // ─── Component ──────────────────────────────────────────────────────────
 const MSNDispatchCenter: React.FC = () => {
   const navigate = useNavigate();
-  const { user, isAdmin, authLoading } = useAuth();
+  const { isAdmin, authLoading } = useAuth();
 
   const [riders, setRiders] = useState<RiderEntry[]>([]);
   const [drivers, setDrivers] = useState<DriverEntry[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeRides, setActiveRides] = useState<Record<string, any>>({});
-  const logEndRef = useRef<HTMLDivElement>(null);
   const logIdCounter = useRef(0);
   const driverCacheRef = useRef<Record<string, string>>({});
   const riderCacheRef = useRef<Record<string, { first_name: string | null; last_name: string | null; email: string | null }>>({});
