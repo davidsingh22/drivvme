@@ -625,43 +625,18 @@ const MSNDispatchCenter: React.FC = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0 flex flex-col h-[calc(100vh-180px)]">
-            {/* Active rides bar */}
-            {Object.keys(activeRides).length > 0 && (
-              <div className="border-b border-green-900/50 p-2 space-y-1 max-h-32 overflow-y-auto">
-                {Object.values(activeRides).map((ride: any) => (
-                  <div key={ride.id} className="flex items-center justify-between gap-2 text-[10px]">
-                    <div className="flex items-center gap-1 min-w-0 truncate">
-                      <AlertTriangle className="h-3 w-3 text-yellow-500 flex-shrink-0" />
-                      <span className="text-yellow-400 truncate">
-                        {ride.id.slice(0, 8)} · {ride.status}
-                      </span>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => forceResetRide(ride.id)}
-                      className="h-5 px-2 text-[10px] text-red-500 hover:text-red-300 hover:bg-red-900/20 flex-shrink-0"
-                    >
-                      <Skull className="h-3 w-3 mr-1" /> FORCE RESET
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {/* Log feed */}
             <ScrollArea className="flex-1 px-2 py-1">
-              <div className="space-y-px">
+              <div className="space-y-px font-mono text-[11px] leading-tight">
                 {logs.map((log) => (
-                  <div key={log.id} className="flex gap-1.5 text-[10px] leading-tight py-px">
+                  <div key={log.id} className="flex gap-1.5 py-px">
                     <span className="text-gray-600 flex-shrink-0 tabular-nums">[{fmtTime(log.ts)}]</span>
-                    <span className={logColor[log.type] ?? "text-gray-400"}>{log.message}</span>
+                    <span className={logColor[log.type] ?? "text-gray-400"}>{renderTimelineMessage(log.message)}</span>
                   </div>
                 ))}
-                <div ref={logEndRef} />
               </div>
               {logs.length === 0 && (
-                <div className="text-gray-600 text-[10px] py-4 text-center">Waiting for events...</div>
+                <div className="text-gray-600 text-[11px] py-4 text-center">Waiting for events...</div>
               )}
             </ScrollArea>
           </CardContent>
