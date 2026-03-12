@@ -386,19 +386,15 @@ const MSNDispatchCenter: React.FC = () => {
   // ─── Realtime: rides (new rides + status changes + dispatch) ───────
   useEffect(() => {
     if (!isAdmin) return;
+
+    const riderRef = (ride: any) => (ride?.rider_id ? riderToken(ride.rider_id) : "unknown");
+
     const ch = supabase
       .channel("msn-rides")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
         setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
-
-        const { data: rp } = await supabase
-          .from("profiles")
-          .select("first_name, last_name, email")
-          .eq("user_id", ride.rider_id)
-          .maybeSingle();
-        const riderEmail = rp?.email || [rp?.first_name, rp?.last_name].filter(Boolean).join(" ") || ride.rider_id?.slice(0, 8);
-        pushLog("rider", `🚗 ${riderEmail} is searching for a ride (Triggered by ride 'requested')`, ride.id);
+        pushLog("rider", `🚕 ${riderRef(ride)} is looking for a ride`, ride.id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
@@ -415,30 +411,22 @@ const MSNDispatchCenter: React.FC = () => {
         }
 
         if (ride.status !== old.status) {
-          const { data: rp } = await supabase
-            .from("profiles")
-            .select("first_name, last_name, email")
-            .eq("user_id", ride.rider_id)
-            .maybeSingle();
-          const riderEmail = rp?.email || [rp?.first_name, rp?.last_name].filter(Boolean).join(" ") || ride.rider_id?.slice(0, 8);
-
           if (ride.status === "driver_assigned" && ride.driver_id) {
             const dn = await resolveDriverName(ride.driver_id);
-            pushLog("dispatch", `✅ ${riderEmail} ride accepted by ${dn}`, ride.id);
+            pushLog("dispatch", `✅ ${riderRef(ride)} ride accepted by ${dn}`, ride.id);
           } else if (ride.status === "cancelled") {
-            pushLog("cancel", `❌ ${riderEmail} ride cancelled`, ride.id);
+            pushLog("cancel", `❌ ${riderRef(ride)} ride cancelled`, ride.id);
           } else if (ride.status === "in_progress") {
-            pushLog("rider", `🚗 ${riderEmail} ride in progress`, ride.id);
+            pushLog("rider", `🚗 ${riderRef(ride)} ride in progress`, ride.id);
           } else if (ride.status === "completed") {
-            pushLog("rider", `🏁 ${riderEmail} ride completed`, ride.id);
+            pushLog("rider", `🏁 ${riderRef(ride)} ride completed`, ride.id);
           } else if (ride.status === "driver_en_route") {
-            pushLog("driver", `🚙 Driver en route to ${riderEmail}`, ride.id);
+            pushLog("driver", `🚙 Driver en route to ${riderRef(ride)}`, ride.id);
           } else if (ride.status === "arrived") {
-            pushLog("driver", `📍 Driver arrived for ${riderEmail}`, ride.id);
+            pushLog("driver", `📍 Driver arrived for ${riderRef(ride)}`, ride.id);
           }
         }
 
-        // Dispatch notifications
         const oldIds: string[] = old.notified_driver_ids ?? [];
         const newIds: string[] = ride.notified_driver_ids ?? [];
         const freshIds = newIds.filter((id: string) => !oldIds.includes(id));
@@ -448,7 +436,10 @@ const MSNDispatchCenter: React.FC = () => {
         }
       })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
   }, [isAdmin, pushLog, resolveDriverName]);
 
   // ─── Auto-scroll logs ──────────────────────────────────────────────
