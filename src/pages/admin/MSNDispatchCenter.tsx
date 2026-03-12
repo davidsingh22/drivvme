@@ -200,8 +200,27 @@ const MSNDispatchCenter: React.FC = () => {
           ...prev,
         ];
       });
+
+      void resolveRiderProfile(userId)
+        .then((profile) => {
+          if (!profile) return;
+          riderCacheRef.current[userId] = profile;
+          setRiders((prev) =>
+            prev.map((r) =>
+              r.user_id === userId
+                ? {
+                    ...r,
+                    first_name: profile.first_name,
+                    last_name: profile.last_name,
+                    email: profile.email,
+                  }
+                : r
+            )
+          );
+        })
+        .catch(() => undefined);
     },
-    []
+    [resolveRiderProfile]
   );
 
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
