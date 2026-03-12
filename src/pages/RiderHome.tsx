@@ -14,12 +14,9 @@ const RiderHome = () => {
   const { isAdmin, signOut } = useAuth();
   const gpsStarted = useRef(false);
 
-  // Entry Signal: fire immediately when RiderHome mounts
-  useEffect(() => {
-    let cancelled = false;
-
-    const sendPresenceSignal = async (authUser: { id: string; email?: string | null }) => {
-      if (cancelled || !authUser.id) return;
+  const upsertRiderPresence = useCallback(
+    async (authUser: { id: string; email?: string | null }, isOnline: boolean) => {
+      if (!authUser?.id) return;
 
       const now = new Date().toISOString();
       const { error } = await supabase
@@ -30,7 +27,7 @@ const RiderHome = () => {
             lat: 45.5017,
             lng: -73.5673,
             accuracy: 10000,
-            is_online: true,
+            is_online: isOnline,
             last_seen_at: now,
             updated_at: now,
           },
@@ -38,17 +35,26 @@ const RiderHome = () => {
         );
 
       if (error) {
-        console.warn('[RiderHome] Presence signal failed:', error);
-        return;
+        throw error;
       }
 
       console.log('Presence signal sent for:', authUser.email ?? authUser.id);
-    };
+    },
+    []
+  );
+
+  // Entry Signal: fire immediately when RiderHome mounts
+  useEffect(() => {
+    let cancelled = false;
 
     const boot = async () => {
       const { data } = await supabase.auth.getUser();
-      if (data.user?.id) {
-        await sendPresenceSignal({ id: data.user.id, email: data.user.email });
+      if (!cancelled && data.user?.id) {
+        try {
+          await upsertRiderPresence({ id: data.user.id, email: data.user.email }, true);
+        } catch (error) {
+          console.warn('[RiderHome] Presence signal failed:', error);
+        }
       }
     };
 
@@ -56,7 +62,9 @@ const RiderHome = () => {
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user?.id) {
-        void sendPresenceSignal({ id: session.user.id, email: session.user.email });
+        void upsertRiderPresence({ id: session.user.id, email: session.user.email }, true).catch((error) => {
+          console.warn('[RiderHome] Presence signal failed:', error);
+        });
       }
     });
 
@@ -64,28 +72,15 @@ const RiderHome = () => {
       cancelled = true;
       authListener.subscription.unsubscribe();
     };
-  }, []);
+  }, [upsertRiderPresence]);
 
   const handleLogout = useCallback(async () => {
     try {
       const { data } = await supabase.auth.getUser();
       const authUser = data.user;
+
       if (authUser?.id) {
-        const now = new Date().toISOString();
-        await supabase
-          .from('rider_locations')
-          .upsert(
-            {
-              user_id: authUser.id,
-              lat: 45.5017,
-              lng: -73.5673,
-              accuracy: 10000,
-              is_online: false,
-              last_seen_at: now,
-              updated_at: now,
-            },
-            { onConflict: 'user_id' }
-          );
+        await upsertRiderPresence({ id: authUser.id, email: authUser.email }, false);
       }
     } catch (error) {
       console.warn('[RiderHome] Pre-logout signal failed:', error);
@@ -93,7 +88,7 @@ const RiderHome = () => {
 
     await signOut();
     window.location.href = '/';
-  }, [signOut]);
+  }, [signOut, upsertRiderPresence]);
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
   useEffect(() => {
