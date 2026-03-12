@@ -442,11 +442,6 @@ const MSNDispatchCenter: React.FC = () => {
     };
   }, [isAdmin, pushLog, resolveDriverName]);
 
-  // ─── Auto-scroll logs ──────────────────────────────────────────────
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
-
   // ─── Refresh timer for "App Open" indicators ──────────────────────
   const [, setTick] = useState(0);
   useEffect(() => {
