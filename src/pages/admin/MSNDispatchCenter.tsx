@@ -253,9 +253,9 @@ const MSNDispatchCenter: React.FC = () => {
     });
 
     nextRiders.sort((a, b) => {
-      const aOnline = a.is_online || isAppOpen(a.last_seen_at);
-      const bOnline = b.is_online || isAppOpen(b.last_seen_at);
-      if (aOnline !== bOnline) return aOnline ? -1 : 1;
+      const aActive = hasFreshHeartbeat(a.last_seen_at);
+      const bActive = hasFreshHeartbeat(b.last_seen_at);
+      if (aActive !== bActive) return aActive ? -1 : 1;
       return (
         (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
         (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
@@ -263,6 +263,14 @@ const MSNDispatchCenter: React.FC = () => {
     });
 
     setRiders(nextRiders);
+
+    const heartbeatIds = locationRows
+      .filter((row) => hasFreshHeartbeat(row.last_seen_at))
+      .map((row) => row.user_id);
+
+    if (heartbeatIds.length) {
+      setActiveRiderIds((prev) => Array.from(new Set([...heartbeatIds, ...prev])));
+    }
   }, []);
 
   // ─── Fetch drivers ─────────────────────────────────────────────────
