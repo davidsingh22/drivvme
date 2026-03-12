@@ -233,6 +233,7 @@ const AppRoutes = () => {
         <DriverFloatingGPSButton />
       </Suspense>
       <RiderLocationTracker />
+      <InstantPresenceSignal />
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />

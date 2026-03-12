@@ -600,9 +600,9 @@ const MSNDispatchCenter: React.FC = () => {
     cancel: "text-red-400",
   };
 
-  // Online = fresh heartbeat within 2 min
-  const onlineRiders = riders.filter((r) => hasFreshHeartbeat(r.last_seen_at));
-  const offlineRiders = riders.filter((r) => !hasFreshHeartbeat(r.last_seen_at));
+  // Online = is_online flag from realtime (instant, no heartbeat delay)
+  const onlineRiders = riders.filter((r) => r.is_online);
+  const offlineRiders = riders.filter((r) => !r.is_online);
 
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono p-4">
