@@ -417,6 +417,9 @@ const MSNDispatchCenter: React.FC = () => {
     cancel: "text-red-400",
   };
 
+  const onlineRiders = riders.filter((r) => r.is_online || isAppOpen(r.last_seen_at));
+  const idleRiders = riders.filter((r) => !(r.is_online || isAppOpen(r.last_seen_at)));
+
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono p-4">
       {/* Header */}
