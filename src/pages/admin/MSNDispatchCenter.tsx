@@ -44,9 +44,11 @@ interface LogEntry {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────
-const isAppOpen = (lastSeen: string | null) => {
+const HEARTBEAT_WINDOW_MS = 5 * 60 * 1000;
+
+const hasFreshHeartbeat = (lastSeen: string | null) => {
   if (!lastSeen) return false;
-  return Date.now() - new Date(lastSeen).getTime() < 30_000;
+  return Date.now() - new Date(lastSeen).getTime() <= HEARTBEAT_WINDOW_MS;
 };
 
 const fmtTime = (d: Date) =>
@@ -67,6 +69,7 @@ const MSNDispatchCenter: React.FC = () => {
   const [drivers, setDrivers] = useState<DriverEntry[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeRides, setActiveRides] = useState<Record<string, any>>({});
+  const [activeRiderIds, setActiveRiderIds] = useState<string[]>([]);
   const logIdCounter = useRef(0);
   const driverCacheRef = useRef<Record<string, string>>({});
   const riderCacheRef = useRef<Record<string, { first_name: string | null; last_name: string | null; email: string | null }>>({});
@@ -166,6 +169,60 @@ const MSNDispatchCenter: React.FC = () => {
     return null;
   }, []);
 
+  const ensureRiderVisible = useCallback(
+    (userId: string, lastSeenAt?: string | null) => {
+      if (!userId) return;
+      const heartbeat = lastSeenAt ?? new Date().toISOString();
+
+      setActiveRiderIds((prev) => (prev.includes(userId) ? prev : [userId, ...prev]));
+
+      setRiders((prev) => {
+        const idx = prev.findIndex((r) => r.user_id === userId);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = {
+            ...next[idx],
+            last_seen_at: heartbeat,
+            is_online: true,
+          };
+          return next;
+        }
+
+        return [
+          {
+            user_id: userId,
+            first_name: null,
+            last_name: null,
+            email: null,
+            last_seen_at: heartbeat,
+            is_online: true,
+          },
+          ...prev,
+        ];
+      });
+
+      void resolveRiderProfile(userId)
+        .then((profile) => {
+          if (!profile) return;
+          riderCacheRef.current[userId] = profile;
+          setRiders((prev) =>
+            prev.map((r) =>
+              r.user_id === userId
+                ? {
+                    ...r,
+                    first_name: profile.first_name,
+                    last_name: profile.last_name,
+                    email: profile.email,
+                  }
+                : r
+            )
+          );
+        })
+        .catch(() => undefined);
+    },
+    [resolveRiderProfile]
+  );
+
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
   const fetchRiders = useCallback(async () => {
     const [{ data: riderRoles }, { data: locations }] = await Promise.all([
@@ -215,9 +272,9 @@ const MSNDispatchCenter: React.FC = () => {
     });
 
     nextRiders.sort((a, b) => {
-      const aOnline = a.is_online || isAppOpen(a.last_seen_at);
-      const bOnline = b.is_online || isAppOpen(b.last_seen_at);
-      if (aOnline !== bOnline) return aOnline ? -1 : 1;
+      const aActive = hasFreshHeartbeat(a.last_seen_at);
+      const bActive = hasFreshHeartbeat(b.last_seen_at);
+      if (aActive !== bActive) return aActive ? -1 : 1;
       return (
         (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
         (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
@@ -225,6 +282,14 @@ const MSNDispatchCenter: React.FC = () => {
     });
 
     setRiders(nextRiders);
+
+    const heartbeatIds = locationRows
+      .filter((row) => hasFreshHeartbeat(row.last_seen_at))
+      .map((row) => row.user_id);
+
+    if (heartbeatIds.length) {
+      setActiveRiderIds((prev) => Array.from(new Set([...heartbeatIds, ...prev])));
+    }
   }, []);
 
   // ─── Fetch drivers ─────────────────────────────────────────────────
@@ -275,60 +340,23 @@ const MSNDispatchCenter: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) return;
 
-    const sortByPresence = (list: RiderEntry[]) => {
-      const next = [...list];
-      next.sort((a, b) => {
-        const aOnline = a.is_online || isAppOpen(a.last_seen_at);
-        const bOnline = b.is_online || isAppOpen(b.last_seen_at);
-        if (aOnline !== bOnline) return aOnline ? -1 : 1;
-        return (
-          (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
-          (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
-        );
-      });
-      return next;
-    };
-
     const ch = supabase
       .channel("msn-rider-locations")
       .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
+        toast.success("Data Received!");
+
         if (payload.eventType === "DELETE") return;
 
         const row = (payload.new as any) ?? {};
         if (!row.user_id) return;
 
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
-        const nextIsOnline = row.is_online ?? true;
 
-        // Golden rule: show the rider immediately, even before profile/email fetch resolves.
-        setRiders((prev) => {
-          const index = prev.findIndex((r) => r.user_id === row.user_id);
-          if (index >= 0) {
-            const next = [...prev];
-            next[index] = {
-              ...next[index],
-              last_seen_at: updatedLastSeen,
-              is_online: nextIsOnline,
-            };
-            return sortByPresence(next);
-          }
-
-          return sortByPresence([
-            {
-              user_id: row.user_id,
-              first_name: null,
-              last_name: null,
-              email: null,
-              last_seen_at: updatedLastSeen,
-              is_online: nextIsOnline,
-            },
-            ...prev,
-          ]);
-        });
+        ensureRiderVisible(row.user_id, updatedLastSeen);
 
         const oldLastSeen = (payload.old as any)?.last_seen_at;
-        if (nextIsOnline && (payload.eventType === "INSERT" || oldLastSeen !== updatedLastSeen)) {
-          pushLog("system", `🟢 ${riderToken(row.user_id)} is now Online`);
+        if (payload.eventType === "INSERT" || oldLastSeen !== updatedLastSeen) {
+          pushLog("system", `🟢 ${riderToken(row.user_id)} is Online`);
         }
 
         // Identity hot-swap in background (list + timeline update automatically via token rendering).
@@ -337,17 +365,15 @@ const MSNDispatchCenter: React.FC = () => {
             if (!profile) return;
             riderCacheRef.current[row.user_id] = profile;
             setRiders((prev) =>
-              sortByPresence(
-                prev.map((r) =>
-                  r.user_id === row.user_id
-                    ? {
-                        ...r,
-                        first_name: profile.first_name,
-                        last_name: profile.last_name,
-                        email: profile.email,
-                      }
-                    : r
-                )
+              prev.map((r) =>
+                r.user_id === row.user_id
+                  ? {
+                      ...r,
+                      first_name: profile.first_name,
+                      last_name: profile.last_name,
+                      email: profile.email,
+                    }
+                  : r
               )
             );
           })
@@ -358,7 +384,7 @@ const MSNDispatchCenter: React.FC = () => {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [isAdmin, pushLog, resolveRiderProfile]);
+  }, [ensureRiderVisible, isAdmin, pushLog, resolveRiderProfile]);
 
   // ─── Realtime: driver_profiles (online status) ─────────────────────
   useEffect(() => {
@@ -392,11 +418,20 @@ const MSNDispatchCenter: React.FC = () => {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
         setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
-        pushLog("rider", `🚕 ${riderRef(ride)} is looking for a ride`, ride.id);
+
+        if (ride.rider_id) {
+          ensureRiderVisible(ride.rider_id, new Date().toISOString());
+        }
+
+        pushLog("rider", `🚗 ${riderRef(ride)} is searching...`, ride.id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
         const old = payload.old as any;
+
+        if (ride.rider_id) {
+          ensureRiderVisible(ride.rider_id, ride.updated_at ?? new Date().toISOString());
+        }
 
         if (["completed", "cancelled"].includes(ride.status)) {
           setActiveRides((prev) => {
@@ -438,7 +473,7 @@ const MSNDispatchCenter: React.FC = () => {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [isAdmin, pushLog, resolveDriverName]);
+  }, [ensureRiderVisible, isAdmin, pushLog, resolveDriverName]);
 
   // ─── Refresh timer for "App Open" indicators ──────────────────────
   const [, setTick] = useState(0);
@@ -480,8 +515,26 @@ const MSNDispatchCenter: React.FC = () => {
     cancel: "text-red-400",
   };
 
-  const onlineRiders = riders.filter((r) => r.is_online || isAppOpen(r.last_seen_at));
-  const idleRiders = riders.filter((r) => !(r.is_online || isAppOpen(r.last_seen_at)));
+  const riderMap = new Map(riders.map((r) => [r.user_id, r]));
+  const heartbeatIds = riders.filter((r) => hasFreshHeartbeat(r.last_seen_at)).map((r) => r.user_id);
+  const onlineRiderIds = Array.from(new Set([...activeRiderIds, ...heartbeatIds]));
+
+  const onlineRiders = onlineRiderIds
+    .map((userId) =>
+      riderMap.get(userId) ?? {
+        user_id: userId,
+        first_name: null,
+        last_name: null,
+        email: null,
+        last_seen_at: new Date().toISOString(),
+        is_online: true,
+      }
+    )
+    .sort(
+      (a, b) =>
+        (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
+        (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
+    );
 
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono p-4">
@@ -532,25 +585,13 @@ const MSNDispatchCenter: React.FC = () => {
                       <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
                       <span className="text-[11px] truncate text-sky-400">{riderLabel(r)}</span>
                     </div>
-                    <span className="text-[9px] flex-shrink-0 text-green-500">APP OPEN</span>
+                    <span className="text-[9px] flex-shrink-0 text-green-500">ONLINE</span>
                   </div>
                 ))}
 
-                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-600 border-t border-green-900/30">
-                  Idle Riders ({idleRiders.length})
-                </div>
-
-                {idleRiders.map((r) => (
-                  <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10 opacity-70">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="h-2 w-2 rounded-full flex-shrink-0 bg-gray-600" />
-                      <span className="text-[11px] truncate text-gray-400">{riderLabel(r)}</span>
-                    </div>
-                    <span className="text-[9px] flex-shrink-0 text-gray-600">IDLE</span>
-                  </div>
-                ))}
-
-                {riders.length === 0 && <div className="p-3 text-xs text-gray-600">No riders found</div>}
+                {onlineRiders.length === 0 && (
+                  <div className="p-3 text-xs text-gray-600">Waiting for rider heartbeats...</div>
+                )}
               </div>
             </ScrollArea>
           </CardContent>
