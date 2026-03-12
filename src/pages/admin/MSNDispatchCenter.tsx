@@ -415,7 +415,8 @@ const MSNDispatchCenter: React.FC = () => {
   if (!isAdmin) return null;
 
   const logColor: Record<string, string> = {
-    rider: "text-cyan-400",
+    rider: "text-sky-400",
+    driver: "text-purple-400",
     dispatch: "text-yellow-400",
     system: "text-green-400",
     cancel: "text-red-400",
