@@ -187,6 +187,7 @@ const RideBooking = () => {
   const [followDriver, setFollowDriver] = useState(true);
   const paymentGateCheckedRef = useRef<string | null>(null);
   const rideCreatedRef = useRef(false);
+  const cancelInFlightRef = useRef(false);
   const riderLocationWatchId = useRef<number | null>(null);
   const mapRef = useRef<any>(null);
   const hasAutoDetectedLocation = useRef(false);
@@ -1612,8 +1613,9 @@ const RideBooking = () => {
     );
   };
 
-  const verifyCancellation = async (rideId: string, attempts = 4) => {
+  const verifyCancellation = async (rideId: string, riderId: string, attempts = 4) => {
     let driverId: string | null = null;
+    let lastError: unknown = null;
 
     for (let i = 0; i < attempts; i++) {
       try {
@@ -1635,27 +1637,70 @@ const RideBooking = () => {
         driverId = data?.driver_id ?? driverId;
 
         if (data?.status === 'cancelled') {
-          return { confirmed: true, driverId };
+          return { confirmed: true, driverId, lastError };
         }
-      } catch {
-        // Keep retrying verification for transient read failures
+      } catch (err) {
+        lastError = err;
+      }
+
+      try {
+        const token = await getValidAccessToken();
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 4000);
+
+        try {
+          const res = await fetch(
+            `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${riderId}&select=status,driver_id`,
+            {
+              method: 'GET',
+              headers: {
+                apikey: ANON_KEY,
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json',
+              },
+              cache: 'no-store',
+              signal: controller.signal,
+            }
+          );
+
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            throw new Error(`Verify fallback failed (${res.status}): ${body}`);
+          }
+
+          const rows = (await res.json().catch(() => [])) as Array<{
+            status?: string;
+            driver_id?: string | null;
+          }>;
+
+          const row = Array.isArray(rows) ? rows[0] : null;
+          driverId = row?.driver_id ?? driverId;
+
+          if (row?.status === 'cancelled') {
+            return { confirmed: true, driverId, lastError };
+          }
+        } finally {
+          window.clearTimeout(timeout);
+        }
+      } catch (err) {
+        lastError = err;
       }
 
       if (i < attempts - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 350));
+        await new Promise((resolve) => setTimeout(resolve, 300));
       }
     }
 
-    return { confirmed: false, driverId };
+    return { confirmed: false, driverId, lastError };
   };
 
   const handleCancelRide = async () => {
-    console.log('STARTING CANCEL');
-    if (!currentRide || isCancelling) return;
+    if (!currentRide || isCancelling || cancelInFlightRef.current) return;
 
     const rideId = currentRide.id;
     const userId = user?.id;
-    const targetDriverId = currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
+    const targetDriverId =
+      currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
 
     if (!userId) {
       toast({
@@ -1666,8 +1711,8 @@ const RideBooking = () => {
       return;
     }
 
+    cancelInFlightRef.current = true;
     setIsCancelling(true);
-    console.log('[Cancel] rideId:', rideId, 'driverId:', targetDriverId);
     toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
 
     try {
@@ -1677,7 +1722,7 @@ const RideBooking = () => {
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const { error: rpcError } = await withTimeout(
+          const { data: rpcRide, error: rpcError } = await withTimeout(
             supabase
               .rpc('cancel_ride', {
                 p_ride_id: rideId,
@@ -1691,13 +1736,21 @@ const RideBooking = () => {
           if (rpcError) {
             throw rpcError;
           }
-        } catch (rpcErr) {
-          console.warn('[Cancel] RPC failed, trying REST fallback:', rpcErr);
-          lastError = rpcErr;
 
+          if (rpcRide?.status === 'cancelled') {
+            cancelConfirmed = true;
+            confirmedDriverId = rpcRide.driver_id ?? confirmedDriverId;
+            break;
+          }
+        } catch (rpcErr) {
+          lastError = rpcErr;
+          console.warn('[Cancel] RPC failed, trying REST fallback:', rpcErr);
+        }
+
+        try {
           const token = await getValidAccessToken();
           const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 10000);
+          const timeout = window.setTimeout(() => controller.abort(), 10000);
 
           try {
             const res = await fetch(
@@ -1714,6 +1767,7 @@ const RideBooking = () => {
                   status: 'cancelled',
                   cancelled_at: new Date().toISOString(),
                   cancelled_by: userId,
+                  cancel_reason: 'Cancelled by rider',
                   cancellation_reason: 'Cancelled by rider',
                 }),
                 signal: controller.signal,
@@ -1721,17 +1775,29 @@ const RideBooking = () => {
             );
 
             if (!res.ok) {
-              const body = await res.text();
+              const body = await res.text().catch(() => '');
               throw new Error(`Fallback cancel failed (${res.status}): ${body}`);
             }
-          } catch (fallbackErr) {
-            lastError = fallbackErr;
+
+            const rows = (await res.json().catch(() => [])) as Array<{
+              status?: string;
+              driver_id?: string | null;
+            }>;
+            const row = Array.isArray(rows) ? rows[0] : null;
+            confirmedDriverId = row?.driver_id ?? confirmedDriverId;
+
+            if (row?.status === 'cancelled') {
+              cancelConfirmed = true;
+              break;
+            }
           } finally {
-            clearTimeout(timeout);
+            window.clearTimeout(timeout);
           }
+        } catch (fallbackErr) {
+          lastError = fallbackErr;
         }
 
-        const verification = await verifyCancellation(rideId, 5);
+        const verification = await verifyCancellation(rideId, userId, 4);
         confirmedDriverId = verification.driverId ?? confirmedDriverId;
 
         if (verification.confirmed) {
@@ -1739,13 +1805,12 @@ const RideBooking = () => {
           break;
         }
 
-        const retryable = isTransientCancelError(lastError);
-        if (attempt < 3 && retryable) {
-          await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
-          continue;
-        }
+        lastError = verification.lastError ?? lastError;
 
-        break;
+        if (attempt < 3) {
+          const delay = isTransientCancelError(lastError) ? 350 * attempt : 250;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
       }
 
       if (!cancelConfirmed) {
@@ -1791,6 +1856,7 @@ const RideBooking = () => {
         variant: 'destructive',
       });
     } finally {
+      cancelInFlightRef.current = false;
       setIsCancelling(false);
     }
   };
@@ -1944,7 +2010,7 @@ const RideBooking = () => {
           vehicle_color: '',
           license_plate: '—',
           average_rating: 5
-        }} driverId={currentRide?.driver_id || ''} pickupAddress={pickup?.address || currentRide?.pickup_address || ''} dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''} estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0} distanceKm={distanceKm || currentRide?.distance_km || 0} durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0} rideId={currentRide?.id || ''} rideStatus={currentRide?.status || ''} phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} minutesAway={minutesAway} onShareTrip={handleShareTrip} onSafetyPress={() => setSafetySheetOpen(true)} onCancelRide={handleCancelRide} />
+        }} driverId={currentRide?.driver_id || ''} pickupAddress={pickup?.address || currentRide?.pickup_address || ''} dropoffAddress={dropoff?.address || currentRide?.dropoff_address || ''} estimatedFare={fareEstimate?.total || currentRide?.estimated_fare || 0} distanceKm={distanceKm || currentRide?.distance_km || 0} durationMinutes={durationMinutes || currentRide?.estimated_duration_minutes || 0} rideId={currentRide?.id || ''} rideStatus={currentRide?.status || ''} phase={step as 'matched' | 'arriving' | 'arrived' | 'inProgress'} minutesAway={minutesAway} onShareTrip={handleShareTrip} onSafetyPress={() => setSafetySheetOpen(true)} onCancelRide={handleCancelRide} isCancelling={isCancelling} />
 
         {/* Safety Sheet */}
         <SafetySheet open={safetySheetOpen} onOpenChange={setSafetySheetOpen} rideId={currentRide?.id || ''} driverName={driverInfo?.first_name || (language === 'fr' ? 'Chauffeur' : 'Driver')} vehicleInfo={driverInfo ? `${driverInfo.vehicle_color} ${driverInfo.vehicle_make} ${driverInfo.vehicle_model}` : ''} licensePlate={driverInfo?.license_plate || ''} onShareLocation={handleShareTrip} />
