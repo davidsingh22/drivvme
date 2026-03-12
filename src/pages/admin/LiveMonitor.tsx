@@ -216,7 +216,7 @@ export default function LiveMonitor() {
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
 
-    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes] = await Promise.all([
+    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes, onlineDriverProfilesRes] = await Promise.all([
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
@@ -237,6 +237,12 @@ export default function LiveMonitor() {
         .from('presence')
         .select('user_id, last_seen_at, role')
         .gte('last_seen_at', cutoff),
+      // Always show drivers who are flagged as online in their profile,
+      // even if their heartbeat is stale (e.g. app backgrounded on mobile)
+      supabase
+        .from('driver_profiles')
+        .select('user_id, updated_at')
+        .eq('is_online', true),
     ]);
 
     if (riderRes.error || driverRes.error || activeRidesRes.error) {
