@@ -546,7 +546,7 @@ const MSNDispatchCenter: React.FC = () => {
                   <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
-                      <span className="text-[11px] truncate text-sky-400">{r.email || nameOf(r)}</span>
+                      <span className="text-[11px] truncate text-sky-400">{riderLabel(r)}</span>
                     </div>
                     <span className="text-[9px] flex-shrink-0 text-green-500">APP OPEN</span>
                   </div>
