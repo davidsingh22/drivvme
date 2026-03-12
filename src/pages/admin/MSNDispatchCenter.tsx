@@ -128,23 +128,41 @@ const MSNDispatchCenter: React.FC = () => {
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
   const fetchRiders = useCallback(async () => {
     const { data: riderRoles } = await supabase.from("user_roles").select("user_id").eq("role", "rider");
-    if (!riderRoles?.length) return;
+    if (!riderRoles?.length) {
+      setRiders([]);
+      return;
+    }
 
     const ids = riderRoles.map((r) => r.user_id);
     const { data: profiles } = await supabase.from("profiles").select("user_id, first_name, last_name, email").in("user_id", ids);
     const { data: locations } = await supabase.from("rider_locations").select("user_id, last_seen_at, is_online").in("user_id", ids);
 
     const locMap = new Map((locations ?? []).map((l) => [l.user_id, l]));
-    setRiders(
-      (profiles ?? []).map((p) => ({
+    const nextRiders = (profiles ?? []).map((p) => {
+      riderCacheRef.current[p.user_id] = {
+        first_name: p.first_name,
+        last_name: p.last_name,
+        email: p.email,
+      };
+
+      return {
         user_id: p.user_id,
         first_name: p.first_name,
         last_name: p.last_name,
         email: p.email,
         last_seen_at: locMap.get(p.user_id)?.last_seen_at ?? null,
         is_online: locMap.get(p.user_id)?.is_online ?? false,
-      }))
-    );
+      };
+    });
+
+    nextRiders.sort((a, b) => {
+      const aOnline = a.is_online || isAppOpen(a.last_seen_at);
+      const bOnline = b.is_online || isAppOpen(b.last_seen_at);
+      if (aOnline !== bOnline) return aOnline ? -1 : 1;
+      return (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) - (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
+    });
+
+    setRiders(nextRiders);
   }, []);
 
   // ─── Fetch drivers ─────────────────────────────────────────────────
