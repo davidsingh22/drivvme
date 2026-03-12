@@ -76,6 +76,8 @@ const MSNDispatchCenter: React.FC = () => {
   const logIdCounter = useRef(0);
   const driverCacheRef = useRef<Record<string, string>>({});
   const riderCacheRef = useRef<Record<string, { first_name: string | null; last_name: string | null; email: string | null }>>({});
+  const userStatusRef = useRef<Record<string, UserStatus>>({});
+  const [riderDisplayVersion, setRiderDisplayVersion] = useState(0);
 
   // ─── Gate ───────────────────────────────────────────────────────────
   useEffect(() => {
