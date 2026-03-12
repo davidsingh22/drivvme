@@ -69,6 +69,7 @@ const MSNDispatchCenter: React.FC = () => {
   const logEndRef = useRef<HTMLDivElement>(null);
   const logIdCounter = useRef(0);
   const driverCacheRef = useRef<Record<string, string>>({});
+  const riderCacheRef = useRef<Record<string, { first_name: string | null; last_name: string | null; email: string | null }>>({});
 
   // ─── Gate ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -108,26 +109,60 @@ const MSNDispatchCenter: React.FC = () => {
     []
   );
 
+  const resolveRiderProfile = useCallback(async (userId: string) => {
+    if (riderCacheRef.current[userId]) return riderCacheRef.current[userId];
+    const { data } = await supabase
+      .from("profiles")
+      .select("first_name, last_name, email")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (data) {
+      riderCacheRef.current[userId] = data;
+      return data;
+    }
+
+    return { first_name: "Guest", last_name: "Active", email: null };
+  }, []);
+
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
   const fetchRiders = useCallback(async () => {
     const { data: riderRoles } = await supabase.from("user_roles").select("user_id").eq("role", "rider");
-    if (!riderRoles?.length) return;
+    if (!riderRoles?.length) {
+      setRiders([]);
+      return;
+    }
 
     const ids = riderRoles.map((r) => r.user_id);
     const { data: profiles } = await supabase.from("profiles").select("user_id, first_name, last_name, email").in("user_id", ids);
     const { data: locations } = await supabase.from("rider_locations").select("user_id, last_seen_at, is_online").in("user_id", ids);
 
     const locMap = new Map((locations ?? []).map((l) => [l.user_id, l]));
-    setRiders(
-      (profiles ?? []).map((p) => ({
+    const nextRiders = (profiles ?? []).map((p) => {
+      riderCacheRef.current[p.user_id] = {
+        first_name: p.first_name,
+        last_name: p.last_name,
+        email: p.email,
+      };
+
+      return {
         user_id: p.user_id,
         first_name: p.first_name,
         last_name: p.last_name,
         email: p.email,
         last_seen_at: locMap.get(p.user_id)?.last_seen_at ?? null,
         is_online: locMap.get(p.user_id)?.is_online ?? false,
-      }))
-    );
+      };
+    });
+
+    nextRiders.sort((a, b) => {
+      const aOnline = a.is_online || isAppOpen(a.last_seen_at);
+      const bOnline = b.is_online || isAppOpen(b.last_seen_at);
+      if (aOnline !== bOnline) return aOnline ? -1 : 1;
+      return (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) - (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
+    });
+
+    setRiders(nextRiders);
   }, []);
 
   // ─── Fetch drivers ─────────────────────────────────────────────────
@@ -177,21 +212,71 @@ const MSNDispatchCenter: React.FC = () => {
   // ─── Realtime: rider_locations ─────────────────────────────────────
   useEffect(() => {
     if (!isAdmin) return;
+
     const ch = supabase
       .channel("msn-rider-locations")
-      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, async (payload) => {
         const row = (payload.new as any) ?? {};
+        if (!row.user_id) return;
+
+        const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
+
+        setRiders((prev) => {
+          const index = prev.findIndex((r) => r.user_id === row.user_id);
+
+          if (index >= 0) {
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              last_seen_at: updatedLastSeen,
+              is_online: row.is_online ?? true,
+            };
+
+            next.sort((a, b) => {
+              const aOnline = a.is_online || isAppOpen(a.last_seen_at);
+              const bOnline = b.is_online || isAppOpen(b.last_seen_at);
+              if (aOnline !== bOnline) return aOnline ? -1 : 1;
+              return (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) - (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
+            });
+
+            return next;
+          }
+
+          return [
+            {
+              user_id: row.user_id,
+              first_name: "Guest",
+              last_name: "Active",
+              email: null,
+              last_seen_at: updatedLastSeen,
+              is_online: row.is_online ?? true,
+            },
+            ...prev,
+          ];
+        });
+
+        const profile = await resolveRiderProfile(row.user_id);
         setRiders((prev) =>
           prev.map((r) =>
             r.user_id === row.user_id
-              ? { ...r, last_seen_at: row.last_seen_at ?? r.last_seen_at, is_online: row.is_online ?? r.is_online }
+              ? {
+                  ...r,
+                  first_name: profile.first_name,
+                  last_name: profile.last_name,
+                  email: profile.email,
+                }
               : r
           )
         );
+
+        pushLog("rider", `📶 Rider ping received: ${nameOf(profile)} is active`);
       })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [isAdmin]);
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [isAdmin, pushLog, resolveRiderProfile]);
 
   // ─── Realtime: driver_profiles (online status) ─────────────────────
   useEffect(() => {
@@ -332,6 +417,9 @@ const MSNDispatchCenter: React.FC = () => {
     cancel: "text-red-400",
   };
 
+  const onlineRiders = riders.filter((r) => r.is_online || isAppOpen(r.last_seen_at));
+  const idleRiders = riders.filter((r) => !(r.is_online || isAppOpen(r.last_seen_at)));
+
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono p-4">
       {/* Header */}
@@ -371,20 +459,34 @@ const MSNDispatchCenter: React.FC = () => {
           <CardContent className="p-0">
             <ScrollArea className="h-[calc(50vh-80px)] lg:h-[calc(100vh-180px)]">
               <div className="divide-y divide-green-900/30">
-                {riders.map((r) => {
-                  const appOpen = isAppOpen(r.last_seen_at);
-                  return (
-                    <div key={r.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <div className={`h-2 w-2 rounded-full flex-shrink-0 ${appOpen ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" : "bg-gray-600"}`} />
-                        <span className="text-xs truncate text-gray-300">{nameOf(r)}</span>
-                      </div>
-                      <span className={`text-[10px] flex-shrink-0 ${appOpen ? "text-green-500" : "text-gray-600"}`}>
-                        {appOpen ? "APP OPEN" : "IDLE"}
-                      </span>
+                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-green-500">
+                  Online Riders ({onlineRiders.length})
+                </div>
+
+                {onlineRiders.map((r) => (
+                  <div key={r.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
+                      <span className="text-xs truncate text-gray-300">{nameOf(r)}</span>
                     </div>
-                  );
-                })}
+                    <span className="text-[10px] flex-shrink-0 text-green-500">APP OPEN</span>
+                  </div>
+                ))}
+
+                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-600 border-t border-green-900/30">
+                  Idle Riders ({idleRiders.length})
+                </div>
+
+                {idleRiders.map((r) => (
+                  <div key={r.user_id} className="flex items-center justify-between px-3 py-2 hover:bg-green-900/10 opacity-70">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="h-2 w-2 rounded-full flex-shrink-0 bg-gray-600" />
+                      <span className="text-xs truncate text-gray-300">{nameOf(r)}</span>
+                    </div>
+                    <span className="text-[10px] flex-shrink-0 text-gray-600">IDLE</span>
+                  </div>
+                ))}
+
                 {riders.length === 0 && <div className="p-3 text-xs text-gray-600">No riders found</div>}
               </div>
             </ScrollArea>
