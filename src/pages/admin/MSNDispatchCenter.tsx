@@ -166,8 +166,8 @@ const MSNDispatchCenter: React.FC = () => {
     []
   );
 
-  const resolveRiderProfile = useCallback(async (userId: string) => {
-    if (riderCacheRef.current[userId]?.email) return riderCacheRef.current[userId];
+  const resolveRiderProfile = useCallback(async (userId: string, bypassCache = false) => {
+    if (!bypassCache && riderCacheRef.current[userId]?.email) return riderCacheRef.current[userId];
     const { data } = await supabase
       .from("profiles")
       .select("first_name, last_name, email")
@@ -350,7 +350,19 @@ const MSNDispatchCenter: React.FC = () => {
 
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
 
-        // If is_online is explicitly false, mark offline
+        // Always resolve profile immediately on any event (bypass cache to get email)
+        void resolveRiderProfile(row.user_id, true).then((profile) => {
+          if (!profile) return;
+          setRiders((prev) =>
+            prev.map((r) =>
+              r.user_id === row.user_id
+                ? { ...r, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }
+                : r
+            )
+          );
+        });
+
+        // If is_online is explicitly false, mark offline instantly
         if (row.is_online === false) {
           setRiders((prev) =>
             prev.map((r) => (r.user_id === row.user_id ? { ...r, is_online: false, last_seen_at: updatedLastSeen } : r))
@@ -364,7 +376,7 @@ const MSNDispatchCenter: React.FC = () => {
 
         ensureRiderVisible(row.user_id, updatedLastSeen);
 
-        // Only log "Online" once per session
+        // Only log "Online" once per session (offline→online transition)
         const prevStatus = userStatusRef.current[row.user_id];
         if (!prevStatus || prevStatus === "offline") {
           userStatusRef.current[row.user_id] = "online";
