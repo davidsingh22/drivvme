@@ -69,6 +69,7 @@ const MSNDispatchCenter: React.FC = () => {
   const logEndRef = useRef<HTMLDivElement>(null);
   const logIdCounter = useRef(0);
   const driverCacheRef = useRef<Record<string, string>>({});
+  const riderCacheRef = useRef<Record<string, { first_name: string | null; last_name: string | null; email: string | null }>>({});
 
   // ─── Gate ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -107,6 +108,22 @@ const MSNDispatchCenter: React.FC = () => {
     },
     []
   );
+
+  const resolveRiderProfile = useCallback(async (userId: string) => {
+    if (riderCacheRef.current[userId]) return riderCacheRef.current[userId];
+    const { data } = await supabase
+      .from("profiles")
+      .select("first_name, last_name, email")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (data) {
+      riderCacheRef.current[userId] = data;
+      return data;
+    }
+
+    return { first_name: "Guest", last_name: "Active", email: null };
+  }, []);
 
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
   const fetchRiders = useCallback(async () => {
