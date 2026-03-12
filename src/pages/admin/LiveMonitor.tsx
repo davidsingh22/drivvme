@@ -622,8 +622,70 @@ export default function LiveMonitor() {
 
     const poll = setInterval(loadOnlineUsers, 15_000);
 
+    // Polling fallback: catch ride status changes that realtime may silently miss
+    const lastPollTsRef = { current: new Date().toISOString() };
+    const ridePoll = setInterval(async () => {
+      const since = lastPollTsRef.current;
+      lastPollTsRef.current = new Date().toISOString();
+      try {
+        const { data: recentRides } = await supabase
+          .from('rides')
+          .select('id, rider_id, driver_id, status, pickup_address, dropoff_address, estimated_fare, updated_at, created_at')
+          .gte('updated_at', since)
+          .order('updated_at', { ascending: false })
+          .limit(20);
+
+        if (!recentRides?.length) return;
+
+        for (const ride of recentRides) {
+          const status = String(ride.status || '').toLowerCase();
+          const feedId = `ride-${ride.id}-${status}`;
+
+          // Skip if we already have this exact status update in the feed
+          if (feedIdsRef.current.has(feedId)) continue;
+
+          const riderId = ride.rider_id as string | null;
+          const driverId = ride.driver_id as string | null;
+          if (riderId) await upsertProfileNames([riderId]);
+          if (driverId) await upsertProfileNames([driverId]);
+
+          const riderName = riderId ? getCachedName(riderId) : 'Unknown';
+          const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
+
+          let message: string;
+          if (status === 'driver_assigned' && driverId) {
+            const driverName = getCachedName(driverId);
+            message = `${driverName} accepted ${riderName}'s ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+          } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
+            message = `${riderName}: Booking Successful`;
+          } else {
+            message = `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+          }
+
+          const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
+
+          // Remove active offers for cancelled/completed/assigned rides
+          if (['driver_assigned', 'cancelled', 'completed'].includes(status)) {
+            removeOffersForRide(ride.id);
+          }
+
+          pushFeedItem({
+            id: feedId,
+            icon: statusInfo.icon,
+            message,
+            source: 'rides',
+            created_at: ride.updated_at || new Date().toISOString(),
+            feedRole,
+          });
+        }
+      } catch (err) {
+        console.error('LiveMonitor: ride poll fallback error', err);
+      }
+    }, 10_000);
+
     return () => {
       clearInterval(poll);
+      clearInterval(ridePoll);
       supabase.removeChannel(ridesCh);
       supabase.removeChannel(notifCh);
       supabase.removeChannel(riderLocCh);
