@@ -169,6 +169,41 @@ const MSNDispatchCenter: React.FC = () => {
     return null;
   }, []);
 
+  const ensureRiderVisible = useCallback(
+    (userId: string, lastSeenAt?: string | null) => {
+      if (!userId) return;
+      const heartbeat = lastSeenAt ?? new Date().toISOString();
+
+      setActiveRiderIds((prev) => (prev.includes(userId) ? prev : [userId, ...prev]));
+
+      setRiders((prev) => {
+        const idx = prev.findIndex((r) => r.user_id === userId);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = {
+            ...next[idx],
+            last_seen_at: heartbeat,
+            is_online: true,
+          };
+          return next;
+        }
+
+        return [
+          {
+            user_id: userId,
+            first_name: null,
+            last_name: null,
+            email: null,
+            last_seen_at: heartbeat,
+            is_online: true,
+          },
+          ...prev,
+        ];
+      });
+    },
+    []
+  );
+
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
   const fetchRiders = useCallback(async () => {
     const [{ data: riderRoles }, { data: locations }] = await Promise.all([
