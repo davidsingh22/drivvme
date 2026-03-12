@@ -13,8 +13,6 @@ import {
   Zap,
   Users,
   Car,
-  AlertTriangle,
-  Skull,
   Power,
   RefreshCw,
 } from "lucide-react";
