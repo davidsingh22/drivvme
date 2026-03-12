@@ -313,7 +313,7 @@ const MSNDispatchCenter: React.FC = () => {
         last_name: profile?.last_name ?? null,
         email: profile?.email ?? null,
         last_seen_at: loc.last_seen_at ?? null,
-        is_online: hasFreshHeartbeat(loc.last_seen_at),
+        is_online: loc.is_online === true,
       };
     });
 
