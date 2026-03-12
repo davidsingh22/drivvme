@@ -261,8 +261,13 @@ async function sendOneSignalDriverAlert(
     console.log(`Found ${playerIds.length} player_ids for ${driverUserIds.length} drivers`);
 
     if (playerIds.length > 0) {
-      const r1 = await sendPayload({ include_player_ids: playerIds }, "player_ids");
+      const r1 = await sendPayload({ include_player_ids: playerIds, collapse_id: crypto.randomUUID(), data: { ...basePayload.data, nonce: crypto.randomUUID() } }, "player_ids");
       if (r1.recipients > 0) return { success: true };
+      
+      // Player IDs failed — try external_user_ids fallback
+      console.log("OneSignal player_ids failed, trying include_external_user_ids");
+      const r1b = await sendPayload({ include_external_user_ids: driverUserIds, collapse_id: crypto.randomUUID(), data: { ...basePayload.data, nonce: crypto.randomUUID() } }, "external_user_ids");
+      if (r1b.recipients > 0) return { success: true };
     }
   }
 
