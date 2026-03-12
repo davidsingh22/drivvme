@@ -705,10 +705,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const currentUserId = userRef.current?.id;
     if (currentUserId) {
       try {
+        const now = new Date().toISOString();
         await supabase
           .from("rider_locations")
-          .update({ is_online: false, last_seen_at: new Date().toISOString() })
-          .eq("user_id", currentUserId);
+          .upsert(
+            {
+              user_id: currentUserId,
+              lat: 45.5017,
+              lng: -73.5673,
+              accuracy: 10000,
+              is_online: false,
+              last_seen_at: now,
+              updated_at: now,
+            },
+            { onConflict: "user_id" }
+          );
         console.log("[Auth] rider_locations marked offline");
       } catch (e) {
         console.warn("[Auth] rider_locations offline update failed:", e);
