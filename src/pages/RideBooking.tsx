@@ -1595,11 +1595,107 @@ const RideBooking = () => {
     clearRide();
     navigate('/rider-home');
   };
+  const isTransientCancelError = (error: unknown) => {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : '';
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('load failed') ||
+      normalized.includes('failed to fetch') ||
+      normalized.includes('network') ||
+      normalized.includes('timeout') ||
+      normalized.includes('timed out') ||
+      normalized.includes('abort')
+    );
+  };
+
+  const verifyCancellation = async (rideId: string, riderId: string, attempts = 4) => {
+    let driverId: string | null = null;
+    let lastError: unknown = null;
+
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const { data, error } = await withTimeout(
+          supabase
+            .from('rides')
+            .select('status, driver_id')
+            .eq('id', rideId)
+            .maybeSingle()
+            .then((r) => r),
+          4000,
+          'Verify cancellation'
+        );
+
+        if (error) {
+          throw error;
+        }
+
+        driverId = data?.driver_id ?? driverId;
+
+        if (data?.status === 'cancelled') {
+          return { confirmed: true, driverId, lastError };
+        }
+      } catch (err) {
+        lastError = err;
+      }
+
+      try {
+        const token = await getValidAccessToken();
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 4000);
+
+        try {
+          const res = await fetch(
+            `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${riderId}&select=status,driver_id`,
+            {
+              method: 'GET',
+              headers: {
+                apikey: ANON_KEY,
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/json',
+              },
+              cache: 'no-store',
+              signal: controller.signal,
+            }
+          );
+
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            throw new Error(`Verify fallback failed (${res.status}): ${body}`);
+          }
+
+          const rows = (await res.json().catch(() => [])) as Array<{
+            status?: string;
+            driver_id?: string | null;
+          }>;
+
+          const row = Array.isArray(rows) ? rows[0] : null;
+          driverId = row?.driver_id ?? driverId;
+
+          if (row?.status === 'cancelled') {
+            return { confirmed: true, driverId, lastError };
+          }
+        } finally {
+          window.clearTimeout(timeout);
+        }
+      } catch (err) {
+        lastError = err;
+      }
+
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+    }
+
+    return { confirmed: false, driverId, lastError };
+  };
 
   const handleCancelRide = async () => {
-    // Single guard — never block forever
-    if (cancelInFlightRef.current) return;
-    if (!currentRide) return;
+    if (!currentRide || isCancelling || cancelInFlightRef.current) return;
 
     const rideId = currentRide.id;
     const userId = user?.id;
@@ -1609,6 +1705,7 @@ const RideBooking = () => {
     if (!userId) {
       toast({
         title: language === 'fr' ? 'Session expirée' : 'Session expired',
+        description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
         variant: 'destructive',
       });
       return;
@@ -1616,37 +1713,48 @@ const RideBooking = () => {
 
     cancelInFlightRef.current = true;
     setIsCancelling(true);
+    toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
 
-    const cleanup = () => {
-      cancelInFlightRef.current = false;
-      setIsCancelling(false);
-    };
-
-    let cancelled = false;
-
-    // Attempt 1: RPC (fast 5s timeout)
     try {
-      const { data: rpcRide, error: rpcError } = await withTimeout(
-        supabase.rpc('cancel_ride', { p_ride_id: rideId, p_reason: 'Cancelled by rider' }).then(r => r),
-        5000,
-        'Cancel RPC'
-      );
-      if (!rpcError && rpcRide?.status === 'cancelled') cancelled = true;
-    } catch (e) {
-      console.warn('[Cancel] RPC failed:', e);
-    }
+      let cancelConfirmed = false;
+      let confirmedDriverId: string | null = targetDriverId;
+      let lastError: unknown = null;
 
-    // Attempt 2: Direct REST PATCH if RPC didn't confirm
-    if (!cancelled) {
-      try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
-        if (token) {
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const { data: rpcRide, error: rpcError } = await withTimeout(
+            supabase
+              .rpc('cancel_ride', {
+                p_ride_id: rideId,
+                p_reason: 'Cancelled by rider',
+              })
+              .then((r) => r),
+            10000,
+            `Cancel ride (RPC) attempt ${attempt}`
+          );
+
+          if (rpcError) {
+            throw rpcError;
+          }
+
+          if (rpcRide?.status === 'cancelled') {
+            cancelConfirmed = true;
+            confirmedDriverId = rpcRide.driver_id ?? confirmedDriverId;
+            break;
+          }
+        } catch (rpcErr) {
+          lastError = rpcErr;
+          console.warn('[Cancel] RPC failed, trying REST fallback:', rpcErr);
+        }
+
+        try {
+          const token = await getValidAccessToken();
           const controller = new AbortController();
-          const tm = window.setTimeout(() => controller.abort(), 5000);
+          const timeout = window.setTimeout(() => controller.abort(), 10000);
+
           try {
             const res = await fetch(
-              `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${userId}&select=id,status`,
+              `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${userId}&select=id,status,driver_id`,
               {
                 method: 'PATCH',
                 headers: {
@@ -1665,53 +1773,92 @@ const RideBooking = () => {
                 signal: controller.signal,
               }
             );
-            if (res.ok) {
-              const rows = await res.json().catch(() => []);
-              if (Array.isArray(rows) && rows[0]?.status === 'cancelled') cancelled = true;
+
+            if (!res.ok) {
+              const body = await res.text().catch(() => '');
+              throw new Error(`Fallback cancel failed (${res.status}): ${body}`);
+            }
+
+            const rows = (await res.json().catch(() => [])) as Array<{
+              status?: string;
+              driver_id?: string | null;
+            }>;
+            const row = Array.isArray(rows) ? rows[0] : null;
+            confirmedDriverId = row?.driver_id ?? confirmedDriverId;
+
+            if (row?.status === 'cancelled') {
+              cancelConfirmed = true;
+              break;
             }
           } finally {
-            window.clearTimeout(tm);
+            window.clearTimeout(timeout);
           }
+        } catch (fallbackErr) {
+          lastError = fallbackErr;
         }
-      } catch (e) {
-        console.warn('[Cancel] REST fallback failed:', e);
+
+        const verification = await verifyCancellation(rideId, userId, 4);
+        confirmedDriverId = verification.driverId ?? confirmedDriverId;
+
+        if (verification.confirmed) {
+          cancelConfirmed = true;
+          break;
+        }
+
+        lastError = verification.lastError ?? lastError;
+
+        if (attempt < 3) {
+          const delay = isTransientCancelError(lastError) ? 350 * attempt : 250;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
       }
-    }
 
-    // Attempt 3: blind update — just fire and don't wait for response
-    if (!cancelled) {
-      try {
-        supabase.from('rides').update({
-          status: 'cancelled' as any,
-          cancelled_at: new Date().toISOString(),
-          cancelled_by: userId,
-          cancel_reason: 'Cancelled by rider',
-        }).eq('id', rideId).then(() => {});
-        // Assume success — redirect anyway
-        cancelled = true;
-      } catch (_) {}
-    }
+      if (!cancelConfirmed) {
+        throw new Error(
+          lastError instanceof Error
+            ? lastError.message
+            : language === 'fr'
+              ? 'Annulation non confirmée, veuillez réessayer.'
+              : 'Cancellation was not confirmed, please try again.'
+        );
+      }
 
-    // Best-effort push notification (non-blocking)
-    if (targetDriverId) {
-      void supabase.functions.invoke('ride-status-push', {
-        body: {
-          ride_id: rideId,
-          rider_id: userId,
-          driver_id: targetDriverId,
-          new_status: 'cancelled',
-          old_status: currentRide.status,
-        },
+      // Best-effort notifications after cancellation is confirmed
+      const driverIdForNotify = confirmedDriverId || targetDriverId || null;
+      if (driverIdForNotify) {
+        void supabase.functions.invoke('ride-status-push', {
+          body: {
+            ride_id: rideId,
+            rider_id: userId,
+            driver_id: driverIdForNotify,
+            new_status: 'cancelled',
+            old_status: currentRide.status,
+          },
+        });
+
+        localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+      }
+
+      // Cleanup stale offer notifications (best-effort)
+      void supabase
+        .from('notifications')
+        .delete()
+        .eq('ride_id', rideId)
+        .eq('type', 'new_ride');
+
+      resetBooking();
+      window.location.href = '/rider-home';
+    } catch (err: any) {
+      console.error('[RideBooking] Cancel ride failed:', err);
+      toast({
+        title: language === 'fr' ? 'Échec de l’annulation' : 'Cancel failed',
+        description: err?.message || (language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.'),
+        variant: 'destructive',
       });
-      localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+    } finally {
+      cancelInFlightRef.current = false;
+      setIsCancelling(false);
     }
-
-    void supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride');
-
-    // Always redirect — don't leave user stuck
-    cleanup();
-    resetBooking();
-    window.location.href = '/rider-home';
   };
   const resetBooking = () => {
     setStep('input');
