@@ -1067,7 +1067,47 @@ const DriverDashboard = () => {
   }, [user, currentRide]);
 
   const toggleOnlineStatus = async () => {
-    if (!user) return;
+    if (!user) {
+      console.warn('[DriverDashboard] toggleOnlineStatus: user not loaded yet, refreshing session...');
+      // Try to recover the session
+      try {
+        const { data } = await supabase.auth.getSession();
+        if (!data.session) {
+          await supabase.auth.refreshSession();
+        }
+      } catch (e) {
+        console.error('[DriverDashboard] session recovery failed:', e);
+      }
+      // Re-check after recovery attempt
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.user) {
+        toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+        return;
+      }
+      // Use the recovered user for this toggle
+      const recoveredUser = sessionData.session.user;
+      try {
+        const newStatus = !isOnline;
+        const { error } = await supabase
+          .from('driver_profiles')
+          .update({ is_online: newStatus })
+          .eq('user_id', recoveredUser.id);
+        if (error) {
+          toast({ title: 'Error', description: error.message, variant: 'destructive' });
+          return;
+        }
+        setIsOnline(newStatus);
+        await refreshDriverProfile();
+        toast({
+          title: newStatus ? 'You are now online' : 'You are now offline',
+          description: newStatus ? 'You will receive ride requests' : 'You will not receive ride requests',
+        });
+      } catch (error) {
+        console.error('[DriverDashboard] toggleOnlineStatus error:', error);
+        toast({ title: 'Error', description: 'Something went wrong.', variant: 'destructive' });
+      }
+      return;
+    }
 
     try {
       const newStatus = !isOnline;
