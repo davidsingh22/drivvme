@@ -304,20 +304,18 @@ const MSNDispatchCenter: React.FC = () => {
         const ride = payload.new as any;
         setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
 
-        // Resolve rider name
         const { data: rp } = await supabase
           .from("profiles")
           .select("first_name, last_name, email")
           .eq("user_id", ride.rider_id)
           .maybeSingle();
-        const riderName = rp ? [rp.first_name, rp.last_name].filter(Boolean).join(" ") || rp.email : ride.rider_id?.slice(0, 8);
-        pushLog("rider", `🚕 RIDER ${riderName} is requesting a ride now → ${ride.pickup_address} ➜ ${ride.dropoff_address}`, ride.id);
+        const riderEmail = rp?.email || [rp?.first_name, rp?.last_name].filter(Boolean).join(" ") || ride.rider_id?.slice(0, 8);
+        pushLog("rider", `🚗 ${riderEmail} is searching for a ride (Triggered by ride 'requested')`, ride.id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
         const old = payload.old as any;
 
-        // Update active rides map
         if (["completed", "cancelled"].includes(ride.status)) {
           setActiveRides((prev) => {
             const next = { ...prev };
@@ -328,27 +326,37 @@ const MSNDispatchCenter: React.FC = () => {
           setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
         }
 
-        // Status change events
         if (ride.status !== old.status) {
+          const { data: rp } = await supabase
+            .from("profiles")
+            .select("first_name, last_name, email")
+            .eq("user_id", ride.rider_id)
+            .maybeSingle();
+          const riderEmail = rp?.email || [rp?.first_name, rp?.last_name].filter(Boolean).join(" ") || ride.rider_id?.slice(0, 8);
+
           if (ride.status === "driver_assigned" && ride.driver_id) {
             const dn = await resolveDriverName(ride.driver_id);
-            pushLog("dispatch", `✅ DRIVER ${dn} ACCEPTED ride ${ride.id.slice(0, 8)}`, ride.id);
+            pushLog("dispatch", `✅ ${riderEmail} ride accepted by ${dn}`, ride.id);
           } else if (ride.status === "cancelled") {
-            pushLog("cancel", `❌ Ride ${ride.id.slice(0, 8)} CANCELLED`, ride.id);
+            pushLog("cancel", `❌ ${riderEmail} ride cancelled`, ride.id);
           } else if (ride.status === "in_progress") {
-            pushLog("system", `🚗 Ride ${ride.id.slice(0, 8)} IN PROGRESS`);
+            pushLog("rider", `🚗 ${riderEmail} ride in progress`, ride.id);
           } else if (ride.status === "completed") {
-            pushLog("system", `🏁 Ride ${ride.id.slice(0, 8)} COMPLETED`);
+            pushLog("rider", `🏁 ${riderEmail} ride completed`, ride.id);
+          } else if (ride.status === "driver_en_route") {
+            pushLog("driver", `🚙 Driver en route to ${riderEmail}`, ride.id);
+          } else if (ride.status === "arrived") {
+            pushLog("driver", `📍 Driver arrived for ${riderEmail}`, ride.id);
           }
         }
 
-        // Dispatch notifications (notified_driver_ids changed)
+        // Dispatch notifications
         const oldIds: string[] = old.notified_driver_ids ?? [];
         const newIds: string[] = ride.notified_driver_ids ?? [];
         const freshIds = newIds.filter((id: string) => !oldIds.includes(id));
         for (const dId of freshIds) {
           const dn = await resolveDriverName(dId);
-          pushLog("dispatch", `📡 SYSTEM: Sending Ride Request to DRIVER ${dn} — (25s timer started)`, ride.id);
+          pushLog("dispatch", `📡 Ride request sent to ${dn} (25s timer)`, ride.id);
         }
       })
       .subscribe();
