@@ -426,7 +426,8 @@ serve(async (req) => {
     const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
       .select("user_id, current_lat, current_lng")
-      .eq("is_online", true);
+      .eq("is_online", true)
+      .eq("is_verified", true);
 
     if (driverError) {
       console.error("Error fetching online drivers:", driverError);
