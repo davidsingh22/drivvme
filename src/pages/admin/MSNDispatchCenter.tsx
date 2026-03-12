@@ -44,9 +44,11 @@ interface LogEntry {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────
-const isAppOpen = (lastSeen: string | null) => {
+const HEARTBEAT_WINDOW_MS = 5 * 60 * 1000;
+
+const hasFreshHeartbeat = (lastSeen: string | null) => {
   if (!lastSeen) return false;
-  return Date.now() - new Date(lastSeen).getTime() < 30_000;
+  return Date.now() - new Date(lastSeen).getTime() <= HEARTBEAT_WINDOW_MS;
 };
 
 const fmtTime = (d: Date) =>
