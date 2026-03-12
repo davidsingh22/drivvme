@@ -40,7 +40,7 @@ interface DriverEntry {
 interface LogEntry {
   id: string;
   ts: Date;
-  type: "rider" | "dispatch" | "system" | "cancel";
+  type: "rider" | "driver" | "dispatch" | "system" | "cancel";
   message: string;
   ride_id?: string;
 }
