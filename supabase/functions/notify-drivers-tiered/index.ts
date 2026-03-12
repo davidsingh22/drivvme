@@ -565,6 +565,7 @@ serve(async (req) => {
 
         // Send to drivers WITH player IDs (primary)
         if (playerIds.length > 0) {
+          const collapseId = crypto.randomUUID();
           const playerPayload = {
             app_id: "5a6c4131-8faa-4969-b5c4-5a09033c8e2a",
             include_player_ids: playerIds,
@@ -573,11 +574,12 @@ serve(async (req) => {
             url: "/driver",
             priority: 10,
             ttl: 0,
+            collapse_id: collapseId,
             ios_sound: "default",
             android_sound: "default",
             content_available: true,
             mutable_content: true,
-            data: { ride_id: rideId, type: "new_ride" },
+            data: { ride_id: rideId, type: "new_ride", nonce: crypto.randomUUID() },
           };
 
           const osRes = await fetch("https://onesignal.com/api/v1/notifications", {
@@ -590,7 +592,35 @@ serve(async (req) => {
           });
           const osData = await osRes.json();
           console.log(`[notify-drivers-tiered] onesignal response status (player_ids): ${osRes.status}`, JSON.stringify(osData));
-          if (osRes.ok) {
+          
+          const playerIdFailed = osData?.errors?.length > 0 || (osData?.recipients === 0);
+          
+          // If player_id targeting failed, try external_user_id targeting
+          if (playerIdFailed) {
+            console.log(`[notify-drivers-tiered] player_id targeting failed, trying include_external_user_ids`);
+            const extPayload = {
+              ...playerPayload,
+              include_player_ids: undefined,
+              include_external_user_ids: driverUserIds,
+              collapse_id: crypto.randomUUID(),
+              data: { ride_id: rideId, type: "new_ride", nonce: crypto.randomUUID() },
+            };
+            delete (extPayload as any).include_player_ids;
+            
+            const extRes = await fetch("https://onesignal.com/api/v1/notifications", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json; charset=utf-8",
+                "Authorization": `Basic ${oneSignalApiKey}`,
+              },
+              body: JSON.stringify(extPayload),
+            });
+            const extData = await extRes.json();
+            console.log(`[notify-drivers-tiered] onesignal response (external_user_ids): ${extRes.status}`, JSON.stringify(extData));
+            if (extRes.ok && extData?.recipients > 0) {
+              results.push(...driverUserIds.map(id => ({ id, success: true })));
+            }
+          } else if (osRes.ok) {
             results.push(...playerIds.map(id => ({ id, success: true })));
           }
         }
