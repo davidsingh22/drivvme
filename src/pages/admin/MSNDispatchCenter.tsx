@@ -277,59 +277,83 @@ const MSNDispatchCenter: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) return;
 
+    const sortByPresence = (list: RiderEntry[]) => {
+      const next = [...list];
+      next.sort((a, b) => {
+        const aOnline = a.is_online || isAppOpen(a.last_seen_at);
+        const bOnline = b.is_online || isAppOpen(b.last_seen_at);
+        if (aOnline !== bOnline) return aOnline ? -1 : 1;
+        return (
+          (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
+          (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
+        );
+      });
+      return next;
+    };
+
     const ch = supabase
       .channel("msn-rider-locations")
-      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, async (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
+        if (payload.eventType === "DELETE") return;
+
         const row = (payload.new as any) ?? {};
         if (!row.user_id) return;
 
-        // Immediately resolve the real profile
-        const profile = await resolveRiderProfile(row.user_id);
-        const identity = profile.email || [profile.first_name, profile.last_name].filter(Boolean).join(" ") || row.user_id.slice(0, 8);
-
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
+        const nextIsOnline = row.is_online ?? true;
 
+        // Golden rule: show the rider immediately, even before profile/email fetch resolves.
         setRiders((prev) => {
           const index = prev.findIndex((r) => r.user_id === row.user_id);
-
           if (index >= 0) {
             const next = [...prev];
             next[index] = {
               ...next[index],
-              first_name: profile.first_name ?? next[index].first_name,
-              last_name: profile.last_name ?? next[index].last_name,
-              email: profile.email ?? next[index].email,
               last_seen_at: updatedLastSeen,
-              is_online: row.is_online ?? true,
+              is_online: nextIsOnline,
             };
-
-            next.sort((a, b) => {
-              const aOnline = a.is_online || isAppOpen(a.last_seen_at);
-              const bOnline = b.is_online || isAppOpen(b.last_seen_at);
-              if (aOnline !== bOnline) return aOnline ? -1 : 1;
-              return (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) - (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
-            });
-
-            return next;
+            return sortByPresence(next);
           }
 
-          // New user not in list — add with resolved identity
-          return [
+          return sortByPresence([
             {
               user_id: row.user_id,
-              first_name: profile.first_name ?? null,
-              last_name: profile.last_name ?? null,
-              email: profile.email ?? null,
+              first_name: null,
+              last_name: null,
+              email: null,
               last_seen_at: updatedLastSeen,
-              is_online: row.is_online ?? true,
+              is_online: nextIsOnline,
             },
             ...prev,
-          ];
+          ]);
         });
 
-        if (row.is_online) {
-          pushLog("rider", `🟢 ${identity} is Online (Triggered by RiderHome mount)`);
+        const oldLastSeen = (payload.old as any)?.last_seen_at;
+        if (nextIsOnline && (payload.eventType === "INSERT" || oldLastSeen !== updatedLastSeen)) {
+          pushLog("system", `🟢 ${riderToken(row.user_id)} is now Online`);
         }
+
+        // Identity hot-swap in background (list + timeline update automatically via token rendering).
+        void resolveRiderProfile(row.user_id)
+          .then((profile) => {
+            if (!profile) return;
+            riderCacheRef.current[row.user_id] = profile;
+            setRiders((prev) =>
+              sortByPresence(
+                prev.map((r) =>
+                  r.user_id === row.user_id
+                    ? {
+                        ...r,
+                        first_name: profile.first_name,
+                        last_name: profile.last_name,
+                        email: profile.email,
+                      }
+                    : r
+                )
+              )
+            );
+          })
+          .catch(() => undefined);
       })
       .subscribe();
 
