@@ -170,31 +170,49 @@ const MSNDispatchCenter: React.FC = () => {
 
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
   const fetchRiders = useCallback(async () => {
-    const { data: riderRoles } = await supabase.from("user_roles").select("user_id").eq("role", "rider");
-    if (!riderRoles?.length) {
+    const [{ data: riderRoles }, { data: locations }] = await Promise.all([
+      supabase.from("user_roles").select("user_id").eq("role", "rider"),
+      supabase
+        .from("rider_locations")
+        .select("user_id, last_seen_at, is_online")
+        .order("last_seen_at", { ascending: false })
+        .limit(500),
+    ]);
+
+    const roleIds = (riderRoles ?? []).map((r) => r.user_id);
+    const locationRows = locations ?? [];
+    const allIds = Array.from(new Set([...roleIds, ...locationRows.map((l) => l.user_id)]));
+
+    if (!allIds.length) {
       setRiders([]);
       return;
     }
 
-    const ids = riderRoles.map((r) => r.user_id);
-    const { data: profiles } = await supabase.from("profiles").select("user_id, first_name, last_name, email").in("user_id", ids);
-    const { data: locations } = await supabase.from("rider_locations").select("user_id, last_seen_at, is_online").in("user_id", ids);
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("user_id, first_name, last_name, email")
+      .in("user_id", allIds);
 
-    const locMap = new Map((locations ?? []).map((l) => [l.user_id, l]));
-    const nextRiders = (profiles ?? []).map((p) => {
-      riderCacheRef.current[p.user_id] = {
-        first_name: p.first_name,
-        last_name: p.last_name,
-        email: p.email,
-      };
+    const profileMap = new Map((profiles ?? []).map((p) => [p.user_id, p]));
+    const locMap = new Map(locationRows.map((l) => [l.user_id, l]));
+
+    const nextRiders = allIds.map((userId) => {
+      const profile = profileMap.get(userId);
+      if (profile) {
+        riderCacheRef.current[userId] = {
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+          email: profile.email,
+        };
+      }
 
       return {
-        user_id: p.user_id,
-        first_name: p.first_name,
-        last_name: p.last_name,
-        email: p.email,
-        last_seen_at: locMap.get(p.user_id)?.last_seen_at ?? null,
-        is_online: locMap.get(p.user_id)?.is_online ?? false,
+        user_id: userId,
+        first_name: profile?.first_name ?? null,
+        last_name: profile?.last_name ?? null,
+        email: profile?.email ?? null,
+        last_seen_at: locMap.get(userId)?.last_seen_at ?? null,
+        is_online: locMap.get(userId)?.is_online ?? false,
       };
     });
 
@@ -202,7 +220,10 @@ const MSNDispatchCenter: React.FC = () => {
       const aOnline = a.is_online || isAppOpen(a.last_seen_at);
       const bOnline = b.is_online || isAppOpen(b.last_seen_at);
       if (aOnline !== bOnline) return aOnline ? -1 : 1;
-      return (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) - (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
+      return (
+        (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
+        (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
+      );
     });
 
     setRiders(nextRiders);
