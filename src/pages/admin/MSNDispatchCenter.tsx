@@ -43,15 +43,14 @@ interface LogEntry {
   ride_id?: string;
 }
 
-// Track last known status per user to de-duplicate feed
 type UserStatus = "online" | "searching" | "accepted" | "in_progress" | "completed" | "cancelled" | "offline";
 
 // ─── Helpers ────────────────────────────────────────────────────────────
-const HEARTBEAT_WINDOW_MS = 5 * 60 * 1000;
+const GHOST_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 const hasFreshHeartbeat = (lastSeen: string | null) => {
   if (!lastSeen) return false;
-  return Date.now() - new Date(lastSeen).getTime() <= HEARTBEAT_WINDOW_MS;
+  return Date.now() - new Date(lastSeen).getTime() <= GHOST_TIMEOUT_MS;
 };
 
 const fmtTime = (d: Date) =>
@@ -72,11 +71,11 @@ const MSNDispatchCenter: React.FC = () => {
   const [drivers, setDrivers] = useState<DriverEntry[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeRides, setActiveRides] = useState<Record<string, any>>({});
-  const [activeRiderIds, setActiveRiderIds] = useState<string[]>([]);
   const logIdCounter = useRef(0);
   const driverCacheRef = useRef<Record<string, string>>({});
   const riderCacheRef = useRef<Record<string, { first_name: string | null; last_name: string | null; email: string | null }>>({});
   const userStatusRef = useRef<Record<string, UserStatus>>({});
+  const lastLogPerUser = useRef<Record<string, string>>({});
   const [riderDisplayVersion, setRiderDisplayVersion] = useState(0);
 
   // ─── Gate ───────────────────────────────────────────────────────────
@@ -91,10 +90,10 @@ const MSNDispatchCenter: React.FC = () => {
   const riderDisplay = useCallback(
     (userId: string) => {
       const cached = riderCacheRef.current[userId];
-      const fullName = [cached?.first_name, cached?.last_name].filter(Boolean).join(" ");
-      return cached?.email || fullName || riderFallback(userId);
+      return cached?.email || [cached?.first_name, cached?.last_name].filter(Boolean).join(" ") || riderFallback(userId);
     },
-    []
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [riderDisplayVersion]
   );
 
   const riderLabel = useCallback(
@@ -128,13 +127,21 @@ const MSNDispatchCenter: React.FC = () => {
 
       return parts.length ? parts : message;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [riderDisplay, riderDisplayVersion]
   );
 
-  // ─── Push log helper ───────────────────────────────────────────────
+  // ─── De-duplicated push log ────────────────────────────────────────
   const pushLog = useCallback(
     (type: LogEntry["type"], message: string, ride_id?: string) => {
+      // Extract userId from token for per-user dedup
+      const tokenMatch = message.match(/\{\{rider:([^}]+)\}\}/);
+      if (tokenMatch) {
+        const userId = tokenMatch[1];
+        const lastMsg = lastLogPerUser.current[userId];
+        if (lastMsg === message) return; // exact same message for this user — skip
+        lastLogPerUser.current[userId] = message;
+      }
+
       logIdCounter.current += 1;
       setLogs((prev) => [{ id: `log-${logIdCounter.current}`, ts: new Date(), type, message, ride_id }, ...prev].slice(0, 200));
     },
@@ -151,7 +158,7 @@ const MSNDispatchCenter: React.FC = () => {
         .eq("user_id", driverId)
         .maybeSingle();
       const name = data
-        ? [data.first_name, data.last_name].filter(Boolean).join(" ") || data.email || driverId.slice(0, 8)
+        ? data.email || [data.first_name, data.last_name].filter(Boolean).join(" ") || driverId.slice(0, 8)
         : driverId.slice(0, 8);
       driverCacheRef.current[driverId] = name;
       return name;
@@ -160,7 +167,7 @@ const MSNDispatchCenter: React.FC = () => {
   );
 
   const resolveRiderProfile = useCallback(async (userId: string) => {
-    if (riderCacheRef.current[userId]) return riderCacheRef.current[userId];
+    if (riderCacheRef.current[userId]?.email) return riderCacheRef.current[userId];
     const { data } = await supabase
       .from("profiles")
       .select("first_name, last_name, email")
@@ -169,9 +176,9 @@ const MSNDispatchCenter: React.FC = () => {
 
     if (data) {
       riderCacheRef.current[userId] = data;
+      setRiderDisplayVersion((v) => v + 1);
       return data;
     }
-
     return null;
   }, []);
 
@@ -180,29 +187,15 @@ const MSNDispatchCenter: React.FC = () => {
       if (!userId) return;
       const heartbeat = lastSeenAt ?? new Date().toISOString();
 
-      setActiveRiderIds((prev) => (prev.includes(userId) ? prev : [userId, ...prev]));
-
       setRiders((prev) => {
         const idx = prev.findIndex((r) => r.user_id === userId);
         if (idx >= 0) {
           const next = [...prev];
-          next[idx] = {
-            ...next[idx],
-            last_seen_at: heartbeat,
-            is_online: true,
-          };
+          next[idx] = { ...next[idx], last_seen_at: heartbeat, is_online: true };
           return next;
         }
-
         return [
-          {
-            user_id: userId,
-            first_name: null,
-            last_name: null,
-            email: null,
-            last_seen_at: heartbeat,
-            is_online: true,
-          },
+          { user_id: userId, first_name: null, last_name: null, email: null, last_seen_at: heartbeat, is_online: true },
           ...prev,
         ];
       });
@@ -210,16 +203,10 @@ const MSNDispatchCenter: React.FC = () => {
       void resolveRiderProfile(userId)
         .then((profile) => {
           if (!profile) return;
-          riderCacheRef.current[userId] = profile;
           setRiders((prev) =>
             prev.map((r) =>
               r.user_id === userId
-                ? {
-                    ...r,
-                    first_name: profile.first_name,
-                    last_name: profile.last_name,
-                    email: profile.email,
-                  }
+                ? { ...r, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }
                 : r
             )
           );
@@ -229,25 +216,37 @@ const MSNDispatchCenter: React.FC = () => {
     [resolveRiderProfile]
   );
 
-  // ─── Fetch riders (profiles + rider_locations) ─────────────────────
+  // ─── Ghost killer: evict stale riders every 30s ────────────────────
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setRiders((prev) =>
+        prev.map((r) => {
+          if (!hasFreshHeartbeat(r.last_seen_at) && r.is_online) {
+            // Mark offline
+            if (userStatusRef.current[r.user_id] !== "offline") {
+              userStatusRef.current[r.user_id] = "offline";
+            }
+            return { ...r, is_online: false };
+          }
+          return r;
+        })
+      );
+    }, 30_000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // ─── Fetch riders ─────────────────────────────────────────────────
   const fetchRiders = useCallback(async () => {
-    const [{ data: riderRoles }, { data: locations }] = await Promise.all([
-      supabase.from("user_roles").select("user_id").eq("role", "rider"),
-      supabase
-        .from("rider_locations")
-        .select("user_id, last_seen_at, is_online")
-        .order("last_seen_at", { ascending: false })
-        .limit(500),
-    ]);
+    const { data: locations } = await supabase
+      .from("rider_locations")
+      .select("user_id, last_seen_at, is_online")
+      .order("last_seen_at", { ascending: false })
+      .limit(500);
 
-    const roleIds = (riderRoles ?? []).map((r) => r.user_id);
     const locationRows = locations ?? [];
-    const allIds = Array.from(new Set([...roleIds, ...locationRows.map((l) => l.user_id)]));
+    const allIds = Array.from(new Set(locationRows.map((l) => l.user_id)));
 
-    if (!allIds.length) {
-      setRiders([]);
-      return;
-    }
+    if (!allIds.length) { setRiders([]); return; }
 
     const { data: profiles } = await supabase
       .from("profiles")
@@ -255,47 +254,44 @@ const MSNDispatchCenter: React.FC = () => {
       .in("user_id", allIds);
 
     const profileMap = new Map((profiles ?? []).map((p) => [p.user_id, p]));
-    const locMap = new Map(locationRows.map((l) => [l.user_id, l]));
 
-    const nextRiders = allIds.map((userId) => {
-      const profile = profileMap.get(userId);
+    const nextRiders = locationRows.map((loc) => {
+      const profile = profileMap.get(loc.user_id);
       if (profile) {
-        riderCacheRef.current[userId] = {
+        riderCacheRef.current[loc.user_id] = {
           first_name: profile.first_name,
           last_name: profile.last_name,
           email: profile.email,
         };
       }
-
       return {
-        user_id: userId,
+        user_id: loc.user_id,
         first_name: profile?.first_name ?? null,
         last_name: profile?.last_name ?? null,
         email: profile?.email ?? null,
-        last_seen_at: locMap.get(userId)?.last_seen_at ?? null,
-        is_online: locMap.get(userId)?.is_online ?? false,
+        last_seen_at: loc.last_seen_at ?? null,
+        is_online: hasFreshHeartbeat(loc.last_seen_at),
       };
     });
 
-    nextRiders.sort((a, b) => {
-      const aActive = hasFreshHeartbeat(a.last_seen_at);
-      const bActive = hasFreshHeartbeat(b.last_seen_at);
-      if (aActive !== bActive) return aActive ? -1 : 1;
+    // Deduplicate by user_id
+    const seen = new Set<string>();
+    const deduped = nextRiders.filter((r) => {
+      if (seen.has(r.user_id)) return false;
+      seen.add(r.user_id);
+      return true;
+    });
+
+    deduped.sort((a, b) => {
+      if (a.is_online !== b.is_online) return a.is_online ? -1 : 1;
       return (
         (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
         (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
       );
     });
 
-    setRiders(nextRiders);
-
-    const heartbeatIds = locationRows
-      .filter((row) => hasFreshHeartbeat(row.last_seen_at))
-      .map((row) => row.user_id);
-
-    if (heartbeatIds.length) {
-      setActiveRiderIds((prev) => Array.from(new Set([...heartbeatIds, ...prev])));
-    }
+    setRiders(deduped);
+    setRiderDisplayVersion((v) => v + 1);
   }, []);
 
   // ─── Fetch drivers ─────────────────────────────────────────────────
@@ -316,9 +312,8 @@ const MSNDispatchCenter: React.FC = () => {
       is_online: dpMap.get(p.user_id)?.is_online ?? false,
     }));
     setDrivers(list);
-    // warm cache
     list.forEach((d) => {
-      driverCacheRef.current[d.user_id] = nameOf(d);
+      driverCacheRef.current[d.user_id] = d.email || nameOf(d);
     });
   }, []);
 
@@ -333,14 +328,13 @@ const MSNDispatchCenter: React.FC = () => {
     setActiveRides(map);
   }, []);
 
-  // ─── Initial load ──────────────────────────────────────────────────
+  // ─── Initial load (no system noise) ───────────────────────────────
   useEffect(() => {
     if (!isAdmin) return;
     fetchRiders();
     fetchDrivers();
     fetchActiveRides();
-    pushLog("system", "🟢 MSN Dispatch Command Center ONLINE");
-  }, [isAdmin, fetchRiders, fetchDrivers, fetchActiveRides, pushLog]);
+  }, [isAdmin, fetchRiders, fetchDrivers, fetchActiveRides]);
 
   // ─── Realtime: rider_locations ─────────────────────────────────────
   useEffect(() => {
@@ -355,37 +349,31 @@ const MSNDispatchCenter: React.FC = () => {
         if (!row.user_id) return;
 
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
+
+        // If is_online is explicitly false, mark offline
+        if (row.is_online === false) {
+          setRiders((prev) =>
+            prev.map((r) => (r.user_id === row.user_id ? { ...r, is_online: false, last_seen_at: updatedLastSeen } : r))
+          );
+          if (userStatusRef.current[row.user_id] !== "offline") {
+            userStatusRef.current[row.user_id] = "offline";
+            pushLog("system", `🔴 ${riderToken(row.user_id)} went Offline`);
+          }
+          return;
+        }
+
         ensureRiderVisible(row.user_id, updatedLastSeen);
 
-        // Only log "Online" once — skip duplicate GPS pings
+        // Only log "Online" once per session
         const prevStatus = userStatusRef.current[row.user_id];
-        if (prevStatus !== "online" && prevStatus !== "searching" && prevStatus !== "accepted" && prevStatus !== "in_progress") {
+        if (!prevStatus || prevStatus === "offline") {
           userStatusRef.current[row.user_id] = "online";
           pushLog("system", `🟢 ${riderToken(row.user_id)} is Online`);
         }
-
-        // Identity hot-swap
-        void resolveRiderProfile(row.user_id)
-          .then((profile) => {
-            if (!profile) return;
-            riderCacheRef.current[row.user_id] = profile;
-            setRiders((prev) =>
-              prev.map((r) =>
-                r.user_id === row.user_id
-                  ? { ...r, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }
-                  : r
-              )
-            );
-            // Force re-render of timeline tokens
-            setRiderDisplayVersion((v) => v + 1);
-          })
-          .catch(() => undefined);
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    return () => { supabase.removeChannel(ch); };
   }, [ensureRiderVisible, isAdmin, pushLog, resolveRiderProfile]);
 
   // ─── Realtime: driver_profiles (online status) ─────────────────────
@@ -409,7 +397,7 @@ const MSNDispatchCenter: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [isAdmin, pushLog]);
 
-  // ─── Realtime: rides (new rides + status changes + dispatch) ───────
+  // ─── Realtime: rides ───────────────────────────────────────────────
   useEffect(() => {
     if (!isAdmin) return;
 
@@ -439,16 +427,11 @@ const MSNDispatchCenter: React.FC = () => {
         }
 
         if (["completed", "cancelled"].includes(ride.status)) {
-          setActiveRides((prev) => {
-            const next = { ...prev };
-            delete next[ride.id];
-            return next;
-          });
+          setActiveRides((prev) => { const next = { ...prev }; delete next[ride.id]; return next; });
         } else {
           setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
         }
 
-        // Only log on actual status transitions
         if (ride.status !== old.status) {
           const riderId = ride.rider_id;
           if (ride.status === "driver_assigned" && ride.driver_id) {
@@ -489,15 +472,13 @@ const MSNDispatchCenter: React.FC = () => {
       })
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(ch);
-    };
+    return () => { supabase.removeChannel(ch); };
   }, [ensureRiderVisible, isAdmin, pushLog, resolveDriverName]);
 
-  // ─── Refresh timer for "App Open" indicators ──────────────────────
+  // ─── Tick for UI refresh ──────────────────────────────────────────
   const [, setTick] = useState(0);
   useEffect(() => {
-    const iv = setInterval(() => setTick((t) => t + 1), 5000);
+    const iv = setInterval(() => setTick((t) => t + 1), 10000);
     return () => clearInterval(iv);
   }, []);
 
@@ -534,26 +515,9 @@ const MSNDispatchCenter: React.FC = () => {
     cancel: "text-red-400",
   };
 
-  const riderMap = new Map(riders.map((r) => [r.user_id, r]));
-  const heartbeatIds = riders.filter((r) => hasFreshHeartbeat(r.last_seen_at)).map((r) => r.user_id);
-  const onlineRiderIds = Array.from(new Set([...activeRiderIds, ...heartbeatIds]));
-
-  const onlineRiders = onlineRiderIds
-    .map((userId) =>
-      riderMap.get(userId) ?? {
-        user_id: userId,
-        first_name: null,
-        last_name: null,
-        email: null,
-        last_seen_at: new Date().toISOString(),
-        is_online: true,
-      }
-    )
-    .sort(
-      (a, b) =>
-        (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
-        (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
-    );
+  // Online = fresh heartbeat within 2 min
+  const onlineRiders = riders.filter((r) => hasFreshHeartbeat(r.last_seen_at));
+  const offlineRiders = riders.filter((r) => !hasFreshHeartbeat(r.last_seen_at));
 
   return (
     <div className="min-h-screen bg-black text-green-400 font-mono p-4">
@@ -582,82 +546,89 @@ const MSNDispatchCenter: React.FC = () => {
         </Button>
       </div>
 
-      {/* Two-column status board + feed */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 h-[calc(100vh-100px)]">
-        {/* Rider Box */}
-        <Card className="bg-gray-950 border-green-900 overflow-hidden">
-          <CardHeader className="py-2 px-3 border-b border-green-900">
-            <CardTitle className="text-sm text-green-400 flex items-center gap-2">
-              <Users className="h-4 w-4" /> RIDERS ({riders.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-[calc(50vh-80px)] lg:h-[calc(100vh-180px)]">
-              <div className="divide-y divide-green-900/30">
-                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-green-500">
-                  Online Riders ({onlineRiders.length})
+      {/* Layout: left half = riders+drivers stacked, right half = feed */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 h-[calc(100vh-100px)]">
+        {/* Left: Riders + Drivers stacked */}
+        <div className="flex flex-col gap-4 overflow-hidden">
+          {/* Rider Box */}
+          <Card className="bg-gray-950 border-green-900 overflow-hidden flex-1">
+            <CardHeader className="py-2 px-3 border-b border-green-900">
+              <CardTitle className="text-sm text-green-400 flex items-center gap-2">
+                <Users className="h-4 w-4" /> RIDERS — Online: {onlineRiders.length} / Total: {riders.length}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-full max-h-[calc(50vh-100px)]">
+                <div className="divide-y divide-green-900/30">
+                  {onlineRiders.map((r) => (
+                    <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
+                        <span className="text-[13px] truncate text-sky-400">{riderLabel(r)}</span>
+                      </div>
+                      <span className="text-[9px] flex-shrink-0 text-green-500">ONLINE</span>
+                    </div>
+                  ))}
+                  {offlineRiders.slice(0, 20).map((r) => (
+                    <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10 opacity-50">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="h-2 w-2 rounded-full flex-shrink-0 bg-gray-600" />
+                        <span className="text-[13px] truncate text-gray-500">{riderLabel(r)}</span>
+                      </div>
+                      <span className="text-[9px] flex-shrink-0 text-gray-600">OFFLINE</span>
+                    </div>
+                  ))}
+                  {riders.length === 0 && (
+                    <div className="p-3 text-xs text-gray-600">Waiting for rider heartbeats...</div>
+                  )}
                 </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
 
-                {onlineRiders.map((r) => (
-                  <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
-                      <span className="text-[13px] truncate text-sky-400">{riderLabel(r)}</span>
+          {/* Driver Box */}
+          <Card className="bg-gray-950 border-green-900 overflow-hidden flex-1">
+            <CardHeader className="py-2 px-3 border-b border-green-900">
+              <CardTitle className="text-sm text-green-400 flex items-center gap-2">
+                <Car className="h-4 w-4" /> DRIVERS ({drivers.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-full max-h-[calc(50vh-100px)]">
+                <div className="divide-y divide-green-900/30">
+                  {drivers.map((d) => (
+                    <div key={d.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`h-2 w-2 rounded-full flex-shrink-0 ${d.is_online ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" : "bg-gray-600"}`} />
+                        <span className={`text-[13px] truncate ${d.is_online ? "text-purple-400" : "text-gray-400"}`}>{d.email || nameOf(d)}</span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className={`text-[10px] ${d.is_online ? "text-green-500" : "text-gray-600"}`}>
+                          {d.is_online ? "ONLINE" : "OFFLINE"}
+                        </span>
+                        {d.is_online && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => forceOffline(d.user_id)}
+                            className="h-6 px-2 text-[10px] text-red-500 hover:text-red-300 hover:bg-red-900/20"
+                            title="Force this driver offline"
+                          >
+                            <Power className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                    <span className="text-[9px] flex-shrink-0 text-green-500">ONLINE</span>
-                  </div>
-                ))}
+                  ))}
+                  {drivers.length === 0 && <div className="p-3 text-xs text-gray-600">No drivers found</div>}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </div>
 
-                {onlineRiders.length === 0 && (
-                  <div className="p-3 text-xs text-gray-600">Waiting for rider heartbeats...</div>
-                )}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        {/* Driver Box */}
+        {/* Right: Live Feed full-height */}
         <Card className="bg-gray-950 border-green-900 overflow-hidden">
-          <CardHeader className="py-2 px-3 border-b border-green-900">
-            <CardTitle className="text-sm text-green-400 flex items-center gap-2">
-              <Car className="h-4 w-4" /> DRIVERS ({drivers.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <ScrollArea className="h-[calc(50vh-80px)] lg:h-[calc(100vh-180px)]">
-              <div className="divide-y divide-green-900/30">
-                {drivers.map((d) => (
-                  <div key={d.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className={`h-2 w-2 rounded-full flex-shrink-0 ${d.is_online ? "bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" : "bg-gray-600"}`} />
-                      <span className={`text-[13px] truncate ${d.is_online ? "text-purple-400" : "text-gray-400"}`}>{d.email || nameOf(d)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <span className={`text-[10px] ${d.is_online ? "text-green-500" : "text-gray-600"}`}>
-                        {d.is_online ? "ONLINE" : "OFFLINE"}
-                      </span>
-                      {d.is_online && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => forceOffline(d.user_id)}
-                          className="h-6 px-2 text-[10px] text-red-500 hover:text-red-300 hover:bg-red-900/20"
-                          title="Force this driver offline"
-                        >
-                          <Power className="h-3 w-3" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                {drivers.length === 0 && <div className="p-3 text-xs text-gray-600">No drivers found</div>}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        {/* Live Transaction Feed */}
-        <Card className="bg-gray-950 border-green-900 overflow-hidden lg:row-span-1">
           <CardHeader className="py-2 px-3 border-b border-green-900">
             <CardTitle className="text-sm text-green-400 flex items-center gap-2">
               <Zap className="h-4 w-4" /> LIVE FEED
@@ -668,8 +639,7 @@ const MSNDispatchCenter: React.FC = () => {
               )}
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-0 flex flex-col h-[calc(100vh-180px)]">
-            {/* Log feed */}
+          <CardContent className="p-0 flex flex-col h-[calc(100vh-160px)]">
             <ScrollArea className="flex-1 px-2 py-1">
               <div className="space-y-px font-mono text-[11px] leading-tight">
                 {logs.map((log) => (
