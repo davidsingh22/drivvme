@@ -43,6 +43,9 @@ interface LogEntry {
   ride_id?: string;
 }
 
+// Track last known status per user to de-duplicate feed
+type UserStatus = "online" | "searching" | "accepted" | "in_progress" | "completed" | "cancelled" | "offline";
+
 // ─── Helpers ────────────────────────────────────────────────────────────
 const HEARTBEAT_WINDOW_MS = 5 * 60 * 1000;
 
