@@ -216,7 +216,7 @@ export default function LiveMonitor() {
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
 
-    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes] = await Promise.all([
+    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes, onlineDriverProfilesRes] = await Promise.all([
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
@@ -237,6 +237,12 @@ export default function LiveMonitor() {
         .from('presence')
         .select('user_id, last_seen_at, role')
         .gte('last_seen_at', cutoff),
+      // Always show drivers who are flagged as online in their profile,
+      // even if their heartbeat is stale (e.g. app backgrounded on mobile)
+      supabase
+        .from('driver_profiles')
+        .select('user_id, updated_at')
+        .eq('is_online', true),
     ]);
 
     if (riderRes.error || driverRes.error || activeRidesRes.error) {
@@ -300,6 +306,16 @@ export default function LiveMonitor() {
       if (normalizedPresenceRole === 'driver') {
         driverRoleSet.add(row.user_id);
         roleByUserRef.current.set(row.user_id, 'driver');
+      }
+    });
+
+    // Drivers flagged as is_online=true in driver_profiles always appear,
+    // even if heartbeat/location data is stale (backgrounded app)
+    ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
+      driverRoleSet.add(row.user_id);
+      roleByUserRef.current.set(row.user_id, 'driver');
+      if (!allUsersLatest.has(row.user_id)) {
+        allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
       }
     });
 
