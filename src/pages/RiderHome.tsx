@@ -11,55 +11,89 @@ import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 const RiderHome = () => {
   const navigate = useNavigate();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, signOut } = useAuth();
   const gpsStarted = useRef(false);
-  const presencePinged = useRef(false);
 
-  // Bridge step: touch rider_locations on mount so MSN Dispatch sees us immediately
+  // Entry Signal: fire immediately when RiderHome mounts
   useEffect(() => {
-    if (presencePinged.current || !user?.id) return;
-    presencePinged.current = true;
+    let cancelled = false;
 
-    const touchPresence = async () => {
-      try {
-        const now = new Date().toISOString();
-        console.log('Pinging... rider active signal');
+    const sendPresenceSignal = async (authUser: { id: string; email?: string | null }) => {
+      if (cancelled || !authUser.id) return;
 
-        const { data: existing, error: existingError } = await supabase
-          .from('rider_locations')
-          .select('id')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (existingError) {
-          console.warn('[RiderHome] Presence bridge lookup failed:', existingError);
-        }
-
-        if (existing) {
-          await supabase
-            .from('rider_locations')
-            .update({ is_online: true, last_seen_at: now, updated_at: now })
-            .eq('user_id', user.id);
-        } else {
-          await supabase.from('rider_locations').insert({
-            user_id: user.id,
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('rider_locations')
+        .upsert(
+          {
+            user_id: authUser.id,
             lat: 45.5017,
             lng: -73.5673,
             accuracy: 10000,
             is_online: true,
             last_seen_at: now,
             updated_at: now,
-          });
-        }
+          },
+          { onConflict: 'user_id' }
+        );
 
-        console.log('[RiderHome] Active signal sent');
-      } catch (e) {
-        console.warn('[RiderHome] Presence bridge failed:', e);
+      if (error) {
+        console.warn('[RiderHome] Presence signal failed:', error);
+        return;
+      }
+
+      console.log('Presence signal sent for:', authUser.email ?? authUser.id);
+    };
+
+    const boot = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (data.user?.id) {
+        await sendPresenceSignal({ id: data.user.id, email: data.user.email });
       }
     };
 
-    touchPresence();
-  }, [user?.id]);
+    void boot();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user?.id) {
+        void sendPresenceSignal({ id: session.user.id, email: session.user.email });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      const { data } = await supabase.auth.getUser();
+      const authUser = data.user;
+      if (authUser?.id) {
+        const now = new Date().toISOString();
+        await supabase
+          .from('rider_locations')
+          .upsert(
+            {
+              user_id: authUser.id,
+              lat: 45.5017,
+              lng: -73.5673,
+              accuracy: 10000,
+              is_online: false,
+              last_seen_at: now,
+              updated_at: now,
+            },
+            { onConflict: 'user_id' }
+          );
+      }
+    } catch (error) {
+      console.warn('[RiderHome] Pre-logout signal failed:', error);
+    }
+
+    await signOut();
+    window.location.href = '/';
+  }, [signOut]);
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
   useEffect(() => {
