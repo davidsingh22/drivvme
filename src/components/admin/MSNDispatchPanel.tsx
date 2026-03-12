@@ -205,15 +205,43 @@ const MSNDispatchPanel: React.FC = () => {
     };
     init();
 
-    // Realtime: rider locations (online status changes)
+    // Realtime: rider locations (online status changes + guest fallback)
     const riderChannel = supabase
       .channel('msn-rider-locs')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_locations' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_locations' }, async (payload) => {
         const row = payload.new as any;
-        if (row?.user_id) {
+        if (!row?.user_id) return;
+
+        setRiders(prev => {
+          const exists = prev.some(r => r.user_id === row.user_id);
+          if (exists) {
+            return prev.map(r =>
+              r.user_id === row.user_id
+                ? { ...r, is_online: row.is_online ?? r.is_online, last_seen_at: row.last_seen_at ?? r.last_seen_at }
+                : r
+            );
+          }
+          // Fallback: user not in list yet — add as Guest/Active
+          return [{
+            user_id: row.user_id,
+            first_name: 'Guest',
+            last_name: 'Active',
+            email: null,
+            is_online: row.is_online ?? true,
+            last_seen_at: row.last_seen_at ?? new Date().toISOString(),
+            has_active_ride: false,
+          }, ...prev];
+        });
+
+        // Resolve profile for guest entries and push feed
+        if (row.is_online) {
+          const p = await resolveProfile(row.user_id);
+          const label = p?.email || `${p?.first_name || ''} ${p?.last_name || ''}`.trim() || row.user_id.slice(0, 8);
+          pushFeed('status', `📱 ${label} is now online`);
+          // Update guest entry with real profile data
           setRiders(prev => prev.map(r =>
-            r.user_id === row.user_id
-              ? { ...r, is_online: row.is_online ?? r.is_online, last_seen_at: row.last_seen_at ?? r.last_seen_at }
+            r.user_id === row.user_id && r.first_name === 'Guest'
+              ? { ...r, first_name: p?.first_name ?? null, last_name: p?.last_name ?? null, email: p?.email ?? null }
               : r
           ));
         }

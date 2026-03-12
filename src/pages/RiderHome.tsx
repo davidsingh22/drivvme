@@ -4,14 +4,54 @@ import { Car, Shield } from 'lucide-react';
 import { useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
+import { supabase } from '@/integrations/supabase/client';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
 const RiderHome = () => {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const gpsStarted = useRef(false);
+  const presencePinged = useRef(false);
+
+  // Bridge step: touch rider_locations on mount so MSN Dispatch sees us immediately
+  useEffect(() => {
+    if (presencePinged.current || !user?.id) return;
+    presencePinged.current = true;
+
+    const touchPresence = async () => {
+      try {
+        const now = new Date().toISOString();
+        const { data: existing } = await supabase
+          .from('rider_locations')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (existing) {
+          await supabase
+            .from('rider_locations')
+            .update({ is_online: true, last_seen_at: now, updated_at: now })
+            .eq('user_id', user.id);
+        } else {
+          await supabase.from('rider_locations').insert({
+            user_id: user.id,
+            lat: 45.5017,
+            lng: -73.5673,
+            accuracy: 10000,
+            is_online: true,
+            last_seen_at: now,
+            updated_at: now,
+          });
+        }
+        console.log('[RiderHome] Presence bridge: rider_locations touched');
+      } catch (e) {
+        console.warn('[RiderHome] Presence bridge failed:', e);
+      }
+    };
+    touchPresence();
+  }, [user?.id]);
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
   useEffect(() => {
