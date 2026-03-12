@@ -23,11 +23,17 @@ const RiderHome = () => {
     const touchPresence = async () => {
       try {
         const now = new Date().toISOString();
-        const { data: existing } = await supabase
+        console.log('Pinging... rider active signal');
+
+        const { data: existing, error: existingError } = await supabase
           .from('rider_locations')
           .select('id')
           .eq('user_id', user.id)
           .maybeSingle();
+
+        if (existingError) {
+          console.warn('[RiderHome] Presence bridge lookup failed:', existingError);
+        }
 
         if (existing) {
           await supabase
@@ -45,11 +51,13 @@ const RiderHome = () => {
             updated_at: now,
           });
         }
-        console.log('[RiderHome] Presence bridge: rider_locations touched');
+
+        console.log('[RiderHome] Active signal sent');
       } catch (e) {
         console.warn('[RiderHome] Presence bridge failed:', e);
       }
     };
+
     touchPresence();
   }, [user?.id]);
 
