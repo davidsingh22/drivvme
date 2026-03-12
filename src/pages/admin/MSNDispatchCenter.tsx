@@ -13,8 +13,6 @@ import {
   Zap,
   Users,
   Car,
-  AlertTriangle,
-  Skull,
   Power,
   RefreshCw,
 } from "lucide-react";
@@ -57,16 +55,18 @@ const fmtTime = (d: Date) =>
 const nameOf = (e: { first_name: string | null; last_name: string | null; email: string | null }) =>
   [e.first_name, e.last_name].filter(Boolean).join(" ") || e.email || "Unknown";
 
+const riderToken = (userId: string) => `{{rider:${userId}}}`;
+const riderFallback = (userId: string) => userId.slice(0, 6);
+
 // ─── Component ──────────────────────────────────────────────────────────
 const MSNDispatchCenter: React.FC = () => {
   const navigate = useNavigate();
-  const { user, isAdmin, authLoading } = useAuth();
+  const { isAdmin, authLoading } = useAuth();
 
   const [riders, setRiders] = useState<RiderEntry[]>([]);
   const [drivers, setDrivers] = useState<DriverEntry[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [activeRides, setActiveRides] = useState<Record<string, any>>({});
-  const logEndRef = useRef<HTMLDivElement>(null);
   const logIdCounter = useRef(0);
   const driverCacheRef = useRef<Record<string, string>>({});
   const riderCacheRef = useRef<Record<string, { first_name: string | null; last_name: string | null; email: string | null }>>({});
@@ -79,14 +79,55 @@ const MSNDispatchCenter: React.FC = () => {
     }
   }, [authLoading, isAdmin, navigate]);
 
+  // ─── Identity helpers ───────────────────────────────────────────────
+  const riderDisplay = useCallback(
+    (userId: string) => {
+      const cached = riderCacheRef.current[userId];
+      const fullName = [cached?.first_name, cached?.last_name].filter(Boolean).join(" ");
+      return cached?.email || fullName || riderFallback(userId);
+    },
+    []
+  );
+
+  const riderLabel = useCallback(
+    (entry: RiderEntry) => entry.email || [entry.first_name, entry.last_name].filter(Boolean).join(" ") || riderFallback(entry.user_id),
+    []
+  );
+
+  const renderTimelineMessage = useCallback(
+    (message: string) => {
+      const tokenRegex = /\{\{rider:([^}]+)\}\}/g;
+      const parts: React.ReactNode[] = [];
+      let lastIndex = 0;
+      let tokenMatch: RegExpExecArray | null = null;
+
+      while ((tokenMatch = tokenRegex.exec(message))) {
+        const [rawToken, tokenUserId] = tokenMatch;
+        if (tokenMatch.index > lastIndex) {
+          parts.push(<span key={`txt-${tokenMatch.index}`}>{message.slice(lastIndex, tokenMatch.index)}</span>);
+        }
+        parts.push(
+          <span key={`rider-${tokenMatch.index}`} className="text-sky-400">
+            {riderDisplay(tokenUserId)}
+          </span>
+        );
+        lastIndex = tokenMatch.index + rawToken.length;
+      }
+
+      if (lastIndex < message.length) {
+        parts.push(<span key="txt-end">{message.slice(lastIndex)}</span>);
+      }
+
+      return parts.length ? parts : message;
+    },
+    [riderDisplay]
+  );
+
   // ─── Push log helper ───────────────────────────────────────────────
   const pushLog = useCallback(
     (type: LogEntry["type"], message: string, ride_id?: string) => {
       logIdCounter.current += 1;
-      setLogs((prev) => [
-        ...prev.slice(-199),
-        { id: `log-${logIdCounter.current}`, ts: new Date(), type, message, ride_id },
-      ]);
+      setLogs((prev) => [{ id: `log-${logIdCounter.current}`, ts: new Date(), type, message, ride_id }, ...prev].slice(0, 200));
     },
     []
   );
@@ -122,36 +163,54 @@ const MSNDispatchCenter: React.FC = () => {
       return data;
     }
 
-    return { first_name: "Guest", last_name: "Active", email: null };
+    return null;
   }, []);
 
   // ─── Fetch riders (profiles + rider_locations) ─────────────────────
   const fetchRiders = useCallback(async () => {
-    const { data: riderRoles } = await supabase.from("user_roles").select("user_id").eq("role", "rider");
-    if (!riderRoles?.length) {
+    const [{ data: riderRoles }, { data: locations }] = await Promise.all([
+      supabase.from("user_roles").select("user_id").eq("role", "rider"),
+      supabase
+        .from("rider_locations")
+        .select("user_id, last_seen_at, is_online")
+        .order("last_seen_at", { ascending: false })
+        .limit(500),
+    ]);
+
+    const roleIds = (riderRoles ?? []).map((r) => r.user_id);
+    const locationRows = locations ?? [];
+    const allIds = Array.from(new Set([...roleIds, ...locationRows.map((l) => l.user_id)]));
+
+    if (!allIds.length) {
       setRiders([]);
       return;
     }
 
-    const ids = riderRoles.map((r) => r.user_id);
-    const { data: profiles } = await supabase.from("profiles").select("user_id, first_name, last_name, email").in("user_id", ids);
-    const { data: locations } = await supabase.from("rider_locations").select("user_id, last_seen_at, is_online").in("user_id", ids);
+    const { data: profiles } = await supabase
+      .from("profiles")
+      .select("user_id, first_name, last_name, email")
+      .in("user_id", allIds);
 
-    const locMap = new Map((locations ?? []).map((l) => [l.user_id, l]));
-    const nextRiders = (profiles ?? []).map((p) => {
-      riderCacheRef.current[p.user_id] = {
-        first_name: p.first_name,
-        last_name: p.last_name,
-        email: p.email,
-      };
+    const profileMap = new Map((profiles ?? []).map((p) => [p.user_id, p]));
+    const locMap = new Map(locationRows.map((l) => [l.user_id, l]));
+
+    const nextRiders = allIds.map((userId) => {
+      const profile = profileMap.get(userId);
+      if (profile) {
+        riderCacheRef.current[userId] = {
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+          email: profile.email,
+        };
+      }
 
       return {
-        user_id: p.user_id,
-        first_name: p.first_name,
-        last_name: p.last_name,
-        email: p.email,
-        last_seen_at: locMap.get(p.user_id)?.last_seen_at ?? null,
-        is_online: locMap.get(p.user_id)?.is_online ?? false,
+        user_id: userId,
+        first_name: profile?.first_name ?? null,
+        last_name: profile?.last_name ?? null,
+        email: profile?.email ?? null,
+        last_seen_at: locMap.get(userId)?.last_seen_at ?? null,
+        is_online: locMap.get(userId)?.is_online ?? false,
       };
     });
 
@@ -159,7 +218,10 @@ const MSNDispatchCenter: React.FC = () => {
       const aOnline = a.is_online || isAppOpen(a.last_seen_at);
       const bOnline = b.is_online || isAppOpen(b.last_seen_at);
       if (aOnline !== bOnline) return aOnline ? -1 : 1;
-      return (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) - (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
+      return (
+        (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
+        (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
+      );
     });
 
     setRiders(nextRiders);
@@ -213,59 +275,83 @@ const MSNDispatchCenter: React.FC = () => {
   useEffect(() => {
     if (!isAdmin) return;
 
+    const sortByPresence = (list: RiderEntry[]) => {
+      const next = [...list];
+      next.sort((a, b) => {
+        const aOnline = a.is_online || isAppOpen(a.last_seen_at);
+        const bOnline = b.is_online || isAppOpen(b.last_seen_at);
+        if (aOnline !== bOnline) return aOnline ? -1 : 1;
+        return (
+          (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) -
+          (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0)
+        );
+      });
+      return next;
+    };
+
     const ch = supabase
       .channel("msn-rider-locations")
-      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, async (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
+        if (payload.eventType === "DELETE") return;
+
         const row = (payload.new as any) ?? {};
         if (!row.user_id) return;
 
-        // Immediately resolve the real profile
-        const profile = await resolveRiderProfile(row.user_id);
-        const identity = profile.email || [profile.first_name, profile.last_name].filter(Boolean).join(" ") || row.user_id.slice(0, 8);
-
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
+        const nextIsOnline = row.is_online ?? true;
 
+        // Golden rule: show the rider immediately, even before profile/email fetch resolves.
         setRiders((prev) => {
           const index = prev.findIndex((r) => r.user_id === row.user_id);
-
           if (index >= 0) {
             const next = [...prev];
             next[index] = {
               ...next[index],
-              first_name: profile.first_name ?? next[index].first_name,
-              last_name: profile.last_name ?? next[index].last_name,
-              email: profile.email ?? next[index].email,
               last_seen_at: updatedLastSeen,
-              is_online: row.is_online ?? true,
+              is_online: nextIsOnline,
             };
-
-            next.sort((a, b) => {
-              const aOnline = a.is_online || isAppOpen(a.last_seen_at);
-              const bOnline = b.is_online || isAppOpen(b.last_seen_at);
-              if (aOnline !== bOnline) return aOnline ? -1 : 1;
-              return (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) - (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
-            });
-
-            return next;
+            return sortByPresence(next);
           }
 
-          // New user not in list — add with resolved identity
-          return [
+          return sortByPresence([
             {
               user_id: row.user_id,
-              first_name: profile.first_name ?? null,
-              last_name: profile.last_name ?? null,
-              email: profile.email ?? null,
+              first_name: null,
+              last_name: null,
+              email: null,
               last_seen_at: updatedLastSeen,
-              is_online: row.is_online ?? true,
+              is_online: nextIsOnline,
             },
             ...prev,
-          ];
+          ]);
         });
 
-        if (row.is_online) {
-          pushLog("rider", `🟢 ${identity} is Online (Triggered by RiderHome mount)`);
+        const oldLastSeen = (payload.old as any)?.last_seen_at;
+        if (nextIsOnline && (payload.eventType === "INSERT" || oldLastSeen !== updatedLastSeen)) {
+          pushLog("system", `🟢 ${riderToken(row.user_id)} is now Online`);
         }
+
+        // Identity hot-swap in background (list + timeline update automatically via token rendering).
+        void resolveRiderProfile(row.user_id)
+          .then((profile) => {
+            if (!profile) return;
+            riderCacheRef.current[row.user_id] = profile;
+            setRiders((prev) =>
+              sortByPresence(
+                prev.map((r) =>
+                  r.user_id === row.user_id
+                    ? {
+                        ...r,
+                        first_name: profile.first_name,
+                        last_name: profile.last_name,
+                        email: profile.email,
+                      }
+                    : r
+                )
+              )
+            );
+          })
+          .catch(() => undefined);
       })
       .subscribe();
 
@@ -298,19 +384,15 @@ const MSNDispatchCenter: React.FC = () => {
   // ─── Realtime: rides (new rides + status changes + dispatch) ───────
   useEffect(() => {
     if (!isAdmin) return;
+
+    const riderRef = (ride: any) => (ride?.rider_id ? riderToken(ride.rider_id) : "unknown");
+
     const ch = supabase
       .channel("msn-rides")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
         setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
-
-        const { data: rp } = await supabase
-          .from("profiles")
-          .select("first_name, last_name, email")
-          .eq("user_id", ride.rider_id)
-          .maybeSingle();
-        const riderEmail = rp?.email || [rp?.first_name, rp?.last_name].filter(Boolean).join(" ") || ride.rider_id?.slice(0, 8);
-        pushLog("rider", `🚗 ${riderEmail} is searching for a ride (Triggered by ride 'requested')`, ride.id);
+        pushLog("rider", `🚕 ${riderRef(ride)} is looking for a ride`, ride.id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
@@ -327,30 +409,22 @@ const MSNDispatchCenter: React.FC = () => {
         }
 
         if (ride.status !== old.status) {
-          const { data: rp } = await supabase
-            .from("profiles")
-            .select("first_name, last_name, email")
-            .eq("user_id", ride.rider_id)
-            .maybeSingle();
-          const riderEmail = rp?.email || [rp?.first_name, rp?.last_name].filter(Boolean).join(" ") || ride.rider_id?.slice(0, 8);
-
           if (ride.status === "driver_assigned" && ride.driver_id) {
             const dn = await resolveDriverName(ride.driver_id);
-            pushLog("dispatch", `✅ ${riderEmail} ride accepted by ${dn}`, ride.id);
+            pushLog("dispatch", `✅ ${riderRef(ride)} ride accepted by ${dn}`, ride.id);
           } else if (ride.status === "cancelled") {
-            pushLog("cancel", `❌ ${riderEmail} ride cancelled`, ride.id);
+            pushLog("cancel", `❌ ${riderRef(ride)} ride cancelled`, ride.id);
           } else if (ride.status === "in_progress") {
-            pushLog("rider", `🚗 ${riderEmail} ride in progress`, ride.id);
+            pushLog("rider", `🚗 ${riderRef(ride)} ride in progress`, ride.id);
           } else if (ride.status === "completed") {
-            pushLog("rider", `🏁 ${riderEmail} ride completed`, ride.id);
+            pushLog("rider", `🏁 ${riderRef(ride)} ride completed`, ride.id);
           } else if (ride.status === "driver_en_route") {
-            pushLog("driver", `🚙 Driver en route to ${riderEmail}`, ride.id);
+            pushLog("driver", `🚙 Driver en route to ${riderRef(ride)}`, ride.id);
           } else if (ride.status === "arrived") {
-            pushLog("driver", `📍 Driver arrived for ${riderEmail}`, ride.id);
+            pushLog("driver", `📍 Driver arrived for ${riderRef(ride)}`, ride.id);
           }
         }
 
-        // Dispatch notifications
         const oldIds: string[] = old.notified_driver_ids ?? [];
         const newIds: string[] = ride.notified_driver_ids ?? [];
         const freshIds = newIds.filter((id: string) => !oldIds.includes(id));
@@ -360,13 +434,11 @@ const MSNDispatchCenter: React.FC = () => {
         }
       })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [isAdmin, pushLog, resolveDriverName]);
 
-  // ─── Auto-scroll logs ──────────────────────────────────────────────
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [logs]);
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [isAdmin, pushLog, resolveDriverName]);
 
   // ─── Refresh timer for "App Open" indicators ──────────────────────
   const [, setTick] = useState(0);
@@ -374,20 +446,6 @@ const MSNDispatchCenter: React.FC = () => {
     const iv = setInterval(() => setTick((t) => t + 1), 5000);
     return () => clearInterval(iv);
   }, []);
-
-  // ─── Force Reset ride ──────────────────────────────────────────────
-  const forceResetRide = async (rideId: string) => {
-    const { error } = await supabase
-      .from("rides")
-      .update({ status: "cancelled" as any, cancelled_at: new Date().toISOString(), cancel_reason: "Admin force reset via MSN" })
-      .eq("id", rideId);
-    if (error) {
-      toast.error("Force reset failed: " + error.message);
-    } else {
-      toast.success("Ride force-cancelled");
-      pushLog("cancel", `💀 ADMIN force-cancelled ride ${rideId.slice(0, 8)}`);
-    }
-  };
 
   // ─── Force Offline driver ─────────────────────────────────────────
   const forceOffline = async (driverUserId: string) => {
@@ -472,7 +530,7 @@ const MSNDispatchCenter: React.FC = () => {
                   <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
-                      <span className="text-[11px] truncate text-sky-400">{r.email || nameOf(r)}</span>
+                      <span className="text-[11px] truncate text-sky-400">{riderLabel(r)}</span>
                     </div>
                     <span className="text-[9px] flex-shrink-0 text-green-500">APP OPEN</span>
                   </div>
@@ -486,7 +544,7 @@ const MSNDispatchCenter: React.FC = () => {
                   <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10 opacity-70">
                     <div className="flex items-center gap-2 min-w-0">
                       <div className="h-2 w-2 rounded-full flex-shrink-0 bg-gray-600" />
-                      <span className="text-[11px] truncate text-gray-400">{r.email || nameOf(r)}</span>
+                      <span className="text-[11px] truncate text-gray-400">{riderLabel(r)}</span>
                     </div>
                     <span className="text-[9px] flex-shrink-0 text-gray-600">IDLE</span>
                   </div>
@@ -551,43 +609,18 @@ const MSNDispatchCenter: React.FC = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0 flex flex-col h-[calc(100vh-180px)]">
-            {/* Active rides bar */}
-            {Object.keys(activeRides).length > 0 && (
-              <div className="border-b border-green-900/50 p-2 space-y-1 max-h-32 overflow-y-auto">
-                {Object.values(activeRides).map((ride: any) => (
-                  <div key={ride.id} className="flex items-center justify-between gap-2 text-[10px]">
-                    <div className="flex items-center gap-1 min-w-0 truncate">
-                      <AlertTriangle className="h-3 w-3 text-yellow-500 flex-shrink-0" />
-                      <span className="text-yellow-400 truncate">
-                        {ride.id.slice(0, 8)} · {ride.status}
-                      </span>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => forceResetRide(ride.id)}
-                      className="h-5 px-2 text-[10px] text-red-500 hover:text-red-300 hover:bg-red-900/20 flex-shrink-0"
-                    >
-                      <Skull className="h-3 w-3 mr-1" /> FORCE RESET
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {/* Log feed */}
             <ScrollArea className="flex-1 px-2 py-1">
-              <div className="space-y-px">
+              <div className="space-y-px font-mono text-[11px] leading-tight">
                 {logs.map((log) => (
-                  <div key={log.id} className="flex gap-1.5 text-[10px] leading-tight py-px">
+                  <div key={log.id} className="flex gap-1.5 py-px">
                     <span className="text-gray-600 flex-shrink-0 tabular-nums">[{fmtTime(log.ts)}]</span>
-                    <span className={logColor[log.type] ?? "text-gray-400"}>{log.message}</span>
+                    <span className={logColor[log.type] ?? "text-gray-400"}>{renderTimelineMessage(log.message)}</span>
                   </div>
                 ))}
-                <div ref={logEndRef} />
               </div>
               {logs.length === 0 && (
-                <div className="text-gray-600 text-[10px] py-4 text-center">Waiting for events...</div>
+                <div className="text-gray-600 text-[11px] py-4 text-center">Waiting for events...</div>
               )}
             </ScrollArea>
           </CardContent>
