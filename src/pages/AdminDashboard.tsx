@@ -44,6 +44,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format } from 'date-fns';
 import { SupportMessagesPanel } from '@/components/admin/SupportMessagesPanel';
 import { AdminTipsPanel } from '@/components/admin/AdminTipsPanel';
+import MSNDispatchPanel from '@/components/admin/MSNDispatchPanel';
 
 interface Payment {
   id: string;
@@ -867,14 +868,6 @@ const AdminDashboard = () => {
             <p className="text-muted-foreground">Manage users, payments, and refunds</p>
           </div>
           <div className="flex gap-2">
-            <Button onClick={() => navigate('/admin/riders-live')} variant="outline" className="gap-2">
-              <User className="w-4 h-4" />
-              Live Riders
-            </Button>
-            <Button onClick={() => navigate('/admin/drivers-live')} variant="outline" className="gap-2">
-              <Radio className="w-4 h-4" />
-              Live Drivers
-            </Button>
             <Button onClick={() => navigate('/admin/driver-documents')} variant="outline" className="gap-2">
               <FileText className="w-4 h-4" />
               Driver Documents
@@ -883,9 +876,9 @@ const AdminDashboard = () => {
               <RefreshCw className="w-4 h-4" />
               Issue Refund
             </Button>
-            <Button onClick={() => navigate('/admin/live')} className="gap-2 bg-primary hover:bg-primary/80">
+            <Button onClick={() => navigate('/admin/msn')} className="gap-2 bg-neutral-900 hover:bg-neutral-800 text-white">
               <Radio className="w-4 h-4" />
-              DMN Live
+              MSN
             </Button>
           </div>
         </div>
@@ -956,6 +949,11 @@ const AdminDashboard = () => {
               <CardTitle className="text-2xl text-red-600">${stats.refundedAmount.toFixed(2)}</CardTitle>
             </CardHeader>
           </Card>
+        </div>
+
+        {/* MSN Dispatch Center */}
+        <div className="mb-8">
+          <MSNDispatchPanel />
         </div>
 
         {/* Main Tabs */}
