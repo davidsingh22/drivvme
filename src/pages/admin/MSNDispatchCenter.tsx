@@ -422,9 +422,12 @@ const MSNDispatchCenter: React.FC = () => {
 
         if (ride.rider_id) {
           ensureRiderVisible(ride.rider_id, new Date().toISOString());
+          const prev = userStatusRef.current[ride.rider_id];
+          if (prev !== "searching") {
+            userStatusRef.current[ride.rider_id] = "searching";
+            pushLog("rider", `🚕 ${riderRef(ride)} is searching for a ride`, ride.id);
+          }
         }
-
-        pushLog("rider", `🚗 ${riderRef(ride)} is searching...`, ride.id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
@@ -444,20 +447,34 @@ const MSNDispatchCenter: React.FC = () => {
           setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
         }
 
+        // Only log on actual status transitions
         if (ride.status !== old.status) {
+          const riderId = ride.rider_id;
           if (ride.status === "driver_assigned" && ride.driver_id) {
+            if (riderId) userStatusRef.current[riderId] = "accepted";
             const dn = await resolveDriverName(ride.driver_id);
             pushLog("dispatch", `✅ ${riderRef(ride)} ride accepted by ${dn}`, ride.id);
           } else if (ride.status === "cancelled") {
+            if (riderId) userStatusRef.current[riderId] = "cancelled";
             pushLog("cancel", `❌ ${riderRef(ride)} ride cancelled`, ride.id);
           } else if (ride.status === "in_progress") {
+            if (riderId) userStatusRef.current[riderId] = "in_progress";
             pushLog("rider", `🚗 ${riderRef(ride)} ride in progress`, ride.id);
           } else if (ride.status === "completed") {
+            if (riderId) userStatusRef.current[riderId] = "completed";
             pushLog("rider", `🏁 ${riderRef(ride)} ride completed`, ride.id);
           } else if (ride.status === "driver_en_route") {
             pushLog("driver", `🚙 Driver en route to ${riderRef(ride)}`, ride.id);
           } else if (ride.status === "arrived") {
             pushLog("driver", `📍 Driver arrived for ${riderRef(ride)}`, ride.id);
+          } else if (ride.status === "searching") {
+            if (riderId) {
+              const prevS = userStatusRef.current[riderId];
+              if (prevS !== "searching") {
+                userStatusRef.current[riderId] = "searching";
+                pushLog("rider", `🚕 ${riderRef(ride)} is searching for a ride`, ride.id);
+              }
+            }
           }
         }
 
