@@ -399,11 +399,20 @@ const MSNDispatchCenter: React.FC = () => {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
         setActiveRides((prev) => ({ ...prev, [ride.id]: ride }));
-        pushLog("rider", `🚕 ${riderRef(ride)} is looking for a ride`, ride.id);
+
+        if (ride.rider_id) {
+          ensureRiderVisible(ride.rider_id, new Date().toISOString());
+        }
+
+        pushLog("rider", `🚗 ${riderRef(ride)} is searching...`, ride.id);
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rides" }, async (payload) => {
         const ride = payload.new as any;
         const old = payload.old as any;
+
+        if (ride.rider_id) {
+          ensureRiderVisible(ride.rider_id, ride.updated_at ?? new Date().toISOString());
+        }
 
         if (["completed", "cancelled"].includes(ride.status)) {
           setActiveRides((prev) => {
@@ -445,7 +454,7 @@ const MSNDispatchCenter: React.FC = () => {
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [isAdmin, pushLog, resolveDriverName]);
+  }, [ensureRiderVisible, isAdmin, pushLog, resolveDriverName]);
 
   // ─── Refresh timer for "App Open" indicators ──────────────────────
   const [, setTick] = useState(0);
