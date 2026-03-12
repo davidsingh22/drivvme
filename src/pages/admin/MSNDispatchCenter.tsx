@@ -167,18 +167,43 @@ const MSNDispatchCenter: React.FC = () => {
   );
 
   const resolveRiderProfile = useCallback(async (userId: string, bypassCache = false) => {
-    if (!bypassCache && riderCacheRef.current[userId]?.email) return riderCacheRef.current[userId];
-    const { data } = await supabase
+    const cached = riderCacheRef.current[userId];
+    if (!bypassCache && cached?.email) return cached;
+
+    let profile: { first_name: string | null; last_name: string | null; email: string | null } | null = null;
+
+    const { data: byUserId, error: byUserIdError } = await supabase
       .from("profiles")
       .select("first_name, last_name, email")
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (data) {
-      riderCacheRef.current[userId] = data;
-      setRiderDisplayVersion((v) => v + 1);
-      return data;
+    if (byUserIdError) {
+      console.warn("[MSN] profile lookup by user_id failed:", byUserIdError);
+    } else if (byUserId) {
+      profile = byUserId;
     }
+
+    if (!profile) {
+      const { data: byId, error: byIdError } = await supabase
+        .from("profiles")
+        .select("first_name, last_name, email")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (byIdError) {
+        console.warn("[MSN] profile lookup by id failed:", byIdError);
+      } else if (byId) {
+        profile = byId;
+      }
+    }
+
+    if (profile) {
+      riderCacheRef.current[userId] = profile;
+      setRiderDisplayVersion((v) => v + 1);
+      return profile;
+    }
+
     return null;
   }, []);
 
@@ -200,16 +225,34 @@ const MSNDispatchCenter: React.FC = () => {
         ];
       });
 
-      void resolveRiderProfile(userId)
+      const shouldForceIdentityFetch = !riderCacheRef.current[userId]?.email;
+      void resolveRiderProfile(userId, shouldForceIdentityFetch)
         .then((profile) => {
           if (!profile) return;
-          setRiders((prev) =>
-            prev.map((r) =>
-              r.user_id === userId
-                ? { ...r, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }
-                : r
-            )
-          );
+          setRiders((prev) => {
+            const idx = prev.findIndex((r) => r.user_id === userId);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = {
+                ...next[idx],
+                first_name: profile.first_name,
+                last_name: profile.last_name,
+                email: profile.email,
+              };
+              return next;
+            }
+            return [
+              {
+                user_id: userId,
+                first_name: profile.first_name,
+                last_name: profile.last_name,
+                email: profile.email,
+                last_seen_at: heartbeat,
+                is_online: true,
+              },
+              ...prev,
+            ];
+          });
         })
         .catch(() => undefined);
     },
