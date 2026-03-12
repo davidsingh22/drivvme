@@ -348,23 +348,22 @@ const MSNDispatchCenter: React.FC = () => {
     const ch = supabase
       .channel("msn-rider-locations")
       .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
-        toast.success("Data Received!");
-
         if (payload.eventType === "DELETE") return;
 
         const row = (payload.new as any) ?? {};
         if (!row.user_id) return;
 
         const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
-
         ensureRiderVisible(row.user_id, updatedLastSeen);
 
-        const oldLastSeen = (payload.old as any)?.last_seen_at;
-        if (payload.eventType === "INSERT" || oldLastSeen !== updatedLastSeen) {
+        // Only log "Online" once — skip duplicate GPS pings
+        const prevStatus = userStatusRef.current[row.user_id];
+        if (prevStatus !== "online" && prevStatus !== "searching" && prevStatus !== "accepted" && prevStatus !== "in_progress") {
+          userStatusRef.current[row.user_id] = "online";
           pushLog("system", `🟢 ${riderToken(row.user_id)} is Online`);
         }
 
-        // Identity hot-swap in background (list + timeline update automatically via token rendering).
+        // Identity hot-swap
         void resolveRiderProfile(row.user_id)
           .then((profile) => {
             if (!profile) return;
@@ -372,15 +371,12 @@ const MSNDispatchCenter: React.FC = () => {
             setRiders((prev) =>
               prev.map((r) =>
                 r.user_id === row.user_id
-                  ? {
-                      ...r,
-                      first_name: profile.first_name,
-                      last_name: profile.last_name,
-                      email: profile.email,
-                    }
+                  ? { ...r, first_name: profile.first_name, last_name: profile.last_name, email: profile.email }
                   : r
               )
             );
+            // Force re-render of timeline tokens
+            setRiderDisplayVersion((v) => v + 1);
           })
           .catch(() => undefined);
       })
