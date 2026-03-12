@@ -323,7 +323,7 @@ serve(async (req) => {
       }
     }
 
-    // Read latest ride state for idempotent tier progression
+    // Read latest ride state before attempting to claim this tier
     const { data: latestRide, error: latestRideError } = await supabase
       .from("rides")
       .select("status, driver_id, notification_tier, notified_driver_ids")
@@ -349,9 +349,9 @@ serve(async (req) => {
     }
 
     const currentTier = latestRide.notification_tier ?? 0;
-    if (tier > 1 && currentTier >= tier) {
+    if (tier > 1 && currentTier < tier - 1) {
       return new Response(JSON.stringify({
-        message: `Tier ${tier} already processed, skipping duplicate escalation`,
+        message: `Tier ${tier} is out of order for current ride state`,
         tier,
         currentTier,
         sent: 0,
@@ -366,6 +366,48 @@ serve(async (req) => {
         ...((latestRide.notified_driver_ids ?? []) as string[]),
       ]),
     ];
+
+    // Atomic tier claim: only one function invocation can process a tier
+    const claimPayload = {
+      notification_tier: tier,
+      last_notification_at: new Date().toISOString(),
+    };
+
+    let claimQuery = supabase
+      .from("rides")
+      .update(claimPayload)
+      .eq("id", rideId)
+      .eq("status", "searching")
+      .is("driver_id", null);
+
+    if (tier === 1) {
+      claimQuery = claimQuery.or("notification_tier.is.null,notification_tier.eq.0");
+    } else {
+      claimQuery = claimQuery.eq("notification_tier", tier - 1);
+    }
+
+    const { data: claimRows, error: claimError } = await claimQuery
+      .select("id")
+      .limit(1);
+
+    if (claimError) {
+      console.error(`Failed to claim tier ${tier}:`, claimError);
+      return new Response(JSON.stringify({ error: "Failed to claim dispatch tier" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!claimRows || claimRows.length === 0) {
+      return new Response(JSON.stringify({
+        message: `Tier ${tier} already claimed by another dispatcher`,
+        tier,
+        currentTier,
+        sent: 0,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Tier configuration — closest-driver-first: only 1 driver per tier
     const tierConfig = {
@@ -463,15 +505,6 @@ serve(async (req) => {
     console.log(`Tier ${tier}: Found ${nearbyDrivers.length} eligible drivers (${config.description})`);
 
     if (nearbyDrivers.length === 0) {
-      // Update ride with current tier for escalation tracking
-      await supabase
-        .from("rides")
-        .update({ 
-          notification_tier: tier,
-          last_notification_at: new Date().toISOString(),
-        })
-        .eq("id", rideId);
-
       return new Response(JSON.stringify({ 
         message: `No nearby drivers found for tier ${tier}`, 
         sent: 0,
@@ -487,15 +520,15 @@ serve(async (req) => {
 
     const driverUserIds = nearbyDrivers.map(d => d.user_id);
 
-    // Update ride with notified drivers
+    // Persist deduplicated notified drivers for subsequent tiers
     await supabase
       .from("rides")
       .update({ 
-        notification_tier: tier,
         last_notification_at: new Date().toISOString(),
         notified_driver_ids: [...new Set([...mergedExcludedDriverIds, ...driverUserIds])],
       })
-      .eq("id", rideId);
+      .eq("id", rideId)
+      .eq("notification_tier", tier);
 
     // Get push subscriptions for nearby online drivers
     const { data: subscriptions, error: subError } = await supabase
