@@ -309,6 +309,16 @@ export default function LiveMonitor() {
       }
     });
 
+    // Drivers flagged as is_online=true in driver_profiles always appear,
+    // even if heartbeat/location data is stale (backgrounded app)
+    ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
+      driverRoleSet.add(row.user_id);
+      roleByUserRef.current.set(row.user_id, 'driver');
+      if (!allUsersLatest.has(row.user_id)) {
+        allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
+      }
+
+
     const allUserIds = [...allUsersLatest.keys()];
     await upsertProfileNames(allUserIds);
 
