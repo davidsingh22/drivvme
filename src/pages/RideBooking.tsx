@@ -1595,23 +1595,6 @@ const RideBooking = () => {
     clearRide();
     navigate('/rider-home');
   };
-  const isTransientCancelError = (error: unknown) => {
-    const message =
-      error instanceof Error
-        ? error.message
-        : typeof error === 'string'
-          ? error
-          : '';
-    const normalized = message.toLowerCase();
-    return (
-      normalized.includes('load failed') ||
-      normalized.includes('failed to fetch') ||
-      normalized.includes('network') ||
-      normalized.includes('timeout') ||
-      normalized.includes('timed out') ||
-      normalized.includes('abort')
-    );
-  };
 
   const handleCancelRide = async () => {
     // Single guard — never block forever
