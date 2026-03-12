@@ -547,15 +547,15 @@ serve(async (req) => {
 
     console.log("Found driver subscriptions:", subscriptions?.length || 0);
 
-    // Update ride with the notified driver so escalation hook excludes them
+    // Persist notified drivers for tier escalation exclusions
     await supabase
       .from("rides")
       .update({ 
-        notification_tier: 1,
         last_notification_at: new Date().toISOString(),
-        notified_driver_ids: driverUserIds,
+        notified_driver_ids: [...new Set([...existingNotifiedDriverIds, ...driverUserIds])],
       })
-      .eq("id", rideId);
+      .eq("id", rideId)
+      .eq("notification_tier", 1);
 
     // Create in-app notification for the single closest driver
     const inAppNotifications = nearbyDrivers.map(driver => ({
