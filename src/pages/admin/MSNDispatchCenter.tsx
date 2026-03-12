@@ -566,25 +566,13 @@ const MSNDispatchCenter: React.FC = () => {
                       <div className="h-2 w-2 rounded-full flex-shrink-0 bg-green-500 shadow-[0_0_6px_rgba(34,197,94,0.6)]" />
                       <span className="text-[11px] truncate text-sky-400">{riderLabel(r)}</span>
                     </div>
-                    <span className="text-[9px] flex-shrink-0 text-green-500">APP OPEN</span>
+                    <span className="text-[9px] flex-shrink-0 text-green-500">ONLINE</span>
                   </div>
                 ))}
 
-                <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-600 border-t border-green-900/30">
-                  Idle Riders ({idleRiders.length})
-                </div>
-
-                {idleRiders.map((r) => (
-                  <div key={r.user_id} className="flex items-center justify-between px-3 py-1.5 hover:bg-green-900/10 opacity-70">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className="h-2 w-2 rounded-full flex-shrink-0 bg-gray-600" />
-                      <span className="text-[11px] truncate text-gray-400">{riderLabel(r)}</span>
-                    </div>
-                    <span className="text-[9px] flex-shrink-0 text-gray-600">IDLE</span>
-                  </div>
-                ))}
-
-                {riders.length === 0 && <div className="p-3 text-xs text-gray-600">No riders found</div>}
+                {onlineRiders.length === 0 && (
+                  <div className="p-3 text-xs text-gray-600">Waiting for rider heartbeats...</div>
+                )}
               </div>
             </ScrollArea>
           </CardContent>
