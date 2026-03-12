@@ -1,122 +1,321 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 
-const UPDATE_INTERVAL_MS = 10000;
-const OFFLINE_TIMEOUT_MS = 30000;
-const RETRY_DELAY_MS = 5000;
+const UPDATE_INTERVAL_MS = 5000; // heartbeat
+const RETRY_DELAY_MS = 3000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: number | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(`TIMEOUT_${timeoutMs}`)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
+}
+
+function detectSource(): 'web' | 'ios' | 'android' {
+  const ua = (navigator.userAgent || '').toLowerCase();
+  if (ua.includes('android')) return 'android';
+  if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'ios';
+  return 'web';
+}
+
+function hasNativeBridge(): boolean {
+  const w = window as any;
+  return !!(w.median || w.gonative);
+}
 
 /**
- * Hook to track rider location and online status.
- * Tracks ALL authenticated users except confirmed drivers/admins.
+ * Median docs: bridge functions are not guaranteed to exist until the library initializes.
+ * It calls `window.median_library_ready()` when ready.
  */
+function waitForNativeBridgeReady(timeoutMs = 5000): Promise<void> {
+  return new Promise((resolve) => {
+    if (hasNativeBridge()) return resolve();
+
+    const w = window as any;
+    let done = false;
+
+    const timer = window.setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve();
+    }, timeoutMs);
+
+    const prev = w.median_library_ready;
+    w.median_library_ready = (...args: any[]) => {
+      try {
+        if (typeof prev === 'function') prev(...args);
+      } finally {
+        if (done) return;
+        done = true;
+        window.clearTimeout(timer);
+        resolve();
+      }
+    };
+
+    // If the bridge got injected between our initial check and now, resolve quickly.
+    window.setTimeout(() => {
+      if (done) return;
+      if (hasNativeBridge()) {
+        done = true;
+        window.clearTimeout(timer);
+        resolve();
+      }
+    }, 50);
+  });
+}
+
+function requestMedianLocation() {
+  const w = window as any;
+  try {
+    // Some wrappers expose `median.location.request()`, others use the GeoLocation shim namespace.
+    if (w.median?.location?.request) return w.median.location.request();
+    if (w.gonative?.location?.request) return w.gonative.location.request();
+
+    // Official docs mention GeoLocation shim variants.
+    if (w.median?.ios?.geoLocation?.requestLocation) return w.median.ios.geoLocation.requestLocation();
+    if (w.median?.android?.geoLocation?.promptAndroidLocationServices) return w.median.android.geoLocation.promptAndroidLocationServices();
+  } catch {
+    // silent
+  }
+}
+
 export const useRiderLocationTracking = (enabled: boolean = true) => {
-  const { user, isDriver, isAdmin } = useAuth();
+  const { user, isDriver, isAdmin, authLoading } = useAuth();
   const [isTracking, setIsTracking] = useState(false);
-  
+
+  const source = detectSource();
+  const effectiveUserId = user?.id ?? null;
+
   const watchIdRef = useRef<number | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastPositionRef = useRef<GeolocationPosition | null>(null);
+  const intervalRef = useRef<number | null>(null);
+  const retryTimeoutRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
+
   const userIdRef = useRef<string | null>(null);
+  const lastCoordsRef = useRef<{ lat: number; lng: number; accuracy?: number | null } | null>(null);
+
+  const medianBgStartedRef = useRef(false);
 
   useEffect(() => {
-    userIdRef.current = user?.id ?? null;
-  }, [user?.id]);
+    userIdRef.current = effectiveUserId;
+  }, [effectiveUserId]);
 
-  // Track if user is authenticated AND not a driver/admin
-  // This is intentionally permissive - better to track too many than miss new riders
-  const shouldTrack = enabled && !!user?.id && !isDriver && !isAdmin;
+  const shouldTrack = enabled && !!effectiveUserId && !isDriver && !isAdmin && !authLoading;
 
-  const updateLocation = useCallback(async (position: GeolocationPosition) => {
-    const userId = userIdRef.current;
-    if (!userId || !isMountedRef.current) return;
-
-    try {
-      const { error } = await supabase
-        .from('rider_locations')
-        .upsert({
-          user_id: userId,
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          is_online: true,
-          last_seen_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'user_id'
-        });
-
-      if (error) {
-        console.error('[RiderLocation] Update error:', error);
-      } else if (isMountedRef.current) {
-        setIsTracking(true);
-      }
-    } catch (err) {
-      console.error('[RiderLocation] Failed to update:', err);
+  const lastSessionCheckAtRef = useRef(0);
+  const ensureValidSession = useCallback(async (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastSessionCheckAtRef.current < 15_000) {
+      return true;
     }
+
+    lastSessionCheckAtRef.current = now;
+
+    // Preferred path: lightweight raw token recovery utility.
+    try {
+      await getValidAccessToken();
+      return true;
+    } catch {
+      // Fallback path below.
+    }
+
+    // Fallback 1: in-memory auth session can still be valid even if localStorage read failed.
+    try {
+      const sessionRes = await withTimeout(supabase.auth.getSession(), 3500);
+      if (sessionRes.data.session?.access_token) return true;
+    } catch {
+      // continue to refresh fallback
+    }
+
+    // Fallback 2: explicit refresh through auth client.
+    try {
+      const refreshRes = await withTimeout(supabase.auth.refreshSession(), 5000);
+      if (refreshRes.data.session?.access_token) return true;
+    } catch {
+      // final failure below
+    }
+
+    console.error('[RiderLocation] Could not validate auth session for heartbeat writes');
+    return false;
   }, []);
+
+  const syncPresenceHeartbeat = useCallback(async (lastSeenAt: string) => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+
+    const sessionReady = await ensureValidSession();
+    if (!sessionReady) return;
+
+    const fullName = [user?.user_metadata?.first_name, user?.user_metadata?.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    const displayName = fullName || user?.email || uid;
+
+    await supabase
+      .from('presence')
+      .upsert(
+        {
+          user_id: uid,
+          role: 'RIDER',
+          display_name: displayName,
+          source: detectSource(),
+          last_seen_at: lastSeenAt,
+          updated_at: lastSeenAt,
+        },
+        { onConflict: 'user_id' }
+      );
+  }, [ensureValidSession, user?.email, user?.user_metadata?.first_name, user?.user_metadata?.last_name]);
+
+  const writeLocationCoords = useCallback(async (coords: { lat: number; lng: number; accuracy?: number | null }) => {
+    const uid = userIdRef.current;
+    if (!uid || !isMountedRef.current) return;
+
+    const sessionReady = await ensureValidSession();
+    if (!sessionReady) return;
+
+    const nowIso = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('rider_locations')
+      .upsert(
+        {
+          user_id: uid,
+          lat: coords.lat,
+          lng: coords.lng,
+          accuracy: coords.accuracy ?? null,
+          is_online: true,
+          last_seen_at: nowIso,
+          updated_at: nowIso,
+        },
+        { onConflict: 'user_id' }
+      );
+
+    if (error) {
+      // Keep this as an error only (no alerts) so we don't block iOS WebView execution.
+      // If this fires on iPhone, the app is connected but RLS/auth/session is blocking writes.
+      console.error('[RiderLocation] rider_locations upsert failed:', error.code, error.message);
+      return;
+    }
+
+    if (isMountedRef.current) {
+      setIsTracking(true);
+      void syncPresenceHeartbeat(nowIso);
+    }
+  }, [ensureValidSession, syncPresenceHeartbeat]);
 
   const markOnlineWithoutLocation = useCallback(async () => {
-    const userId = userIdRef.current;
-    if (!userId || !isMountedRef.current) return;
+    const uid = userIdRef.current;
+    if (!uid || !isMountedRef.current) return;
 
-    try {
-      // First try to just update is_online without overwriting coords
-      const { data: existing } = await supabase
+    const sessionReady = await ensureValidSession();
+    if (!sessionReady) return;
+
+    const nowIso = new Date().toISOString();
+
+    // Preserve coordinates if row exists; otherwise insert Montreal defaults.
+    const { data: existing } = await supabase
+      .from('rider_locations')
+      .select('id')
+      .eq('user_id', uid)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
         .from('rider_locations')
-        .select('id')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      if (existing) {
-        // Row exists — only update online status, preserve real coordinates
-        await supabase
-          .from('rider_locations')
-          .update({
-            is_online: true,
-            last_seen_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', userId);
-      } else {
-        // No row yet — insert with Montreal default (will be overwritten when GPS fires)
-        await supabase
-          .from('rider_locations')
-          .insert({
-            user_id: userId,
-            lat: 45.5017,
-            lng: -73.5673,
-            accuracy: 10000,
-            is_online: true,
-            last_seen_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-      }
-      
-      if (isMountedRef.current) {
-        setIsTracking(true);
-      }
-    } catch (err) {
-      console.error('[RiderLocation] Failed to mark online:', err);
+        .update({ is_online: true, last_seen_at: nowIso, updated_at: nowIso })
+        .eq('user_id', uid);
+    } else {
+      await supabase
+        .from('rider_locations')
+        .insert({
+          user_id: uid,
+          lat: 45.5017,
+          lng: -73.5673,
+          accuracy: 10000,
+          is_online: true,
+          last_seen_at: nowIso,
+          updated_at: nowIso,
+        });
     }
-  }, []);
+
+    if (isMountedRef.current) {
+      setIsTracking(true);
+      void syncPresenceHeartbeat(nowIso);
+    }
+  }, [ensureValidSession, syncPresenceHeartbeat]);
 
   const markOffline = useCallback(async () => {
-    const userId = userIdRef.current;
-    if (!userId) return;
+    const uid = userIdRef.current;
+    if (!uid) return;
+
+    const sessionReady = await ensureValidSession();
+    if (!sessionReady) return;
 
     try {
       await supabase
         .from('rider_locations')
-        .update({ 
-          is_online: false,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId);
+        .update({ is_online: false, updated_at: new Date().toISOString() })
+        .eq('user_id', uid);
     } catch {
-      // Silent fail
+      // silent
+    }
+  }, [ensureValidSession]);
+
+  const startMedianBackgroundLocationIfAvailable = useCallback(() => {
+    if (medianBgStartedRef.current) return;
+
+    const w = window as any;
+    const api = w.median?.backgroundLocation;
+
+    if (!api?.start) return;
+
+    try {
+      medianBgStartedRef.current = true;
+
+      const callback = (data: any) => {
+        if (!isMountedRef.current) return;
+
+        const lat = Number(data?.latitude ?? data?.lat);
+        const lng = Number(data?.longitude ?? data?.lng);
+        const accuracy = data?.accuracy != null ? Number(data.accuracy) : null;
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+        lastCoordsRef.current = { lat, lng, accuracy };
+        void writeLocationCoords({ lat, lng, accuracy });
+      };
+
+      api.start({
+        callback,
+        iosBackgroundIndicator: true,
+        iosPauseAutomatically: false,
+        iosDesiredAccuracy: 'bestForNavigation',
+      });
+    } catch {
+      // silent
+    }
+  }, [writeLocationCoords]);
+
+  const stopMedianBackgroundLocationIfRunning = useCallback(() => {
+    const w = window as any;
+    try {
+      if (medianBgStartedRef.current) {
+        w.median?.backgroundLocation?.stop?.();
+      }
+    } catch {
+      // silent
+    } finally {
+      medianBgStartedRef.current = false;
     }
   }, []);
 
@@ -125,97 +324,155 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     if (!shouldTrack) return;
 
-    console.log('[RiderLocation] Starting tracking for:', user?.id);
+    let cancelled = false;
 
-    if (!navigator.geolocation) {
-      markOnlineWithoutLocation();
-      return;
-    }
+    const start = async () => {
+      // 1) Ensure native bridge is initialized before requesting location on iOS.
+      if (source !== 'web') {
+        await waitForNativeBridgeReady(7000);
+        if (cancelled || !isMountedRef.current) return;
 
-    const attemptGetPosition = (retryCount: number = 0) => {
-      if (!isMountedRef.current) return;
+        requestMedianLocation();
+        startMedianBackgroundLocationIfAvailable();
+      }
 
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          if (!isMountedRef.current) return;
-          lastPositionRef.current = position;
-          updateLocation(position);
-        },
-        (error) => {
-          if (!isMountedRef.current) return;
-          
-          if (error.code === 1 || retryCount >= 3) {
-            markOnlineWithoutLocation();
-          } else {
-            retryTimeoutRef.current = setTimeout(() => {
+      // 2) Recover session immediately on tracker start.
+      const sessionReadyOnStart = await ensureValidSession(true);
+      if (!sessionReadyOnStart) {
+        console.warn('[RiderLocation] Tracker started without valid session; will retry on next heartbeat');
+      }
+
+      // 3) Kick presence immediately.
+      void syncPresenceHeartbeat(new Date().toISOString());
+
+      // 4) If HTML5 geolocation is unavailable, still mark online.
+      if (!navigator.geolocation) {
+        void markOnlineWithoutLocation();
+        return;
+      }
+
+      const attemptGetPosition = (retryCount: number = 0) => {
+        if (!isMountedRef.current) return;
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            if (!isMountedRef.current) return;
+            const coords = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+            };
+            lastCoordsRef.current = coords;
+            void writeLocationCoords(coords);
+          },
+          (error) => {
+            if (!isMountedRef.current) return;
+
+            // Permission denied or too many retries -> fallback (still keeps them online).
+            if (error.code === 1 || retryCount >= 3) {
+              void markOnlineWithoutLocation();
+              return;
+            }
+
+            retryTimeoutRef.current = window.setTimeout(() => {
               attemptGetPosition(retryCount + 1);
             }, RETRY_DELAY_MS);
-          }
+          },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+        );
+      };
+
+      attemptGetPosition();
+
+      watchIdRef.current = navigator.geolocation.watchPosition(
+        (position) => {
+          lastCoordsRef.current = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+          };
         },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+        () => {},
+        { enableHighAccuracy: false, timeout: 30000, maximumAge: 10000 }
       );
-    };
 
-    attemptGetPosition();
-
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (position) => { lastPositionRef.current = position; },
-      () => {},
-      { enableHighAccuracy: false, timeout: 30000, maximumAge: 10000 }
-    );
-
-    intervalRef.current = setInterval(() => {
-      if (!isMountedRef.current) return;
-      if (lastPositionRef.current) {
-        updateLocation(lastPositionRef.current);
-      } else {
-        markOnlineWithoutLocation();
-      }
-    }, UPDATE_INTERVAL_MS);
-
-    const handleVisibilityChange = () => {
-      if (!isMountedRef.current) return;
-      
-      if (document.visibilityState === 'hidden') {
-        setTimeout(() => {
-          if (document.visibilityState === 'hidden') markOffline();
-        }, OFFLINE_TIMEOUT_MS);
-      } else {
-        if (lastPositionRef.current) {
-          updateLocation(lastPositionRef.current);
+      intervalRef.current = window.setInterval(() => {
+        if (!isMountedRef.current) return;
+        if (lastCoordsRef.current) {
+          void writeLocationCoords(lastCoordsRef.current);
         } else {
-          markOnlineWithoutLocation();
+          void markOnlineWithoutLocation();
         }
-      }
+      }, UPDATE_INTERVAL_MS);
+
+      const handleVisibilityChange = async () => {
+        if (!isMountedRef.current) return;
+
+        if (document.visibilityState === 'visible') {
+          await ensureValidSession(true);
+        }
+
+        if (document.visibilityState === 'hidden') {
+          void markOnlineWithoutLocation();
+          return;
+        }
+
+        if (lastCoordsRef.current) {
+          void writeLocationCoords(lastCoordsRef.current);
+        } else {
+          void markOnlineWithoutLocation();
+        }
+      };
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      // Cleanup
+      return () => {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    let innerCleanup: undefined | (() => void);
+    void start().then((cleanup) => {
+      innerCleanup = cleanup;
+    });
 
     return () => {
+      cancelled = true;
       isMountedRef.current = false;
+
+      innerCleanup?.();
+
       if (watchIdRef.current !== null) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
       if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+        window.clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
       if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
+        window.clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = null;
       }
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      markOffline();
+
+      stopMedianBackgroundLocationIfRunning();
+
+      void syncPresenceHeartbeat(new Date().toISOString());
     };
-  }, [shouldTrack, user?.id, updateLocation, markOffline, markOnlineWithoutLocation]);
+  }, [shouldTrack, source, ensureValidSession, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, syncPresenceHeartbeat, writeLocationCoords]);
 
   useEffect(() => {
     if (!user?.id) return;
-    const handleBeforeUnload = () => markOffline();
+
+    const handleBeforeUnload = () => {
+      void syncPresenceHeartbeat(new Date().toISOString());
+      void markOffline();
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [user?.id, markOffline]);
+  }, [user?.id, markOffline, syncPresenceHeartbeat]);
 
   return { isTracking };
 };

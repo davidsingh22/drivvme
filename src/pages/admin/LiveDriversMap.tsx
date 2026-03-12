@@ -48,7 +48,7 @@ type DriverLoc = {
   average_rating?: number;
 };
 
-const STALE_THRESHOLD_SECONDS = 60;
+const STALE_VISUAL_THRESHOLD_SECONDS = 60; // visual indicator only, never removes from map
 
 // Map common car color names to CSS colors
 const getCarColor = (colorName: string | null | undefined): string => {
@@ -96,14 +96,8 @@ export default function AdminDriversLive() {
     zoom: 11,
   });
 
-  // Filter to only show active (non-stale) drivers
-  const driversList = useMemo(() => {
-    const now = Date.now();
-    return Object.values(drivers).filter((d) => {
-      const ageSec = Math.floor((now - new Date(d.updated_at).getTime()) / 1000);
-      return ageSec <= STALE_THRESHOLD_SECONDS;
-    });
-  }, [drivers]);
+  // Show ALL online drivers — never filter by staleness
+  const driversList = useMemo(() => Object.values(drivers), [drivers]);
 
   // Auth guard
   useEffect(() => {
@@ -115,10 +109,24 @@ export default function AdminDriversLive() {
     }
   }, [authLoading, session, isAdmin, navigate]);
 
-  // Load initial online drivers with names
+  // Load initial online drivers with names — auto-clean stale ghost sessions
   const loadOnlineDrivers = useCallback(async () => {
     setIsLoading(true);
     try {
+      // First, auto-clean: set drivers offline if no GPS update in 10+ minutes
+      const staleThreshold = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await supabase
+        .from("driver_locations")
+        .update({ is_online: false, updated_at: new Date().toISOString() })
+        .eq("is_online", true)
+        .lt("updated_at", staleThreshold);
+      // Also sync driver_profiles
+      await supabase
+        .from("driver_profiles")
+        .update({ is_online: false, updated_at: new Date().toISOString() })
+        .eq("is_online", true)
+        .lt("updated_at", staleThreshold);
+
       const { data, error } = await supabase
         .from("driver_locations")
         .select("*")
@@ -308,11 +316,14 @@ export default function AdminDriversLive() {
     };
   }, []);
 
-  // Tick for stale check
+  // Polling fallback — re-fetch every 30s to catch missed realtime events
   useEffect(() => {
-    const interval = setInterval(() => setTick((t) => t + 1), 5000);
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+      loadOnlineDrivers(); // silent re-fetch
+    }, 30_000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadOnlineDrivers]);
 
   const now = Date.now();
   const onlineCount = driversList.length;
@@ -541,7 +552,7 @@ export default function AdminDriversLive() {
                     <TableBody>
                       {driversList.map(driver => {
                         const ageSec = Math.floor((now - new Date(driver.updated_at).getTime()) / 1000);
-                        const isStale = ageSec > STALE_THRESHOLD_SECONDS;
+                        const isStale = ageSec > STALE_VISUAL_THRESHOLD_SECONDS;
                         
                         return (
                           <TableRow 

@@ -44,7 +44,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format } from 'date-fns';
 import { SupportMessagesPanel } from '@/components/admin/SupportMessagesPanel';
 import { AdminTipsPanel } from '@/components/admin/AdminTipsPanel';
-import MSNDispatchPanel from '@/components/admin/MSNDispatchPanel';
 
 interface Payment {
   id: string;
@@ -132,7 +131,7 @@ interface Stats {
 }
 
 const AdminDashboard = () => {
-  const { user, isLoading: authLoading, isAdmin } = useAuth();
+  const { user, isLoading: authLoading, roles } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   
@@ -201,7 +200,7 @@ const AdminDashboard = () => {
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [isAssigningDriver, setIsAssigningDriver] = useState(false);
 
-  
+  const isAdmin = roles.includes('admin' as any);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -867,7 +866,19 @@ const AdminDashboard = () => {
             <h1 className="text-3xl font-bold text-foreground">Admin Dashboard</h1>
             <p className="text-muted-foreground">Manage users, payments, and refunds</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Button onClick={() => navigate('/admin/live')} variant="outline" className="gap-2">
+              <Radio className="w-4 h-4" />
+              Live Monitor (MSN)
+            </Button>
+            <Button onClick={() => navigate('/admin/riders-live')} variant="outline" className="gap-2">
+              <User className="w-4 h-4" />
+              Live Riders
+            </Button>
+            <Button onClick={() => navigate('/admin/drivers-live')} variant="outline" className="gap-2">
+              <Radio className="w-4 h-4" />
+              Live Drivers
+            </Button>
             <Button onClick={() => navigate('/admin/driver-documents')} variant="outline" className="gap-2">
               <FileText className="w-4 h-4" />
               Driver Documents
@@ -875,10 +886,6 @@ const AdminDashboard = () => {
             <Button onClick={() => navigate('/admin/refunds')} className="gap-2">
               <RefreshCw className="w-4 h-4" />
               Issue Refund
-            </Button>
-            <Button onClick={() => navigate('/admin/msn')} className="gap-2 bg-neutral-900 hover:bg-neutral-800 text-white">
-              <Radio className="w-4 h-4" />
-              MSN
             </Button>
           </div>
         </div>
@@ -949,11 +956,6 @@ const AdminDashboard = () => {
               <CardTitle className="text-2xl text-red-600">${stats.refundedAmount.toFixed(2)}</CardTitle>
             </CardHeader>
           </Card>
-        </div>
-
-        {/* MSN Dispatch Center */}
-        <div className="mb-8">
-          <MSNDispatchPanel />
         </div>
 
         {/* Main Tabs */}

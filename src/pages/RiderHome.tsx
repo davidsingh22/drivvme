@@ -1,94 +1,66 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Car, Shield } from 'lucide-react';
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { logActivity } from '@/lib/activityEvents';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
-import { supabase } from '@/integrations/supabase/client';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
 
+function detectSource(): 'web' | 'ios' | 'android' {
+  const ua = (navigator.userAgent || '').toLowerCase();
+  if (ua.includes('android')) return 'android';
+  if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'ios';
+  return 'web';
+}
+
+async function getWarmOrQuickGps(): Promise<{ lat: number; lng: number; accuracy?: number | null }> {
+  // Prefer any warm GPS already collected
+  try {
+    const raw = localStorage.getItem('drivveme_gps_warm');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Number.isFinite(parsed?.lat) && Number.isFinite(parsed?.lng)) {
+        return { lat: Number(parsed.lat), lng: Number(parsed.lng), accuracy: null };
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Quick best-effort GPS (2s). Never block indefinitely.
+  if (navigator.geolocation) {
+    try {
+      const coords = await new Promise<{ lat: number; lng: number; accuracy?: number | null }>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) =>
+            resolve({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy ?? null,
+            }),
+          reject,
+          { enableHighAccuracy: true, timeout: 2000, maximumAge: 0 }
+        );
+      });
+      return coords;
+    } catch {
+      // ignore
+    }
+  }
+
+  // Absolute fallback: Montreal
+  return { lat: 45.5017, lng: -73.5673, accuracy: 10000 };
+}
+
 const RiderHome = () => {
   const navigate = useNavigate();
-  const { isAdmin, signOut } = useAuth();
+  const { isAdmin, user, profile } = useAuth();
   const gpsStarted = useRef(false);
 
-  const upsertRiderPresence = useCallback(
-    async (authUser: { id: string; email?: string | null }, isOnline: boolean) => {
-      if (!authUser?.id) return;
-
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from('rider_locations')
-        .upsert(
-          {
-            user_id: authUser.id,
-            lat: 45.5017,
-            lng: -73.5673,
-            accuracy: 10000,
-            is_online: isOnline,
-            last_seen_at: now,
-            updated_at: now,
-          },
-          { onConflict: 'user_id' }
-        );
-
-      if (error) {
-        throw error;
-      }
-
-      console.log('Presence signal sent for:', authUser.email ?? authUser.id);
-    },
-    []
-  );
-
-  // Entry Signal: fire immediately when RiderHome mounts
-  useEffect(() => {
-    let cancelled = false;
-
-    const boot = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (!cancelled && data.user?.id) {
-        try {
-          await upsertRiderPresence({ id: data.user.id, email: data.user.email }, true);
-        } catch (error) {
-          console.warn('[RiderHome] Presence signal failed:', error);
-        }
-      }
-    };
-
-    void boot();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user?.id) {
-        void upsertRiderPresence({ id: session.user.id, email: session.user.email }, true).catch((error) => {
-          console.warn('[RiderHome] Presence signal failed:', error);
-        });
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      authListener.subscription.unsubscribe();
-    };
-  }, [upsertRiderPresence]);
-
-  const handleLogout = useCallback(async () => {
-    try {
-      const { data } = await supabase.auth.getUser();
-      const authUser = data.user;
-
-      if (authUser?.id) {
-        await upsertRiderPresence({ id: authUser.id, email: authUser.email }, false);
-      }
-    } catch (error) {
-      console.warn('[RiderHome] Pre-logout signal failed:', error);
-    }
-
-    await signOut();
-    window.location.href = '/';
-  }, [signOut, upsertRiderPresence]);
+  
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
   useEffect(() => {
@@ -128,17 +100,6 @@ const RiderHome = () => {
   const handleVisibilityChange = useCallback(() => {
     if (document.visibilityState === 'hidden') {
       lastHidden.current = Date.now();
-      void (async () => {
-        try {
-          const { data } = await supabase.auth.getUser();
-          const authUser = data.user;
-          if (authUser?.id) {
-            await upsertRiderPresence({ id: authUser.id, email: authUser.email }, false);
-          }
-        } catch (error) {
-          console.warn('[RiderHome] Hidden offline signal failed:', error);
-        }
-      })();
       return;
     }
 
@@ -159,18 +120,23 @@ const RiderHome = () => {
       try {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
-            localStorage.setItem('drivveme_gps_warm', JSON.stringify({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              ts: Date.now(),
-            }));
+            localStorage.setItem(
+              'drivveme_gps_warm',
+              JSON.stringify({
+                lat: pos.coords.latitude,
+                lng: pos.coords.longitude,
+                ts: Date.now(),
+              })
+            );
           },
           () => {},
           { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 }
         );
-      } catch { /* no-op */ }
+      } catch {
+        /* no-op */
+      }
     }
-  }, [upsertRiderPresence]);
+  }, []);
 
   useEffect(() => {
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -181,15 +147,12 @@ const RiderHome = () => {
     };
   }, [handleVisibilityChange]);
 
+
   return (
     <div className="min-h-screen w-full relative overflow-hidden flex flex-col items-center justify-between">
       {/* Full-screen background */}
       <div className="absolute inset-0 z-0">
-        <img
-          src={riderHomeBg}
-          alt="DrivveMe"
-          className="w-full h-full object-cover object-center"
-        />
+        <img src={riderHomeBg} alt="DrivveMe" className="w-full h-full object-cover object-center" />
         {/* Dark overlay so text is readable */}
         <div
           className="absolute inset-0"
@@ -224,7 +187,26 @@ const RiderHome = () => {
 
         {/* Glowing Book a Ride button — NEVER disabled, GPS is non-blocking */}
         <motion.button
-          onClick={() => navigate('/ride?new=1')}
+          onClick={() => {
+            if (user?.id) {
+              const displayName =
+                [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user.email || user.id;
+              const gpsWarm = (() => {
+                try {
+                  return JSON.parse(localStorage.getItem('drivveme_gps_warm') || '{}');
+                } catch {
+                  return {};
+                }
+              })();
+              logActivity({
+                userId: user.id,
+                eventType: 'BOOK_RIDE_CLICKED',
+                message: `${displayName} tapped Book a Ride`,
+                meta: gpsWarm.lat ? { lat: gpsWarm.lat, lng: gpsWarm.lng } : undefined,
+              });
+            }
+            navigate('/ride?new=1');
+          }}
           className="relative group flex items-center gap-3 px-10 py-5 rounded-2xl font-display font-bold text-xl text-white overflow-hidden"
           style={{
             background: 'linear-gradient(135deg, hsl(270 80% 45%), hsl(280 90% 35%))',
@@ -259,6 +241,17 @@ const RiderHome = () => {
           <span className="relative z-10">Book a Ride</span>
         </motion.button>
 
+        {/* Sub-links */}
+        <div className="flex gap-6 text-white/60 text-sm">
+          <button onClick={() => navigate('/history')} className="hover:text-white transition-colors">
+            Past Rides
+          </button>
+          <span className="text-white/20">|</span>
+          <button onClick={() => navigate('/login')} className="hover:text-white transition-colors">
+            Sign Out
+          </button>
+        </div>
+
         {/* Admin shortcut — only visible to admin users */}
         {isAdmin && (
           <motion.button
@@ -278,27 +271,10 @@ const RiderHome = () => {
             Admin Dashboard
           </motion.button>
         )}
-
-
-        {/* Sub-links */}
-        <div className="flex gap-6 text-white/60 text-sm">
-          <button
-            onClick={() => navigate('/history')}
-            className="hover:text-white transition-colors"
-          >
-            Past Rides
-          </button>
-          <span className="text-white/20">|</span>
-          <button
-            onClick={handleLogout}
-            className="hover:text-white transition-colors"
-          >
-            Sign Out
-          </button>
-        </div>
       </motion.div>
     </div>
   );
 };
 
 export default RiderHome;
+

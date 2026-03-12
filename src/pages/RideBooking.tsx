@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, Suspense } from 'react
 import { withTimeout } from '@/lib/withTimeout';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft, Shield } from 'lucide-react';
+import { MapPin, Navigation, Clock, TrendingDown, Car, X, CreditCard, Bell, History, ChevronDown, LogOut, HelpCircle, ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -36,6 +36,7 @@ import rideBg from '@/assets/drivveme-ride-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
+import { logActivity } from '@/lib/activityEvents';
 import { useOneSignalRiderPrompt } from '@/hooks/useOneSignalRiderPrompt';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
@@ -132,7 +133,6 @@ const RideBooking = () => {
     roles,
     isRider,
     isDriver,
-    isAdmin,
     isLoading: authLoading,
     signOut
   } = useAuth();
@@ -1355,6 +1355,15 @@ const RideBooking = () => {
     if (isSubmitting) return;
     if (!user || !pickup || !dropoff || !fareEstimate) return;
 
+    // Fire-and-forget: log BOOKING_CONFIRMED activity event
+    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user.email || user.id;
+    logActivity({
+      userId: user.id,
+      eventType: 'BOOKING_CONFIRMED',
+      message: `${displayName} confirmed booking`,
+      meta: { pickup: pickup.address, dropoff: dropoff.address, fare: fareEstimate.total },
+    });
+
     const ts = () => `[${new Date().toISOString()}]`;
 
     // Test accounts skip payment entirely
@@ -1593,12 +1602,11 @@ const RideBooking = () => {
     const rideId = currentRide.id;
     const userId = user?.id;
     const targetDriverId = currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
-    const oldStatus = currentRide.status;
 
     console.log('[Cancel] rideId:', rideId, 'driverId:', targetDriverId);
     toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
 
-    // ── STEP 1: AWAIT the database update — this MUST succeed before anything else ──
+    // ── CRITICAL: Use raw fetch with keepalive so requests survive page navigation ──
     let token = '';
     try { token = await getValidAccessToken(); } catch { /* use empty, will fail gracefully */ }
     const headers: Record<string, string> = {
@@ -1608,8 +1616,9 @@ const RideBooking = () => {
       'Prefer': 'return=minimal',
     };
 
+    // 1) Update ride status — keepalive ensures it completes even after unmount
     try {
-      const dbRes = await fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}`, {
+      fetch(`${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}`, {
         method: 'PATCH',
         headers,
         body: JSON.stringify({
@@ -1619,44 +1628,13 @@ const RideBooking = () => {
           cancellation_reason: 'Cancelled by rider',
         }),
         keepalive: true,
-      });
-      console.log('[Cancel] Ride DB updated:', dbRes.status);
+      }).then(r => console.log('[Cancel] Ride DB updated:', r.status)).catch(e => console.warn('[Cancel] Ride update err:', e));
+    } catch (e) { console.warn('[Cancel] Ride fetch err:', e); }
 
-      if (!dbRes.ok) {
-        console.error('[Cancel] DB update failed with status:', dbRes.status);
-        toast({ title: language === 'fr' ? 'Échec' : 'Cancel failed', description: 'Please try again.', variant: 'destructive' });
-        setIsCancelling(false);
-        return; // Do NOT redirect if DB update failed
-      }
-    } catch (e) {
-      console.error('[Cancel] DB fetch error:', e);
-      toast({ title: language === 'fr' ? 'Échec' : 'Cancel failed', description: 'Network error — try again.', variant: 'destructive' });
-      setIsCancelling(false);
-      return; // Do NOT redirect if DB update failed
-    }
-
-    // ── STEP 2: Send ALL notifications BEFORE navigating away ──
-    // (Dispatching after window.location.replace causes browsers to kill requests ~1/3 of the time)
-
+    // 2) Notify driver via MULTIPLE channels for reliability
     if (targetDriverId) {
-      // 2a) CRITICAL: Await the DB notification insert — driver's realtime listener depends on this
+      // 2a) ride-status-push — battle-tested, does proper driver lookup & player ID resolution
       try {
-        const notifRes = await fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': 'return=minimal' },
-          body: JSON.stringify({
-            user_id: targetDriverId,
-            ride_id: rideId,
-            type: 'ride_cancelled',
-            title: 'Ride Cancelled ❌',
-            message: 'The rider cancelled this ride.',
-          }),
-        });
-        console.log('[Cancel] DB notif:', notifRes.status);
-      } catch (e) { console.warn('[Cancel] DB notif err:', e); }
-
-      // 2b) Fire push notifications in parallel (don't await — but dispatch before navigation)
-      const pushPromises = [
         fetch(`${SUPABASE_URL}/functions/v1/ride-status-push`, {
           method: 'POST',
           headers: { ...headers, 'Prefer': '' },
@@ -1665,11 +1643,14 @@ const RideBooking = () => {
             rider_id: userId,
             driver_id: targetDriverId,
             new_status: 'cancelled',
-            old_status: oldStatus,
+            old_status: currentRide.status,
           }),
           keepalive: true,
-        }).then(r => console.log('[Cancel] ride-status-push:', r.status)).catch(e => console.warn('[Cancel] ride-status-push err:', e)),
+        }).then(r => console.log('[Cancel] ride-status-push:', r.status)).catch(e => console.warn('[Cancel] ride-status-push err:', e));
+      } catch (e) { console.warn('[Cancel] ride-status-push fetch err:', e); }
 
+      // 2b) Tag-based push (most reliable fallback — works even if external ID not set)
+      try {
         fetch(`${SUPABASE_URL}/functions/v1/send-onesignal-notification`, {
           method: 'POST',
           headers: { ...headers, 'Prefer': '' },
@@ -1680,16 +1661,29 @@ const RideBooking = () => {
             url: '/driver',
           }),
           keepalive: true,
-        }).then(r => console.log('[Cancel] Tag push sent:', r.status)).catch(e => console.warn('[Cancel] Tag push err:', e)),
-      ];
+        }).then(r => console.log('[Cancel] Tag push sent:', r.status)).catch(e => console.warn('[Cancel] Tag push err:', e));
+      } catch (e) { console.warn('[Cancel] Tag push fetch err:', e); }
 
-      // Wait for push requests to be dispatched (not necessarily completed)
-      await Promise.allSettled(pushPromises);
+      // 3) DB notification (keepalive) — driver's realtime listener picks this up
+      try {
+        fetch(`${SUPABASE_URL}/rest/v1/notifications`, {
+          method: 'POST',
+          headers: { ...headers, 'Prefer': 'return=minimal' },
+          body: JSON.stringify({
+            user_id: targetDriverId,
+            ride_id: rideId,
+            type: 'ride_cancelled',
+            title: 'Ride Cancelled ❌',
+            message: 'The rider cancelled this ride.',
+          }),
+          keepalive: true,
+        }).then(() => console.log('[Cancel] DB notif ok')).catch(e => console.warn('[Cancel] DB notif err:', e));
+      } catch (e) { console.warn('[Cancel] DB notif fetch err:', e); }
 
       localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
     }
 
-    // Clean up stale new_ride notifications (fire-and-forget)
+    // 4) Clean up stale new_ride notifications
     try {
       fetch(`${SUPABASE_URL}/rest/v1/notifications?ride_id=eq.${rideId}&type=eq.new_ride`, {
         method: 'DELETE',
@@ -1698,12 +1692,12 @@ const RideBooking = () => {
       }).catch(() => {});
     } catch { /* ignore */ }
 
-    // ── STEP 3: NOW clear UI and redirect — all network requests are dispatched ──
-    localStorage.removeItem('last_route');
-    localStorage.removeItem(`drivvme_active_ride:${userId}`);
-    setIsCancelling(false);
-    resetBooking();
-    window.location.replace('/rider-home');
+    // One click = exit after 1.5s — requests already in flight with keepalive
+    window.setTimeout(() => {
+      setIsCancelling(false);
+      resetBooking();
+      window.location.href = '/rider-home';
+    }, 1500);
   };
   const resetBooking = () => {
     setStep('input');
@@ -1985,13 +1979,6 @@ const RideBooking = () => {
                         {unreadSupportMessages}
                       </span>}
                   </button>
-                  {isAdmin && <>
-                    <div className="h-px bg-white/10" />
-                    <button onClick={() => navigate('/admin')} className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/10 transition-colors text-left">
-                      <Shield className="h-5 w-5 text-primary" />
-                      <span className="text-white font-medium">Admin Dashboard</span>
-                    </button>
-                  </>}
                   <div className="h-px bg-white/10" />
                   <button onClick={async () => {
                   await signOut();

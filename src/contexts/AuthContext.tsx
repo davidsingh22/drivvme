@@ -700,32 +700,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    // Mark rider offline in rider_locations BEFORE clearing state — AWAIT so the
-    // UPDATE event fires while we still have a valid auth session (RLS needs it).
-    const currentUserId = userRef.current?.id;
-    if (currentUserId) {
-      try {
-        const now = new Date().toISOString();
-        await supabase
-          .from("rider_locations")
-          .upsert(
-            {
-              user_id: currentUserId,
-              lat: 45.5017,
-              lng: -73.5673,
-              accuracy: 10000,
-              is_online: false,
-              last_seen_at: now,
-              updated_at: now,
-            },
-            { onConflict: "user_id" }
-          );
-        console.log("[Auth] rider_locations marked offline");
-      } catch (e) {
-        console.warn("[Auth] rider_locations offline update failed:", e);
-      }
-    }
-
     // Clear local state IMMEDIATELY for instant UI feedback
     setUser(null);
     setSession(null);
@@ -745,15 +719,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionStorage.removeItem('drivvme_session_active');
     } catch {}
 
-    // Complete auth signout after offline signal is persisted
-    try {
-      const { error } = await supabase.auth.signOut();
-      if (error) {
-        throw error;
-      }
-    } catch (error: any) {
+    // Fire-and-forget the actual signOut call to Supabase
+    supabase.auth.signOut().catch((error: any) => {
       console.error('Error signing out:', error);
-    }
+    });
 
     toast({
       title: 'Signed out',
@@ -780,7 +749,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isRider = roles.includes('rider');
   const isDriver = roles.includes('driver');
-  const isAdmin = roles.includes('admin') || user?.email === 'alsenesa@hotmail.com';
+  const isAdmin = roles.includes('admin');
 
   const isLoading = authLoading || profileLoading;
 

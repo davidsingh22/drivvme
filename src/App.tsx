@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback, lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -12,6 +12,7 @@ import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
+import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
@@ -33,8 +34,7 @@ const AdminDriverDocuments = lazy(() => import("./pages/AdminDriverDocuments"));
 const AdminDriverDocumentDetail = lazy(() => import("./pages/AdminDriverDocumentDetail"));
 const LiveDriversMap = lazy(() => import("@/pages/admin/LiveDriversMap"));
 const LiveRidersMap = lazy(() => import("@/pages/admin/LiveRidersMap"));
-const MSNDispatchCenter = lazy(() => import("@/pages/admin/MSNDispatchCenter"));
-const DMNLiveMonitor = lazy(() => import("@/pages/admin/DMNLiveMonitor"));
+const LiveMonitor = lazy(() => import("@/pages/admin/LiveMonitor"));
 const DriverLive = lazy(() => import("./pages/DriverLive"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Debug = lazy(() => import("./pages/Debug"));
@@ -109,79 +109,9 @@ const RiderLocationTracker = () => {
   return null;
 };
 
-// Instant Entry Signal: upsert rider_locations the millisecond auth is confirmed
-// Also re-fires on visibility change (app resume) to keep presence fresh
-const InstantPresenceSignal = () => {
-  const { user, isDriver, isAdmin } = useAuth();
-
-  const sendPulse = useCallback(
-    async (overrideUserId?: string, overrideEmail?: string | null) => {
-      const targetUserId = overrideUserId ?? user?.id;
-      const targetEmail = overrideEmail ?? user?.email ?? null;
-      if (!targetUserId || isDriver || isAdmin) return;
-
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from('rider_locations')
-        .upsert(
-          {
-            user_id: targetUserId,
-            lat: 45.5017,
-            lng: -73.5673,
-            accuracy: 10000,
-            is_online: true,
-            last_seen_at: now,
-            updated_at: now,
-          },
-          { onConflict: 'user_id' }
-        );
-
-      if (error) console.warn('[InstantPresence] upsert failed:', error);
-      else console.log('🟢 Instant presence signal sent for:', targetEmail ?? targetUserId);
-    },
-    [user?.id, user?.email, isDriver, isAdmin]
-  );
-
-  // Fire immediately when the component mounts with an authenticated rider
-  useEffect(() => {
-    void sendPulse();
-  }, [sendPulse]);
-
-  // Re-fire on visibility resume + periodic heartbeat every 30s
-  useEffect(() => {
-    if (!user?.id || isDriver || isAdmin) return;
-
-    const onVisChange = () => {
-      if (document.visibilityState === 'visible') void sendPulse();
-    };
-    document.addEventListener('visibilitychange', onVisChange);
-
-    const iv = setInterval(() => {
-      void sendPulse();
-    }, 30_000);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisChange);
-      clearInterval(iv);
-    };
-  }, [user?.id, isDriver, isAdmin, sendPulse]);
-
-  // Fire again exactly when auth establishes or restores a session
-  useEffect(() => {
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session?.user?.id) return;
-      if (event !== 'SIGNED_IN' && event !== 'INITIAL_SESSION') return;
-      if (session.user.id !== user?.id || isDriver || isAdmin) return;
-      void sendPulse(session.user.id, session.user.email ?? null);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [user?.id, isDriver, isAdmin, sendPulse]);
-
+// Global presence heartbeat for all authenticated users
+const PresenceTracker = () => {
+  usePresenceHeartbeat();
   return null;
 };
 
@@ -190,21 +120,11 @@ const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
   const navigate = useNavigate();
   const [checked, setChecked] = useState(false);
-  // 3-second timeout guard: force-mount the dashboard even if auth/RPC is slow
-  const [forceMount, setForceMount] = useState(false);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setForceMount(true), 3000);
-    return () => clearTimeout(timer);
-  }, []);
 
   useEffect(() => {
     if (authLoading) return;
     if (!session?.user?.id) {
-      // Give iOS resume a moment — if truly no session after forceMount, redirect
-      if (forceMount) {
-        navigate('/login', { replace: true });
-      }
+      navigate('/login', { replace: true });
       return;
     }
 
@@ -217,30 +137,22 @@ const DriverRoute = () => {
           return;
         }
 
-        // Hard guarantee: backend role check with 4s timeout
-        const rpcPromise = supabase.rpc('is_driver', { _user_id: session.user.id });
-        const timeoutPromise = new Promise<{ data: null }>((resolve) =>
-          setTimeout(() => resolve({ data: null }), 4000)
-        );
-        const { data } = await Promise.race([rpcPromise, timeoutPromise]);
+        // Hard guarantee: backend role check
+        const { data } = await supabase.rpc('is_driver', { _user_id: session.user.id });
         if (cancelled) return;
-        if (data === false) {
+        if (!data) {
           navigate('/ride', { replace: true });
           return;
         }
-        // data === true OR null (timeout) → show dashboard
       } finally {
         if (!cancelled) setChecked(true);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [authLoading, session?.user?.id, isDriver, navigate, forceMount]);
+  }, [authLoading, session?.user?.id, isDriver, navigate]);
 
-  // Show dashboard immediately if: forceMount fired, or session exists and check passed
-  const shouldShowDashboard = forceMount || checked;
-
-  if (!shouldShowDashboard && (authLoading || session?.user?.id)) {
+  if (authLoading || (session?.user?.id && !checked)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading…</div>
@@ -274,7 +186,7 @@ const AppRoutes = () => {
         <DriverFloatingGPSButton />
       </Suspense>
       <RiderLocationTracker />
-      <InstantPresenceSignal />
+      <PresenceTracker />
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -306,8 +218,7 @@ const AppRoutes = () => {
         <Route path="/admin/ride-locations" element={<AdminRideLocations />} />
         <Route path="/admin/drivers-live" element={<LiveDriversMap />} />
         <Route path="/admin/riders-live" element={<LiveRidersMap />} />
-        <Route path="/admin/msn" element={<MSNDispatchCenter />} />
-        <Route path="/admin/live" element={<DMNLiveMonitor />} />
+        <Route path="/admin/live" element={<LiveMonitor />} />
         <Route path="/admin/driver-documents" element={<AdminDriverDocuments />} />
         <Route path="/admin/driver-documents/:driverId" element={<AdminDriverDocumentDetail />} />
         <Route path="/driver-live" element={<DriverLive />} />

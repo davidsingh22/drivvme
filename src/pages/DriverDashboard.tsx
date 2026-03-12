@@ -87,9 +87,6 @@ const DriverDashboard = () => {
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
   const [isOnline, setIsOnline] = useState(false);
-  // Track if driver manually went offline this session — prevents auto-online from re-triggering
-  const manuallyWentOfflineRef = useRef(false);
-  const autoOnlineFiredRef = useRef(false);
   // availableRides removed — push-only dispatch, no feed
   const [currentRide, setCurrentRide] = useState<RideRequest | null>(null);
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
@@ -368,14 +365,11 @@ const DriverDashboard = () => {
     if (!driverId) return;
 
     const restoreActiveRide = async () => {
-      // Only restore rides created within the last 6 hours to avoid zombie rides
-      const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
       const { data, error } = await supabase
         .from('rides')
         .select('*')
         .eq('driver_id', driverId)
         .in('status', ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress'])
-        .gte('created_at', sixHoursAgo)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -597,28 +591,15 @@ const DriverDashboard = () => {
         // STEP 3: Query unread notifications
         console.log(`[Recovery] (attempt ${attempt}) 🔍 Querying unread new_ride notifications for user: ${effectiveUserId}`);
 
-        // Only consider notifications from the last 3 minutes — anything older is stale
-        const threeMinAgoISO = new Date(Date.now() - 3 * 60 * 1000).toISOString();
         const { data: pending, error: notifError } = await supabase
           .from('notifications')
           .select('ride_id, created_at')
           .eq('user_id', effectiveUserId)
           .eq('type', 'new_ride')
           .eq('is_read', false)
-          .gte('created_at', threeMinAgoISO)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
-
-        // Auto-cleanup: mark any old unread new_ride notifications as read
-        supabase
-          .from('notifications')
-          .update({ is_read: true })
-          .eq('user_id', effectiveUserId)
-          .eq('type', 'new_ride')
-          .eq('is_read', false)
-          .lt('created_at', threeMinAgoISO)
-          .then(() => {});
 
         if (notifError) {
           console.warn(`[Recovery] ❌ (attempt ${attempt}) Notification query error:`, notifError.message);
@@ -1021,31 +1002,7 @@ const DriverDashboard = () => {
       )
       .subscribe();
 
-    // Polling fallback every 3s — catches cancellations that realtime misses
-    const pollTimer = setInterval(async () => {
-      try {
-        const { data } = await supabase
-          .from('rides')
-          .select('status')
-          .eq('id', currentRide.id)
-          .maybeSingle();
-
-        if (!data || data.status === 'cancelled') {
-          console.log('[ActiveRidePoll] Ride cancelled or gone:', data?.status);
-          setCurrentRide(null);
-          setRiderInfo(null);
-          setShowGPSNavigation(false);
-          toast({
-            title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-            description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
-            variant: 'destructive',
-          });
-        }
-      } catch { /* network error, retry next interval */ }
-    }, 3000);
-
     return () => {
-      clearInterval(pollTimer);
       supabase.removeChannel(channel);
     };
   }, [currentRide?.id]);
@@ -1115,11 +1072,6 @@ const DriverDashboard = () => {
     try {
       const newStatus = !isOnline;
       
-      // Track manual offline so auto-online doesn't re-trigger this session
-      if (!newStatus) {
-        manuallyWentOfflineRef.current = true;
-      }
-
       const { error } = await supabase
         .from('driver_profiles')
         .update({ is_online: newStatus })
@@ -1146,39 +1098,6 @@ const DriverDashboard = () => {
       toast({ title: 'Error', description: 'Something went wrong. Please try again.', variant: 'destructive' });
     }
   };
-
-  // ── Auto-Online: automatically go online once auth + driver profile are confirmed ──
-  useEffect(() => {
-    if (autoOnlineFiredRef.current) return;
-    if (manuallyWentOfflineRef.current) return;
-    if (!user || !session || authLoading) return;
-    if (!driverProfile) return; // wait for profile to be loaded
-
-    autoOnlineFiredRef.current = true;
-
-    // Already online in DB — just sync UI
-    if (driverProfile.is_online) {
-      setIsOnline(true);
-      return;
-    }
-
-    // Go online silently
-    (async () => {
-      console.log('[DriverDashboard] Auto-Online: setting driver online');
-      const { error } = await supabase
-        .from('driver_profiles')
-        .update({ is_online: true })
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.error('[DriverDashboard] Auto-Online failed:', error.message);
-        return;
-      }
-
-      setIsOnline(true);
-      void refreshDriverProfile();
-    })();
-  }, [user, session, authLoading, driverProfile]);
 
   const fetchRiderInfo = useCallback(async (riderId: string) => {
     const { data } = await supabase

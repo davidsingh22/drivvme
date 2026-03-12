@@ -195,28 +195,25 @@ async function getAccessToken(): Promise<string> {
   return tokenData.access_token;
 }
 
-// Send OneSignal notification with resilient targeting fallbacks
+// Send OneSignal notification to specific drivers using player_ids + tag fallback
 async function sendOneSignalDriverAlert(
   rideId: string,
   pickupAddress?: string,
   driverUserIds?: string[],
-): Promise<{ success: boolean; recipients: number; error?: string }> {
+): Promise<{ success: boolean; error?: string }> {
   const apiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
   if (!apiKey) {
     console.error("ONESIGNAL_REST_API_KEY not configured");
-    return { success: false, recipients: 0, error: "Missing OneSignal API key" };
+    return { success: false, error: "Missing OneSignal API key" };
   }
 
   const appId = "5a6c4131-8faa-4969-b5c4-5a09033c8e2a";
-  const targetUserIds = (driverUserIds || []).filter(Boolean);
-  const deliveredUserIds = new Set<string>();
 
   const basePayload = {
     app_id: appId,
     headings: { en: "New Ride Request! 🚗" },
-    contents: { en: pickupAddress ? `Pickup nearby: ${pickupAddress}` : "A rider is looking for a trip nearby." },
+    contents: { en: "A rider is looking for a trip nearby." },
     data: { ride_id: rideId, type: "new_ride" },
-    collapse_id: `ride-offer-${rideId}`,
     priority: 10,
     ttl: 0,
     ios_sound: "default",
@@ -235,23 +232,19 @@ async function sendOneSignalDriverAlert(
         },
         body: JSON.stringify({ ...basePayload, ...targeting }),
       });
-
       const result = await res.json();
-      const recipients = Number(result?.recipients || 0);
+      const recipients = result?.recipients || 0;
       console.log(`OneSignal ${label}:`, JSON.stringify(result), `recipients: ${recipients}`);
-      return {
-        ok: res.ok,
-        recipients,
-        error: Array.isArray(result?.errors) ? result.errors[0] : result?.errors,
-      };
+      return { success: res.ok, recipients, error: result?.errors?.[0] };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error(`OneSignal ${label} failed:`, msg);
-      return { ok: false, recipients: 0, error: msg };
+      return { success: false, recipients: 0, error: msg };
     }
   };
 
-  if (targetUserIds.length > 0) {
+  // Try player_id targeting if we have driver IDs
+  if (driverUserIds?.length) {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, serviceRoleKey);
@@ -259,59 +252,26 @@ async function sendOneSignalDriverAlert(
     const { data: profiles } = await supabase
       .from("profiles")
       .select("user_id, onesignal_player_id")
-      .in("user_id", targetUserIds);
+      .in("user_id", driverUserIds);
 
     const playerIds = (profiles || [])
-      .map((p) => p.onesignal_player_id)
-      .filter((id): id is string => !!id);
+      .map(p => p.onesignal_player_id)
+      .filter(Boolean) as string[];
+
+    console.log(`Found ${playerIds.length} player_ids for ${driverUserIds.length} drivers`);
 
     if (playerIds.length > 0) {
-      const rPlayer = await sendPayload({ include_player_ids: playerIds }, "player_ids");
-      if (rPlayer.recipients > 0) {
-        (profiles || []).forEach((p) => {
-          if (p.user_id && p.onesignal_player_id) deliveredUserIds.add(p.user_id);
-        });
-      }
+      const r1 = await sendPayload({ include_player_ids: playerIds }, "player_ids");
+      if (r1.recipients > 0) return { success: true };
     }
-
-    // Fallback 1: external user ids (more resilient when player IDs are stale)
-    const rExternal = await sendPayload(
-      {
-        include_external_user_ids: targetUserIds,
-        channel_for_external_user_ids: "push",
-      },
-      "external_user_ids",
-    );
-    if (rExternal.recipients > 0) {
-      targetUserIds.forEach((uid) => deliveredUserIds.add(uid));
-    }
-
-    // Fallback 2: per-user uid tag targeting
-    const remaining = targetUserIds.filter((uid) => !deliveredUserIds.has(uid));
-    for (const uid of remaining) {
-      const rTag = await sendPayload(
-        {
-          filters: [
-            { field: "tag", key: "uid", relation: "=", value: uid },
-            { operator: "AND" },
-            { field: "tag", key: "role", relation: "=", value: "driver" },
-          ],
-        },
-        `tag_uid_${uid}`,
-      );
-      if (rTag.recipients > 0) {
-        deliveredUserIds.add(uid);
-      }
-    }
-
-    return {
-      success: deliveredUserIds.size > 0,
-      recipients: deliveredUserIds.size,
-      error: deliveredUserIds.size > 0 ? undefined : "No subscribed OneSignal recipients found",
-    };
   }
 
-  return { success: false, recipients: 0, error: "No target drivers provided" };
+  // Fallback: tag-based broadcast to all drivers
+  const r2 = await sendPayload({
+    filters: [{ field: "tag", key: "role", relation: "=", value: "driver" }],
+  }, "tag_broadcast");
+
+  return { success: r2.recipients > 0, error: r2.error };
 }
 
 serve(async (req) => {
@@ -385,6 +345,83 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey!);
 
+    // Server-side escalation watchdog: if current driver misses the offer,
+    // automatically move to the next closest driver every 25s.
+    const runServerEscalation = async () => {
+      if (!isTrigger) {
+        return { enabled: false, escalatedTiers: [] as number[] };
+      }
+
+      const escalatedTiers: number[] = [];
+
+      for (let i = 0; i < 3; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 25000));
+
+        const { data: latestRide, error: latestRideError } = await supabase
+          .from("rides")
+          .select("status, driver_id, notification_tier, notified_driver_ids, pickup_lat, pickup_lng, pickup_address, dropoff_address, estimated_fare")
+          .eq("id", rideId)
+          .maybeSingle();
+
+        if (latestRideError || !latestRide) {
+          console.error("[Waterfall] Failed to load ride state:", latestRideError);
+          break;
+        }
+
+        if (latestRide.driver_id || latestRide.status !== "searching") {
+          console.log(`[Waterfall] Stopping escalation for ride ${rideId} - status=${latestRide.status}, driver_id=${latestRide.driver_id}`);
+          break;
+        }
+
+        const nextTier = (latestRide.notification_tier ?? 1) + 1;
+        if (nextTier > 4) {
+          console.log(`[Waterfall] Max tier reached for ride ${rideId}`);
+          break;
+        }
+
+        const tierPickupLat = Number(latestRide.pickup_lat ?? pickupLat);
+        const tierPickupLng = Number(latestRide.pickup_lng ?? pickupLng);
+
+        if (!Number.isFinite(tierPickupLat) || !Number.isFinite(tierPickupLng)) {
+          console.error("[Waterfall] Missing pickup coordinates, stopping escalation", { rideId, tierPickupLat, tierPickupLng });
+          break;
+        }
+
+        const tierPayload = {
+          rideId,
+          pickupAddress: latestRide.pickup_address ?? pickupAddress,
+          dropoffAddress: latestRide.dropoff_address ?? dropoffAddress,
+          estimatedFare: Number(latestRide.estimated_fare ?? estimatedFare ?? 0),
+          pickupLat: tierPickupLat,
+          pickupLng: tierPickupLng,
+          tier: nextTier,
+          excludeDriverIds: (latestRide.notified_driver_ids ?? []) as string[],
+        };
+
+        console.log(`[Waterfall] Escalating ride ${rideId} to tier ${nextTier}`);
+
+        const tierResponse = await fetch(`${supabaseUrl}/functions/v1/notify-drivers-tiered`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${serviceRoleKey}`,
+          },
+          body: JSON.stringify(tierPayload),
+        });
+
+        const tierResult = await tierResponse.json().catch(() => null);
+        console.log(`[Waterfall] Tier ${nextTier} response (${tierResponse.status}):`, JSON.stringify(tierResult));
+
+        if (!tierResponse.ok) {
+          break;
+        }
+
+        escalatedTiers.push(nextTier);
+      }
+
+      return { enabled: true, escalatedTiers };
+    };
+
     // Get all online drivers with their current location
     const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
@@ -412,29 +449,35 @@ serve(async (req) => {
       });
     }
 
-    // === SEQUENTIAL DISPATCH: Only notify the SINGLE closest driver ===
-    // Sort all online drivers by distance and pick only the closest one.
-    // The escalation function (notify-drivers-tiered) handles subsequent drivers.
-
-    let driversWithDistance = onlineDrivers
-      .map(driver => {
-        if (!pickupLat || !pickupLng || !driver.current_lat || !driver.current_lng) {
-          return { ...driver, distance_km: Infinity };
-        }
-        const distance = calculateDistanceKm(
-          pickupLat, pickupLng,
-          driver.current_lat, driver.current_lng
-        );
-        console.log(`Driver ${driver.user_id} is ${distance.toFixed(2)}km from pickup`);
-        return { ...driver, distance_km: distance };
-      })
-      .filter(d => d.distance_km <= maxDistanceKm)
-      .sort((a, b) => a.distance_km - b.distance_km);
-
-    // Pick ONLY the single closest driver
-    const nearbyDrivers = driversWithDistance.slice(0, 1);
-
-    console.log(`Sequential dispatch: ${driversWithDistance.length} eligible, picked closest: ${nearbyDrivers.length > 0 ? nearbyDrivers[0].user_id : 'none'}`);
+    // Sequential waterfall: only notify the SINGLE closest driver
+    // The escalation hook will handle notifying the next driver after 25s timeout
+    let nearbyDrivers = onlineDrivers;
+    
+    if (pickupLat && pickupLng) {
+      // Calculate distance for each driver and sort by closest
+      const driversWithDistance = onlineDrivers
+        .filter(driver => driver.current_lat && driver.current_lng)
+        .map(driver => ({
+          ...driver,
+          distance: calculateDistanceKm(
+            pickupLat, 
+            pickupLng, 
+            driver.current_lat!, 
+            driver.current_lng!
+          ),
+        }))
+        .filter(d => d.distance <= maxDistanceKm)
+        .sort((a, b) => a.distance - b.distance);
+      
+      // Only take the single closest driver
+      nearbyDrivers = driversWithDistance.slice(0, 1);
+      
+      console.log(`Sequential waterfall: picked ${nearbyDrivers.length} closest driver out of ${driversWithDistance.length} eligible (within ${maxDistanceKm}km)`);
+      if (nearbyDrivers.length > 0) {
+        const picked = nearbyDrivers[0] as typeof driversWithDistance[0];
+        console.log(`Closest driver: ${picked.user_id} at ${picked.distance.toFixed(2)}km`);
+      }
+    }
 
     if (nearbyDrivers.length === 0) {
       return new Response(JSON.stringify({ 
@@ -446,16 +489,6 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-
-    // Update ride with the notified driver so escalation can exclude them
-    await supabase
-      .from("rides")
-      .update({
-        notification_tier: 1,
-        last_notification_at: new Date().toISOString(),
-        notified_driver_ids: nearbyDrivers.map(d => d.user_id),
-      })
-      .eq("id", rideId);
 
     const driverUserIds = nearbyDrivers.map(d => d.user_id);
 
@@ -475,7 +508,17 @@ serve(async (req) => {
 
     console.log("Found driver subscriptions:", subscriptions?.length || 0);
 
-    // Create in-app notifications for all nearby drivers (even without push subscriptions)
+    // Update ride with the notified driver so escalation hook excludes them
+    await supabase
+      .from("rides")
+      .update({ 
+        notification_tier: 1,
+        last_notification_at: new Date().toISOString(),
+        notified_driver_ids: driverUserIds,
+      })
+      .eq("id", rideId);
+
+    // Create in-app notification for the single closest driver
     const inAppNotifications = nearbyDrivers.map(driver => ({
       user_id: driver.user_id,
       ride_id: rideId,
@@ -495,12 +538,15 @@ serve(async (req) => {
     }
 
     if (!subscriptions || subscriptions.length === 0) {
+      const escalation = await runServerEscalation();
+
       return new Response(JSON.stringify({ 
         message: "No driver push subscriptions found, in-app notifications sent", 
         sent: 0,
         inAppNotifications: inAppNotifications.length,
         nearbyDrivers: nearbyDrivers.length,
-        totalOnline: onlineDrivers.length 
+        totalOnline: onlineDrivers.length,
+        escalation,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -622,6 +668,8 @@ serve(async (req) => {
     const oneSignalResult = await sendOneSignalDriverAlert(rideId, pickupAddress, driverUserIds);
     console.log("OneSignal driver alert:", oneSignalResult);
 
+    const escalation = await runServerEscalation();
+
     return new Response(JSON.stringify({ 
       sent, 
       total: results.length, 
@@ -629,6 +677,7 @@ serve(async (req) => {
       totalOnline: onlineDrivers.length,
       inAppNotifications: inAppNotifications.length,
       oneSignal: oneSignalResult,
+      escalation,
       results 
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

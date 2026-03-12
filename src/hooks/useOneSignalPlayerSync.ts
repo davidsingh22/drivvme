@@ -94,64 +94,40 @@ export function useOneSignalPlayerSync() {
   }, []);
 }
 
-/** Wait for an actual OneSignal SDK instance (not just the deferred queue) */
+/** Wait for window.OneSignal to be available, polling every 500ms for ~5s */
 async function waitForOneSignalSDK(): Promise<any | null> {
-  for (let i = 0; i < 20; i++) {
-    const direct = (window as any).OneSignal;
-    if (direct && (typeof direct.login === "function" || direct?.User?.PushSubscription)) {
-      return direct;
-    }
-
-    const deferred = (window as any).OneSignalDeferred;
-    if (Array.isArray(deferred)) {
-      const resolved = await new Promise<any | null>((resolve) => {
-        let done = false;
-        deferred.push((os: any) => {
-          if (!done) {
-            done = true;
-            resolve(os || null);
-          }
-        });
-        setTimeout(() => {
-          if (!done) {
-            done = true;
-            resolve(null);
-          }
-        }, 250);
-      });
-      if (resolved) return resolved;
-    }
-
+  for (let i = 0; i < 10; i++) {
+    const os = (window as any).OneSignal || (window as any).OneSignalDeferred;
+    if (os) return os;
     await sleep(500);
   }
-
-  console.warn("[PlayerSync] OneSignal SDK not found after retries");
+  console.warn("[PlayerSync] OneSignal SDK not found after 5s");
   return null;
 }
 
-/** Poll for the player / subscription ID (up to ~10s) */
+/** Poll for the player / subscription ID (up to ~8s) */
 async function pollPlayerId(os: any): Promise<string | null> {
-  for (let i = 0; i < 20; i++) {
-    const id = await readPlayerId(os);
+  for (let i = 0; i < 16; i++) {
+    const id = readPlayerId(os);
     if (id) return id;
     await sleep(500);
   }
   return null;
 }
 
-async function readPlayerId(os: any): Promise<string | null> {
+function readPlayerId(os: any): string | null {
   try {
     const subId = os?.User?.PushSubscription?.id;
     if (subId) return subId;
   } catch (_) {}
 
   try {
-    const legacy = await os?.getUserId?.();
+    const legacy = os?.getUserId?.();
     if (typeof legacy === "string" && legacy) return legacy;
   } catch (_) {}
 
   try {
-    const state = await os?.getDeviceState?.();
+    const state = os?.getDeviceState?.();
     if (state?.userId) return state.userId;
   } catch (_) {}
 
