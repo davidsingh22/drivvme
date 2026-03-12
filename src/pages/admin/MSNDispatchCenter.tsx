@@ -115,7 +115,7 @@ const MSNDispatchCenter: React.FC = () => {
           parts.push(<span key={`txt-${tokenMatch.index}`}>{message.slice(lastIndex, tokenMatch.index)}</span>);
         }
         parts.push(
-          <span key={`rider-${tokenMatch.index}`} className="text-sky-400">
+          <span key={`rider-${tokenMatch.index}`} className="text-sky-400 text-[13px]">
             {riderDisplay(tokenUserId)}
           </span>
         );
@@ -128,7 +128,8 @@ const MSNDispatchCenter: React.FC = () => {
 
       return parts.length ? parts : message;
     },
-    [riderDisplay]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [riderDisplay, riderDisplayVersion]
   );
 
   // ─── Push log helper ───────────────────────────────────────────────
