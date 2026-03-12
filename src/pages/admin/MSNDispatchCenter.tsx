@@ -57,6 +57,9 @@ const fmtTime = (d: Date) =>
 const nameOf = (e: { first_name: string | null; last_name: string | null; email: string | null }) =>
   [e.first_name, e.last_name].filter(Boolean).join(" ") || e.email || "Unknown";
 
+const riderToken = (userId: string) => `{{rider:${userId}}}`;
+const riderFallback = (userId: string) => userId.slice(0, 6);
+
 // ─── Component ──────────────────────────────────────────────────────────
 const MSNDispatchCenter: React.FC = () => {
   const navigate = useNavigate();
