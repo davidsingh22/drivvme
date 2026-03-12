@@ -212,21 +212,71 @@ const MSNDispatchCenter: React.FC = () => {
   // ─── Realtime: rider_locations ─────────────────────────────────────
   useEffect(() => {
     if (!isAdmin) return;
+
     const ch = supabase
       .channel("msn-rider-locations")
-      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, (payload) => {
+      .on("postgres_changes", { event: "*", schema: "public", table: "rider_locations" }, async (payload) => {
         const row = (payload.new as any) ?? {};
+        if (!row.user_id) return;
+
+        const updatedLastSeen = row.last_seen_at ?? new Date().toISOString();
+
+        setRiders((prev) => {
+          const index = prev.findIndex((r) => r.user_id === row.user_id);
+
+          if (index >= 0) {
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              last_seen_at: updatedLastSeen,
+              is_online: row.is_online ?? true,
+            };
+
+            next.sort((a, b) => {
+              const aOnline = a.is_online || isAppOpen(a.last_seen_at);
+              const bOnline = b.is_online || isAppOpen(b.last_seen_at);
+              if (aOnline !== bOnline) return aOnline ? -1 : 1;
+              return (b.last_seen_at ? new Date(b.last_seen_at).getTime() : 0) - (a.last_seen_at ? new Date(a.last_seen_at).getTime() : 0);
+            });
+
+            return next;
+          }
+
+          return [
+            {
+              user_id: row.user_id,
+              first_name: "Guest",
+              last_name: "Active",
+              email: null,
+              last_seen_at: updatedLastSeen,
+              is_online: row.is_online ?? true,
+            },
+            ...prev,
+          ];
+        });
+
+        const profile = await resolveRiderProfile(row.user_id);
         setRiders((prev) =>
           prev.map((r) =>
             r.user_id === row.user_id
-              ? { ...r, last_seen_at: row.last_seen_at ?? r.last_seen_at, is_online: row.is_online ?? r.is_online }
+              ? {
+                  ...r,
+                  first_name: profile.first_name,
+                  last_name: profile.last_name,
+                  email: profile.email,
+                }
               : r
           )
         );
+
+        pushLog("rider", `📶 Rider ping received: ${nameOf(profile)} is active`);
       })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [isAdmin]);
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [isAdmin, pushLog, resolveRiderProfile]);
 
   // ─── Realtime: driver_profiles (online status) ─────────────────────
   useEffect(() => {
