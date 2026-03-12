@@ -700,18 +700,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    // Mark rider offline in rider_locations BEFORE clearing state
+    // Mark rider offline in rider_locations BEFORE clearing state — AWAIT so the
+    // UPDATE event fires while we still have a valid auth session (RLS needs it).
     const currentUserId = userRef.current?.id;
     if (currentUserId) {
-      void (async () => {
-        try {
-          await supabase
-            .from("rider_locations")
-            .update({ is_online: false, last_seen_at: new Date().toISOString() })
-            .eq("user_id", currentUserId);
-          console.log("[Auth] rider_locations marked offline");
-        } catch {}
-      })();
+      try {
+        await supabase
+          .from("rider_locations")
+          .update({ is_online: false, last_seen_at: new Date().toISOString() })
+          .eq("user_id", currentUserId);
+        console.log("[Auth] rider_locations marked offline");
+      } catch (e) {
+        console.warn("[Auth] rider_locations offline update failed:", e);
+      }
     }
 
     // Clear local state IMMEDIATELY for instant UI feedback
