@@ -212,16 +212,31 @@ const MSNDispatchCenter: React.FC = () => {
     (userId: string, lastSeenAt?: string | null) => {
       if (!userId) return;
       const heartbeat = lastSeenAt ?? new Date().toISOString();
+      const cached = riderCacheRef.current[userId];
 
       setRiders((prev) => {
         const idx = prev.findIndex((r) => r.user_id === userId);
         if (idx >= 0) {
           const next = [...prev];
-          next[idx] = { ...next[idx], last_seen_at: heartbeat, is_online: true };
+          next[idx] = {
+            ...next[idx],
+            first_name: next[idx].first_name ?? cached?.first_name ?? null,
+            last_name: next[idx].last_name ?? cached?.last_name ?? null,
+            email: next[idx].email ?? cached?.email ?? null,
+            last_seen_at: heartbeat,
+            is_online: true,
+          };
           return next;
         }
         return [
-          { user_id: userId, first_name: null, last_name: null, email: null, last_seen_at: heartbeat, is_online: true },
+          {
+            user_id: userId,
+            first_name: cached?.first_name ?? null,
+            last_name: cached?.last_name ?? null,
+            email: cached?.email ?? null,
+            last_seen_at: heartbeat,
+            is_online: true,
+          },
           ...prev,
         ];
       });
