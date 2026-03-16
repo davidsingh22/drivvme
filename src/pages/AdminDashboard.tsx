@@ -38,12 +38,14 @@ import {
   Radio,
   FileText,
   MessageSquare,
-  HelpCircle
+  HelpCircle,
+  Megaphone
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
 import { SupportMessagesPanel } from '@/components/admin/SupportMessagesPanel';
 import { AdminTipsPanel } from '@/components/admin/AdminTipsPanel';
+import { AdminPushNotificationsPanel } from '@/components/admin/AdminPushNotificationsPanel';
 
 interface Payment {
   id: string;
@@ -1003,6 +1005,10 @@ const AdminDashboard = () => {
                 <HelpCircle className="w-4 h-4" />
                 Support
               </TabsTrigger>
+              <TabsTrigger value="push" className="gap-2">
+                <Megaphone className="w-4 h-4" />
+                Push
+              </TabsTrigger>
             </TabsList>
             
             <div className="flex gap-2">
@@ -1896,6 +1902,13 @@ const AdminDashboard = () => {
       {activeTab === 'support' && (
         <div className="mt-4">
           <SupportMessagesPanel />
+        </div>
+      )}
+
+      {/* Push Notifications Tab */}
+      {activeTab === 'push' && (
+        <div className="mt-4">
+          <AdminPushNotificationsPanel />
         </div>
       )}
     </div>

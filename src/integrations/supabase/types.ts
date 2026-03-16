@@ -74,6 +74,33 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_notifications_log: {
+        Row: {
+          audience: string
+          id: string
+          message: string
+          sent_at: string
+          sent_by_admin: string
+          title: string
+        }
+        Insert: {
+          audience?: string
+          id?: string
+          message: string
+          sent_at?: string
+          sent_by_admin: string
+          title: string
+        }
+        Update: {
+          audience?: string
+          id?: string
+          message?: string
+          sent_at?: string
+          sent_by_admin?: string
+          title?: string
+        }
+        Relationships: []
+      }
       custom_locations: {
         Row: {
           address: string

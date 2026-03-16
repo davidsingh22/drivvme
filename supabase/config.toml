@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.bind-onesignal-player-id]
 verify_jwt = false
+
+[functions.admin-send-notification]
+verify_jwt = false
