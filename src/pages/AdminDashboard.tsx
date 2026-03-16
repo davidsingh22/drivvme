@@ -44,6 +44,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { format } from 'date-fns';
 import { SupportMessagesPanel } from '@/components/admin/SupportMessagesPanel';
 import { AdminTipsPanel } from '@/components/admin/AdminTipsPanel';
+import { AdminPushNotificationsPanel } from '@/components/admin/AdminPushNotificationsPanel';
 
 interface Payment {
   id: string;
