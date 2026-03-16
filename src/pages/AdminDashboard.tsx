@@ -1904,6 +1904,13 @@ const AdminDashboard = () => {
           <SupportMessagesPanel />
         </div>
       )}
+
+      {/* Push Notifications Tab */}
+      {activeTab === 'push' && (
+        <div className="mt-4">
+          <AdminPushNotificationsPanel />
+        </div>
+      )}
     </div>
   );
 };
