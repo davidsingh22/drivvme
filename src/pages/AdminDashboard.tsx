@@ -1004,6 +1004,10 @@ const AdminDashboard = () => {
                 <HelpCircle className="w-4 h-4" />
                 Support
               </TabsTrigger>
+              <TabsTrigger value="push" className="gap-2">
+                <Megaphone className="w-4 h-4" />
+                Push
+              </TabsTrigger>
             </TabsList>
             
             <div className="flex gap-2">
