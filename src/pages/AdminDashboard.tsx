@@ -38,7 +38,8 @@ import {
   Radio,
   FileText,
   MessageSquare,
-  HelpCircle
+  HelpCircle,
+  Megaphone
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { format } from 'date-fns';
