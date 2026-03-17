@@ -824,7 +824,7 @@ serve(async (req) => {
       tier,
       config: config.description,
       nearbyDrivers: nearbyDrivers.length,
-      totalOnline: onlineDrivers.length,
+      totalOnline: enrichedDrivers.length,
       inAppNotifications: inAppNotifications.length,
       notifiedDriverIds: driverUserIds,
       shouldEscalate: nearbyDrivers.length === 0 && tier < 4,
