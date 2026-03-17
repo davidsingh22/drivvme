@@ -54,11 +54,16 @@ export function useDriverPresence(
           payload.lat = lat;
           payload.lng = lng;
         }
-        await supabase
-          .from('driver_presence' as any)
-          .upsert(payload, { onConflict: 'driver_id' });
+        const { error } = await supabase
+          .from('driver_presence')
+          .upsert(payload as any, { onConflict: 'driver_id' });
+        if (error) {
+          console.error('[DriverPresence] upsert error:', error.message, error.details);
+        } else {
+          console.log('[DriverPresence] upsert OK — status:', payload.status);
+        }
       } catch (e: any) {
-        console.error('[DriverPresence] upsert error:', e.message);
+        console.error('[DriverPresence] upsert exception:', e.message);
       }
     },
     [user?.id, displayName]

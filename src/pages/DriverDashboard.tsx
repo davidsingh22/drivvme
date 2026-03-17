@@ -1268,15 +1268,21 @@ const DriverDashboard = () => {
       }
 
       // Immediately update driver_presence
-      await supabase
-        .from('driver_presence' as any)
+      const { error: presError } = await supabase
+        .from('driver_presence')
         .upsert({
           driver_id: user.id,
           status: newStatus ? 'available' : 'offline',
           current_screen: 'dashboard',
           last_seen: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        }, { onConflict: 'driver_id' });
+          display_name: displayName,
+        } as any, { onConflict: 'driver_id' });
+      if (presError) {
+        console.error('[DriverDashboard] driver_presence upsert error:', presError.message, presError.details);
+      } else {
+        console.log('[DriverDashboard] driver_presence upsert OK → status:', newStatus ? 'available' : 'offline');
+      }
 
       setIsOnline(newStatus);
       await refreshDriverProfile();
