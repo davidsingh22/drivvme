@@ -456,7 +456,7 @@ serve(async (req) => {
     const { data: busyRides } = await supabase
       .from("rides")
       .select("driver_id, dropoff_lat, dropoff_lng")
-      .in("driver_id", onlineDrivers.map(d => d.user_id))
+      .in("driver_id", enrichedDrivers.map(d => d.user_id))
       .in("status", ["driver_assigned", "driver_en_route", "arrived", "in_progress"]);
 
     const busyDriverDropoffs = new Map<string, { lat: number; lng: number }>();
