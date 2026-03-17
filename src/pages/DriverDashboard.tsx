@@ -158,6 +158,14 @@ const DriverDashboard = () => {
     updateIntervalMs: 3000,
   });
 
+  // Driver presence tracking
+  const driverPresenceStatus: DriverStatus = currentRide
+    ? 'on_trip'
+    : isOnline
+      ? 'available'
+      : 'online';
+  useDriverPresence(driverPresenceStatus, 'dashboard');
+
   // Sync GPS position to local state for map
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
   
