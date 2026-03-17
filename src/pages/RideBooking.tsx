@@ -1539,6 +1539,28 @@ const RideBooking = () => {
       } catch (e) {
         console.error('Failed to update ride status to searching', e);
       }
+
+      // Immediately trigger driver dispatch — don't wait for the Stripe webhook
+      try {
+        console.log('[RideBooking] 🚀 Triggering immediate driver dispatch for ride:', currentRide.id);
+        supabase.functions.invoke('notify-drivers-tiered', {
+          body: {
+            rideId: currentRide.id,
+            pickupAddress: currentRide.pickup_address,
+            dropoffAddress: currentRide.dropoff_address,
+            estimatedFare: Number(currentRide.estimated_fare),
+            pickupLat: currentRide.pickup_lat,
+            pickupLng: currentRide.pickup_lng,
+            tier: 1,
+            excludeDriverIds: [],
+          },
+        }).then(({ error }) => {
+          if (error) console.error('[RideBooking] Dispatch error:', error);
+          else console.log('[RideBooking] ✅ Driver dispatch triggered successfully');
+        });
+      } catch (dispatchErr) {
+        console.error('[RideBooking] Dispatch invocation failed:', dispatchErr);
+      }
     }
     setStep('searching');
     toast({
