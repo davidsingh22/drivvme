@@ -163,7 +163,7 @@ const DriverDashboard = () => {
     ? 'on_trip'
     : isOnline
       ? 'available'
-      : 'online';
+      : 'offline';
   useDriverPresence(driverPresenceStatus, 'dashboard');
 
   // Sync GPS position to local state for map
@@ -1144,6 +1144,16 @@ const DriverDashboard = () => {
           toast({ title: 'Error', description: error.message, variant: 'destructive' });
           return;
         }
+        // Immediately update driver_presence
+        await supabase
+          .from('driver_presence' as any)
+          .upsert({
+            driver_id: recoveredUser.id,
+            status: newStatus ? 'available' : 'offline',
+            current_screen: 'dashboard',
+            last_seen: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'driver_id' });
         setIsOnline(newStatus);
         await refreshDriverProfile();
         toast({
@@ -1173,6 +1183,17 @@ const DriverDashboard = () => {
         });
         return;
       }
+
+      // Immediately update driver_presence
+      await supabase
+        .from('driver_presence' as any)
+        .upsert({
+          driver_id: user.id,
+          status: newStatus ? 'available' : 'offline',
+          current_screen: 'dashboard',
+          last_seen: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'driver_id' });
 
       setIsOnline(newStatus);
       await refreshDriverProfile();
