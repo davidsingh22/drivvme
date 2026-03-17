@@ -842,6 +842,39 @@ export type Database = {
         }
         Relationships: []
       }
+      rider_presence: {
+        Row: {
+          current_screen: string
+          display_name: string | null
+          id: string
+          last_seen: string
+          role: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          current_screen?: string
+          display_name?: string | null
+          id?: string
+          last_seen?: string
+          role?: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          current_screen?: string
+          display_name?: string | null
+          id?: string
+          last_seen?: string
+          role?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       rides: {
         Row: {
           acceptance_time_seconds: number | null
