@@ -13,16 +13,15 @@ const OFFLINE_AFTER_MS = 60_000; // mark offline after 60s inactivity
  * Marks offline on unmount / visibility hidden > 60s.
  */
 export function useRiderPresence(currentScreen: ScreenName) {
-  const { user, profile, roles, loading } = useAuth();
+  const { user, profile, roles, isLoading } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hiddenAtRef = useRef<number | null>(null);
   const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenRef = useRef(currentScreen);
   screenRef.current = currentScreen;
 
-  // Allow presence to fire as soon as user is authenticated, even if roles haven't loaded yet.
-  // If roles have loaded, verify rider role; if still loading, assume rider (we're on a rider page).
-  const isRider = loading ? !!user?.id : roles.includes('rider') || roles.length === 0;
+  // Fire presence immediately even if roles haven't loaded yet (we're on a rider page).
+  const isRider = isLoading ? !!user?.id : roles.includes('rider') || roles.length === 0;
 
   const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || '';
 
