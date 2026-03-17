@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell } from 'lucide-react';
+import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell, Search, Home, ShoppingCart } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
 
@@ -130,6 +130,16 @@ export default function LiveMonitor() {
   const [activeOffers, setActiveOffers] = useState<ActiveRideOffer[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Rider presence state
+  interface RiderPresenceRow {
+    user_id: string;
+    display_name: string | null;
+    status: string;
+    current_screen: string;
+    last_seen: string;
+  }
+  const [riderPresence, setRiderPresence] = useState<RiderPresenceRow[]>([]);
+
   const feedIdsRef = useRef(new Set<string>());
   const profileNameRef = useRef(new Map<string, string>());
   const locationFeedCooldownRef = useRef(new Map<string, number>());
@@ -158,6 +168,33 @@ export default function LiveMonitor() {
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/login', { replace: true });
   }, [authLoading, isAdmin, navigate]);
+
+  // ── Rider Presence: fetch + realtime ──
+  const loadRiderPresence = useCallback(async () => {
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const { data } = await supabase
+      .from('rider_presence' as any)
+      .select('user_id, display_name, status, current_screen, last_seen')
+      .eq('status', 'online')
+      .gte('last_seen', cutoff);
+    if (data) setRiderPresence(data as any);
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadRiderPresence();
+    const interval = setInterval(loadRiderPresence, 15_000);
+    const channel = supabase
+      .channel('rider-presence-monitor')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_presence' }, () => {
+        loadRiderPresence();
+      })
+      .subscribe();
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [isAdmin, loadRiderPresence]);
 
   const getCachedName = useCallback((uid: string) => {
     return profileNameRef.current.get(uid) || uid.slice(0, 8);
@@ -706,6 +743,22 @@ export default function LiveMonitor() {
   const bookingEvents5m = feed.filter((e) => e.icon === '⚡' && e.created_at >= fiveMinAgo).length;
   const successEvents5m = feed.filter((e) => e.message.includes('Booking Successful') && e.created_at >= fiveMinAgo).length;
 
+  // Rider presence breakdown
+  const ridersOnHome = riderPresence.filter((r) => r.current_screen === 'home');
+  const ridersSearching = riderPresence.filter((r) => r.current_screen === 'searching');
+  const ridersBooking = riderPresence.filter((r) => r.current_screen === 'booking');
+
+  const screenIcon = (screen: string) => {
+    if (screen === 'searching') return <Search className="h-3.5 w-3.5 text-yellow-500" />;
+    if (screen === 'booking') return <ShoppingCart className="h-3.5 w-3.5 text-green-500" />;
+    return <Home className="h-3.5 w-3.5 text-blue-500" />;
+  };
+  const screenLabel = (screen: string) => {
+    if (screen === 'searching') return 'Searching';
+    if (screen === 'booking') return 'Booking';
+    return 'Home';
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -747,6 +800,61 @@ export default function LiveMonitor() {
             </div>
           </Card>
         </div>
+
+        {/* Rider Presence Breakdown */}
+        <div className="grid grid-cols-3 gap-4">
+          <Card className="p-4 flex items-center gap-3 border-blue-500/30">
+            <Home className="h-6 w-6 text-blue-500" />
+            <div>
+              <div className="text-2xl font-bold">{ridersOnHome.length}</div>
+              <div className="text-xs text-muted-foreground">On Home</div>
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 border-yellow-500/30">
+            <Search className="h-6 w-6 text-yellow-500" />
+            <div>
+              <div className="text-2xl font-bold">{ridersSearching.length}</div>
+              <div className="text-xs text-muted-foreground">Searching</div>
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 border-green-500/30">
+            <ShoppingCart className="h-6 w-6 text-green-500" />
+            <div>
+              <div className="text-2xl font-bold">{ridersBooking.length}</div>
+              <div className="text-xs text-muted-foreground">Booking</div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Rider Presence Detail List */}
+        {riderPresence.length > 0 && (
+          <Card className="p-4">
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Rider Presence (Real-Time)
+              <Badge variant="secondary" className="ml-auto">{riderPresence.length}</Badge>
+            </h2>
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {riderPresence
+                .sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime())
+                .map((r) => (
+                  <div key={r.user_id} className="flex items-center justify-between p-2 rounded-lg border border-border">
+                    <div className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
+                      <span className="text-sm font-medium truncate max-w-[140px]">
+                        {r.display_name || r.user_id.slice(0, 8)}
+                      </span>
+                      <Badge variant="outline" className="text-xs flex items-center gap-1">
+                        {screenIcon(r.current_screen)}
+                        {screenLabel(r.current_screen)}
+                      </Badge>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{timeAgo(r.last_seen)}</span>
+                  </div>
+                ))}
+            </div>
+          </Card>
+        )}
 
         <div className="grid md:grid-cols-2 gap-6">
           <Card className="p-4">
