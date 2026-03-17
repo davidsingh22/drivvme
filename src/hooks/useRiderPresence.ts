@@ -1,16 +1,15 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 type ScreenName = 'home' | 'searching' | 'booking';
 
-const HEARTBEAT_MS = 30_000; // 30s heartbeat
-const OFFLINE_AFTER_MS = 60_000; // mark offline after 60s inactivity
+const HEARTBEAT_MS = 30_000;
+const OFFLINE_AFTER_MS = 60_000;
 
 /**
  * Tracks rider presence in `rider_presence` table.
- * Call with the current screen name. Heartbeats every 30s.
- * Marks offline on unmount / visibility hidden > 60s.
+ * Waits for auth session to be ready before first upsert.
  */
 export function useRiderPresence(currentScreen: ScreenName) {
   const { user, profile, roles, isLoading } = useAuth();
@@ -20,7 +19,21 @@ export function useRiderPresence(currentScreen: ScreenName) {
   const screenRef = useRef(currentScreen);
   screenRef.current = currentScreen;
 
-  // Fire presence immediately even if roles haven't loaded yet (we're on a rider page).
+  // Track whether supabase auth session is actually ready
+  const [isAuthReady, setIsAuthReady] = useState(false);
+
+  useEffect(() => {
+    // Check session immediately
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) setIsAuthReady(true);
+    });
+    // Also listen for future auth changes (login, token refresh, etc.)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIsAuthReady(!!session?.user);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
   const isRider = isLoading ? !!user?.id : roles.includes('rider') || roles.length === 0;
 
   const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || '';
@@ -45,8 +58,9 @@ export function useRiderPresence(currentScreen: ScreenName) {
     }
   }, [user?.id, displayName]);
 
+  // Main effect: gated on BOTH auth ready AND user available
   useEffect(() => {
-    if (!user?.id || !isRider) return;
+    if (!isAuthReady || !user?.id || !isRider) return;
 
     // Initial upsert
     upsertPresence('online');
@@ -58,12 +72,10 @@ export function useRiderPresence(currentScreen: ScreenName) {
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         hiddenAtRef.current = Date.now();
-        // Start offline timer
         offlineTimerRef.current = setTimeout(() => {
           upsertPresence('offline');
         }, OFFLINE_AFTER_MS);
       } else {
-        // Came back
         if (offlineTimerRef.current) {
           clearTimeout(offlineTimerRef.current);
           offlineTimerRef.current = null;
@@ -74,19 +86,17 @@ export function useRiderPresence(currentScreen: ScreenName) {
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // Cleanup
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
       document.removeEventListener('visibilitychange', handleVisibility);
-      // Mark offline on unmount (best effort)
       upsertPresence('offline');
     };
-  }, [user?.id, isRider, upsertPresence]);
+  }, [isAuthReady, user?.id, isRider, upsertPresence]);
 
   // Update screen when it changes
   useEffect(() => {
-    if (!user?.id || !isRider) return;
+    if (!isAuthReady || !user?.id || !isRider) return;
     upsertPresence('online', currentScreen);
-  }, [currentScreen, user?.id, isRider, upsertPresence]);
+  }, [currentScreen, isAuthReady, user?.id, isRider, upsertPresence]);
 }
