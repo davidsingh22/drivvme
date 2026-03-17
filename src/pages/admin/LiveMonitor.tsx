@@ -208,6 +208,33 @@ export default function LiveMonitor() {
     };
   }, [isAdmin, loadRiderPresence]);
 
+  // ── Driver Presence: fetch + realtime ──
+  const loadDriverPresence = useCallback(async () => {
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const { data } = await supabase
+      .from('driver_presence' as any)
+      .select('driver_id, display_name, status, current_screen, last_seen, lat, lng')
+      .neq('status', 'offline')
+      .gte('last_seen', cutoff);
+    if (data) setDriverPresence(data as any);
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadDriverPresence();
+    const interval = setInterval(loadDriverPresence, 15_000);
+    const channel = supabase
+      .channel('driver-presence-monitor')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_presence' }, () => {
+        loadDriverPresence();
+      })
+      .subscribe();
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [isAdmin, loadDriverPresence]);
+
   const getCachedName = useCallback((uid: string) => {
     return profileNameRef.current.get(uid) || uid.slice(0, 8);
   }, []);
