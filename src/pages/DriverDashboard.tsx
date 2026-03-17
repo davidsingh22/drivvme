@@ -35,6 +35,7 @@ import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
+import { useDriverPresence, type DriverStatus } from '@/hooks/useDriverPresence';
 
 interface RideRequest {
   id: string;
@@ -156,6 +157,14 @@ const DriverDashboard = () => {
     isOnline,
     updateIntervalMs: 3000,
   });
+
+  // Driver presence tracking
+  const driverPresenceStatus: DriverStatus = currentRide
+    ? 'on_trip'
+    : isOnline
+      ? 'available'
+      : 'online';
+  useDriverPresence(driverPresenceStatus, 'dashboard');
 
   // Sync GPS position to local state for map
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;

@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell, Search, Home, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell, Search, Home, ShoppingCart, Power, Navigation2, MapPin } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
 
@@ -140,6 +140,18 @@ export default function LiveMonitor() {
   }
   const [riderPresence, setRiderPresence] = useState<RiderPresenceRow[]>([]);
 
+  // Driver presence state
+  interface DriverPresenceRow {
+    driver_id: string;
+    display_name: string | null;
+    status: string;
+    current_screen: string;
+    last_seen: string;
+    lat: number | null;
+    lng: number | null;
+  }
+  const [driverPresence, setDriverPresence] = useState<DriverPresenceRow[]>([]);
+
   const feedIdsRef = useRef(new Set<string>());
   const profileNameRef = useRef(new Map<string, string>());
   const locationFeedCooldownRef = useRef(new Map<string, number>());
@@ -195,6 +207,33 @@ export default function LiveMonitor() {
       supabase.removeChannel(channel);
     };
   }, [isAdmin, loadRiderPresence]);
+
+  // ── Driver Presence: fetch + realtime ──
+  const loadDriverPresence = useCallback(async () => {
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const { data } = await supabase
+      .from('driver_presence' as any)
+      .select('driver_id, display_name, status, current_screen, last_seen, lat, lng')
+      .neq('status', 'offline')
+      .gte('last_seen', cutoff);
+    if (data) setDriverPresence(data as any);
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadDriverPresence();
+    const interval = setInterval(loadDriverPresence, 15_000);
+    const channel = supabase
+      .channel('driver-presence-monitor')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_presence' }, () => {
+        loadDriverPresence();
+      })
+      .subscribe();
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [isAdmin, loadDriverPresence]);
 
   const getCachedName = useCallback((uid: string) => {
     return profileNameRef.current.get(uid) || uid.slice(0, 8);
@@ -748,6 +787,27 @@ export default function LiveMonitor() {
   const ridersSearching = riderPresence.filter((r) => r.current_screen === 'searching');
   const ridersBooking = riderPresence.filter((r) => r.current_screen === 'booking');
 
+  // Driver presence breakdown
+  const driversOnline = driverPresence.filter((d) => d.status === 'online');
+  const driversAvailable = driverPresence.filter((d) => d.status === 'available');
+  const driversOnTrip = driverPresence.filter((d) => d.status === 'on_trip');
+
+  const driverStatusIcon = (status: string) => {
+    if (status === 'on_trip') return <Navigation2 className="h-3.5 w-3.5 text-red-500" />;
+    if (status === 'available') return <Power className="h-3.5 w-3.5 text-green-500" />;
+    return <MapPin className="h-3.5 w-3.5 text-blue-500" />;
+  };
+  const driverStatusLabel = (status: string) => {
+    if (status === 'on_trip') return 'On Trip';
+    if (status === 'available') return 'Available';
+    return 'Online';
+  };
+  const driverStatusColor = (status: string) => {
+    if (status === 'on_trip') return 'bg-red-500';
+    if (status === 'available') return 'bg-green-500';
+    return 'bg-blue-500';
+  };
+
   const screenIcon = (screen: string) => {
     if (screen === 'searching') return <Search className="h-3.5 w-3.5 text-yellow-500" />;
     if (screen === 'booking') return <ShoppingCart className="h-3.5 w-3.5 text-green-500" />;
@@ -850,6 +910,61 @@ export default function LiveMonitor() {
                       </Badge>
                     </div>
                     <span className="text-xs text-muted-foreground">{timeAgo(r.last_seen)}</span>
+                  </div>
+                ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Driver Presence Breakdown */}
+        <div className="grid grid-cols-3 gap-4">
+          <Card className="p-4 flex items-center gap-3 border-blue-500/30">
+            <Power className="h-6 w-6 text-blue-500" />
+            <div>
+              <div className="text-2xl font-bold">{driversOnline.length}</div>
+              <div className="text-xs text-muted-foreground">Drivers Online</div>
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 border-green-500/30">
+            <Car className="h-6 w-6 text-green-500" />
+            <div>
+              <div className="text-2xl font-bold">{driversAvailable.length}</div>
+              <div className="text-xs text-muted-foreground">Available</div>
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 border-red-500/30">
+            <Navigation2 className="h-6 w-6 text-red-500" />
+            <div>
+              <div className="text-2xl font-bold">{driversOnTrip.length}</div>
+              <div className="text-xs text-muted-foreground">On Trip</div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Driver Presence Detail List */}
+        {driverPresence.length > 0 && (
+          <Card className="p-4">
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Car className="h-5 w-5 text-primary" />
+              Driver Presence (Real-Time)
+              <Badge variant="secondary" className="ml-auto">{driverPresence.length}</Badge>
+            </h2>
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {driverPresence
+                .sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime())
+                .map((d) => (
+                  <div key={d.driver_id} className="flex items-center justify-between p-2 rounded-lg border border-border">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${driverStatusColor(d.status)} animate-pulse`} />
+                      <span className="text-sm font-medium truncate max-w-[140px]">
+                        {d.display_name || d.driver_id.slice(0, 8)}
+                      </span>
+                      <Badge variant="outline" className="text-xs flex items-center gap-1">
+                        {driverStatusIcon(d.status)}
+                        {driverStatusLabel(d.status)}
+                      </Badge>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{timeAgo(d.last_seen)}</span>
                   </div>
                 ))}
             </div>
