@@ -523,7 +523,7 @@ serve(async (req) => {
         tier,
         config: config.description,
         nearbyDrivers: 0,
-        totalOnline: onlineDrivers.length,
+        totalOnline: enrichedDrivers.length,
         shouldEscalate: tier < 4,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
