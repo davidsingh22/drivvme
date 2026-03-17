@@ -69,6 +69,7 @@ const DriverDashboard = () => {
     session,
     roles,
     isDriver,
+    profile,
     driverProfile,
     refreshDriverProfile,
     refreshSession,
