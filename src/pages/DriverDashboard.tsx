@@ -163,7 +163,7 @@ const DriverDashboard = () => {
     ? 'on_trip'
     : isOnline
       ? 'available'
-      : 'online';
+      : 'offline';
   useDriverPresence(driverPresenceStatus, 'dashboard');
 
   // Sync GPS position to local state for map
