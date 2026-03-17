@@ -1277,7 +1277,7 @@ const DriverDashboard = () => {
           current_screen: 'dashboard',
           last_seen: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          display_name: user?.email || '',
+          display_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || '',
         } as any, { onConflict: 'driver_id' });
       if (presError) {
         console.error('[DriverDashboard] driver_presence upsert error:', presError.message, presError.details);
