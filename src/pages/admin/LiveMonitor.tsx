@@ -787,6 +787,27 @@ export default function LiveMonitor() {
   const ridersSearching = riderPresence.filter((r) => r.current_screen === 'searching');
   const ridersBooking = riderPresence.filter((r) => r.current_screen === 'booking');
 
+  // Driver presence breakdown
+  const driversOnline = driverPresence.filter((d) => d.status === 'online');
+  const driversAvailable = driverPresence.filter((d) => d.status === 'available');
+  const driversOnTrip = driverPresence.filter((d) => d.status === 'on_trip');
+
+  const driverStatusIcon = (status: string) => {
+    if (status === 'on_trip') return <Navigation2 className="h-3.5 w-3.5 text-red-500" />;
+    if (status === 'available') return <Power className="h-3.5 w-3.5 text-green-500" />;
+    return <MapPin className="h-3.5 w-3.5 text-blue-500" />;
+  };
+  const driverStatusLabel = (status: string) => {
+    if (status === 'on_trip') return 'On Trip';
+    if (status === 'available') return 'Available';
+    return 'Online';
+  };
+  const driverStatusColor = (status: string) => {
+    if (status === 'on_trip') return 'bg-red-500';
+    if (status === 'available') return 'bg-green-500';
+    return 'bg-blue-500';
+  };
+
   const screenIcon = (screen: string) => {
     if (screen === 'searching') return <Search className="h-3.5 w-3.5 text-yellow-500" />;
     if (screen === 'booking') return <ShoppingCart className="h-3.5 w-3.5 text-green-500" />;
