@@ -916,6 +916,61 @@ export default function LiveMonitor() {
           </Card>
         )}
 
+        {/* Driver Presence Breakdown */}
+        <div className="grid grid-cols-3 gap-4">
+          <Card className="p-4 flex items-center gap-3 border-blue-500/30">
+            <Power className="h-6 w-6 text-blue-500" />
+            <div>
+              <div className="text-2xl font-bold">{driversOnline.length}</div>
+              <div className="text-xs text-muted-foreground">Drivers Online</div>
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 border-green-500/30">
+            <Car className="h-6 w-6 text-green-500" />
+            <div>
+              <div className="text-2xl font-bold">{driversAvailable.length}</div>
+              <div className="text-xs text-muted-foreground">Available</div>
+            </div>
+          </Card>
+          <Card className="p-4 flex items-center gap-3 border-red-500/30">
+            <Navigation2 className="h-6 w-6 text-red-500" />
+            <div>
+              <div className="text-2xl font-bold">{driversOnTrip.length}</div>
+              <div className="text-xs text-muted-foreground">On Trip</div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Driver Presence Detail List */}
+        {driverPresence.length > 0 && (
+          <Card className="p-4">
+            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+              <Car className="h-5 w-5 text-primary" />
+              Driver Presence (Real-Time)
+              <Badge variant="secondary" className="ml-auto">{driverPresence.length}</Badge>
+            </h2>
+            <div className="space-y-2 max-h-[300px] overflow-y-auto">
+              {driverPresence
+                .sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime())
+                .map((d) => (
+                  <div key={d.driver_id} className="flex items-center justify-between p-2 rounded-lg border border-border">
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2.5 w-2.5 rounded-full ${driverStatusColor(d.status)} animate-pulse`} />
+                      <span className="text-sm font-medium truncate max-w-[140px]">
+                        {d.display_name || d.driver_id.slice(0, 8)}
+                      </span>
+                      <Badge variant="outline" className="text-xs flex items-center gap-1">
+                        {driverStatusIcon(d.status)}
+                        {driverStatusLabel(d.status)}
+                      </Badge>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{timeAgo(d.last_seen)}</span>
+                  </div>
+                ))}
+            </div>
+          </Card>
+        )}
+
         <div className="grid md:grid-cols-2 gap-6">
           <Card className="p-4">
             <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
