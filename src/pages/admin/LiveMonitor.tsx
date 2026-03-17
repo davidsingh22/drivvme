@@ -130,6 +130,16 @@ export default function LiveMonitor() {
   const [activeOffers, setActiveOffers] = useState<ActiveRideOffer[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Rider presence state
+  interface RiderPresenceRow {
+    user_id: string;
+    display_name: string | null;
+    status: string;
+    current_screen: string;
+    last_seen: string;
+  }
+  const [riderPresence, setRiderPresence] = useState<RiderPresenceRow[]>([]);
+
   const feedIdsRef = useRef(new Set<string>());
   const profileNameRef = useRef(new Map<string, string>());
   const locationFeedCooldownRef = useRef(new Map<string, number>());
