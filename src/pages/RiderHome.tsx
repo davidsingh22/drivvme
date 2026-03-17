@@ -8,6 +8,7 @@ import { getValidAccessToken } from '@/lib/sessionRecovery';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
+import { useRiderPresence } from '@/hooks/useRiderPresence';
 
 function detectSource(): 'web' | 'ios' | 'android' {
   const ua = (navigator.userAgent || '').toLowerCase();
