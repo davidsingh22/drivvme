@@ -467,7 +467,7 @@ serve(async (req) => {
     });
 
     // Filter and sort drivers by distance
-    const driversWithDistance: DriverWithDistance[] = onlineDrivers
+    const driversWithDistance: DriverWithDistance[] = enrichedDrivers
       .filter(driver => !mergedExcludedDriverIds.includes(driver.user_id))
       .map(driver => {
         // For busy drivers, use their dropoff location instead
