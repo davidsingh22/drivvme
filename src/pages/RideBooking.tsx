@@ -152,6 +152,9 @@ const RideBooking = () => {
   } = usePushNotifications();
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
+  // Track rider presence — booking screen
+  useRiderPresence('booking');
+
   // Active ride persistence hook
   const {
     activeRide,
