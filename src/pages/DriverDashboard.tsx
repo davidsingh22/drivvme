@@ -35,6 +35,7 @@ import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
+import { useDriverPresence, type DriverStatus } from '@/hooks/useDriverPresence';
 
 interface RideRequest {
   id: string;
