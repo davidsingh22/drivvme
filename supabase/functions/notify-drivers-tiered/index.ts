@@ -378,26 +378,31 @@ serve(async (req) => {
     const config = tierConfig[tier as keyof typeof tierConfig] || tierConfig[1];
     const effectiveMaxEta = maxEtaMinutes ?? config.maxEta;
 
-    // Get all online drivers with their current location and priority status
-    const { data: onlineDrivers, error: driverError } = await supabase
-      .from("driver_profiles")
-      .select("user_id, current_lat, current_lng, priority_driver_until")
-      .eq("is_online", true)
-      .eq("is_verified", true);
+    // Get active drivers from driver_presence (status=available, seen within 60s)
+    const sixtySecondsAgo = new Date(Date.now() - 60_000).toISOString();
+    const { data: activePresence, error: presenceError } = await supabase
+      .from("driver_presence")
+      .select("driver_id, lat, lng, last_seen, status, display_name")
+      .eq("status", "available")
+      .gte("last_seen", sixtySecondsAgo);
 
-    if (driverError) {
-      console.error("Error fetching online drivers:", driverError);
-      return new Response(JSON.stringify({ error: "Failed to fetch drivers" }), {
+    if (presenceError) {
+      console.error("Error fetching driver_presence:", presenceError);
+      return new Response(JSON.stringify({ error: "Failed to fetch active drivers" }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    console.log("Found online drivers:", onlineDrivers?.length || 0);
+    const activeDriverIds = (activePresence || []).map(p => p.driver_id);
+    console.log(`[notify-drivers-tiered] driver_presence query: ${activePresence?.length || 0} available drivers within 60s`);
+    for (const p of (activePresence || [])) {
+      console.log(`  ↳ driver_id=${p.driver_id} status=${p.status} last_seen=${p.last_seen} name=${p.display_name || '?'}`);
+    }
 
-    if (!onlineDrivers || onlineDrivers.length === 0) {
+    if (activeDriverIds.length === 0) {
       return new Response(JSON.stringify({ 
-        message: "No online drivers found", 
+        message: "No active available drivers found in driver_presence", 
         sent: 0,
         tier,
         nearbyDrivers: 0,
@@ -407,11 +412,51 @@ serve(async (req) => {
       });
     }
 
+    // Now fetch verified driver_profiles only for active drivers
+    const { data: onlineDrivers, error: driverError } = await supabase
+      .from("driver_profiles")
+      .select("user_id, current_lat, current_lng, priority_driver_until")
+      .in("user_id", activeDriverIds)
+      .eq("is_verified", true);
+
+    if (driverError) {
+      console.error("Error fetching driver profiles:", driverError);
+      return new Response(JSON.stringify({ error: "Failed to fetch driver profiles" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Merge presence GPS into driver profiles (presence GPS may be more recent)
+    const presenceMap = new Map(activePresence?.map(p => [p.driver_id, p]) || []);
+    const enrichedDrivers = (onlineDrivers || []).map(d => {
+      const pres = presenceMap.get(d.user_id);
+      return {
+        ...d,
+        current_lat: d.current_lat ?? pres?.lat ?? null,
+        current_lng: d.current_lng ?? pres?.lng ?? null,
+      };
+    });
+
+    console.log(`[notify-drivers-tiered] Verified + active drivers: ${enrichedDrivers.length}`);
+
+    if (enrichedDrivers.length === 0) {
+      return new Response(JSON.stringify({ 
+        message: "No verified active drivers found", 
+        sent: 0,
+        tier,
+        nearbyDrivers: 0,
+        totalOnline: activeDriverIds.length 
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Check which drivers are currently on a ride (to check dropoff proximity)
     const { data: busyRides } = await supabase
       .from("rides")
       .select("driver_id, dropoff_lat, dropoff_lng")
-      .in("driver_id", onlineDrivers.map(d => d.user_id))
+      .in("driver_id", enrichedDrivers.map(d => d.user_id))
       .in("status", ["driver_assigned", "driver_en_route", "arrived", "in_progress"]);
 
     const busyDriverDropoffs = new Map<string, { lat: number; lng: number }>();
@@ -422,7 +467,7 @@ serve(async (req) => {
     });
 
     // Filter and sort drivers by distance
-    const driversWithDistance: DriverWithDistance[] = onlineDrivers
+    const driversWithDistance: DriverWithDistance[] = enrichedDrivers
       .filter(driver => !mergedExcludedDriverIds.includes(driver.user_id))
       .map(driver => {
         // For busy drivers, use their dropoff location instead
@@ -478,7 +523,7 @@ serve(async (req) => {
         tier,
         config: config.description,
         nearbyDrivers: 0,
-        totalOnline: onlineDrivers.length,
+        totalOnline: enrichedDrivers.length,
         shouldEscalate: tier < 4,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -779,7 +824,7 @@ serve(async (req) => {
       tier,
       config: config.description,
       nearbyDrivers: nearbyDrivers.length,
-      totalOnline: onlineDrivers.length,
+      totalOnline: enrichedDrivers.length,
       inAppNotifications: inAppNotifications.length,
       notifiedDriverIds: driverUserIds,
       shouldEscalate: nearbyDrivers.length === 0 && tier < 4,
