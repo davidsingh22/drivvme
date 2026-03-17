@@ -61,6 +61,9 @@ const RiderHome = () => {
   const { isAdmin, user, profile } = useAuth();
   const gpsStarted = useRef(false);
 
+  // Track rider presence on home screen
+  useRiderPresence('home');
+
   
 
   // Phase 1: Background GPS warming — 3-second strict timeout, never blocks UI
