@@ -1234,7 +1234,7 @@ const DriverDashboard = () => {
             current_screen: 'dashboard',
             last_seen: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            display_name: recoveredUser.email || '',
+            display_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || recoveredUser.email || '',
           } as any, { onConflict: 'driver_id' });
         if (presErr) console.error('[DriverDashboard] driver_presence upsert error (recovered):', presErr.message);
         else console.log('[DriverDashboard] driver_presence upsert OK (recovered) → status:', newStatus ? 'available' : 'offline');
