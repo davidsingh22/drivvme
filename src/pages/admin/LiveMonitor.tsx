@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell } from 'lucide-react';
+import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell, Search, Home, ShoppingCart } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
 
