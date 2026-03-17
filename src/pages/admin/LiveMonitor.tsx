@@ -140,6 +140,18 @@ export default function LiveMonitor() {
   }
   const [riderPresence, setRiderPresence] = useState<RiderPresenceRow[]>([]);
 
+  // Driver presence state
+  interface DriverPresenceRow {
+    driver_id: string;
+    display_name: string | null;
+    status: string;
+    current_screen: string;
+    last_seen: string;
+    lat: number | null;
+    lng: number | null;
+  }
+  const [driverPresence, setDriverPresence] = useState<DriverPresenceRow[]>([]);
+
   const feedIdsRef = useRef(new Set<string>());
   const profileNameRef = useRef(new Map<string, string>());
   const locationFeedCooldownRef = useRef(new Map<string, number>());
