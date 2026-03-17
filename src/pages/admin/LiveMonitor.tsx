@@ -169,6 +169,33 @@ export default function LiveMonitor() {
     if (!authLoading && !isAdmin) navigate('/login', { replace: true });
   }, [authLoading, isAdmin, navigate]);
 
+  // ── Rider Presence: fetch + realtime ──
+  const loadRiderPresence = useCallback(async () => {
+    const cutoff = new Date(Date.now() - 60_000).toISOString();
+    const { data } = await supabase
+      .from('rider_presence' as any)
+      .select('user_id, display_name, status, current_screen, last_seen')
+      .eq('status', 'online')
+      .gte('last_seen', cutoff);
+    if (data) setRiderPresence(data as any);
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadRiderPresence();
+    const interval = setInterval(loadRiderPresence, 15_000);
+    const channel = supabase
+      .channel('rider-presence-monitor')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_presence' }, () => {
+        loadRiderPresence();
+      })
+      .subscribe();
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [isAdmin, loadRiderPresence]);
+
   const getCachedName = useCallback((uid: string) => {
     return profileNameRef.current.get(uid) || uid.slice(0, 8);
   }, []);
