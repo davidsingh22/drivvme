@@ -3,100 +3,146 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 type ScreenName = 'home' | 'searching' | 'booking';
+type SessionUser = { id: string; email: string | null };
 
 const HEARTBEAT_MS = 30_000;
 const OFFLINE_AFTER_MS = 60_000;
 
 /**
  * Tracks rider presence in `rider_presence` table.
- * Waits for auth session to be ready before first upsert.
+ * Initializes immediately for existing sessions and continues listening for auth changes.
  */
 export function useRiderPresence(currentScreen: ScreenName) {
-  const { user, profile, roles, isLoading } = useAuth();
+  const { user, profile } = useAuth();
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hiddenAtRef = useRef<number | null>(null);
   const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenRef = useRef(currentScreen);
+  const sessionUserRef = useRef<SessionUser | null>(null);
+  const effectiveUserIdRef = useRef<string | null>(null);
+  const effectiveEmailRef = useRef<string | null>(null);
+  const displayNameRef = useRef('');
+
   screenRef.current = currentScreen;
 
-  // Track whether supabase auth session is actually ready
-  const [isAuthReady, setIsAuthReady] = useState(false);
+  const effectiveUserId = user?.id ?? sessionUser?.id ?? null;
+  const effectiveEmail = user?.email ?? sessionUser?.email ?? null;
+  const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || effectiveEmail || '';
+
+  effectiveUserIdRef.current = effectiveUserId;
+  effectiveEmailRef.current = effectiveEmail;
+  displayNameRef.current = displayName;
+
+  const upsertPresence = useCallback(
+    async (
+      status: 'online' | 'offline' = 'online',
+      screen?: ScreenName,
+      userId?: string | null,
+      email?: string | null,
+    ) => {
+      const targetUserId = userId ?? effectiveUserIdRef.current;
+      if (!targetUserId) return;
+
+      try {
+        await supabase.from('rider_presence').upsert(
+          {
+            user_id: targetUserId,
+            role: 'rider',
+            status,
+            current_screen: screen ?? screenRef.current,
+            last_seen: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            display_name: displayNameRef.current || email || effectiveEmailRef.current || '',
+          },
+          { onConflict: 'user_id' },
+        );
+      } catch (e: any) {
+        console.error('[RiderPresence] upsert error:', e.message);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    // Check session immediately
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) setIsAuthReady(true);
+    let isMounted = true;
+
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!isMounted) return;
+
+      const nextSessionUser = session?.user
+        ? { id: session.user.id, email: session.user.email ?? null }
+        : null;
+
+      sessionUserRef.current = nextSessionUser;
+      setSessionUser(nextSessionUser);
+
+      if (nextSessionUser) {
+        void upsertPresence('online', screenRef.current, nextSessionUser.id, nextSessionUser.email);
+      }
     });
-    // Also listen for future auth changes (login, token refresh, etc.)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAuthReady(!!session?.user);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const previousSessionUser = sessionUserRef.current;
+      const nextSessionUser = session?.user
+        ? { id: session.user.id, email: session.user.email ?? null }
+        : null;
+
+      sessionUserRef.current = nextSessionUser;
+      setSessionUser(nextSessionUser);
+
+      if (nextSessionUser) {
+        void upsertPresence('online', screenRef.current, nextSessionUser.id, nextSessionUser.email);
+      } else if (previousSessionUser?.id) {
+        void upsertPresence('offline', screenRef.current, previousSessionUser.id, previousSessionUser.email);
+      }
     });
-    return () => subscription.unsubscribe();
-  }, []);
 
-  const isRider = isLoading ? !!user?.id : roles.includes('rider') || roles.length === 0;
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [upsertPresence]);
 
-  const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || '';
-
-  const upsertPresence = useCallback(async (status: 'online' | 'offline' = 'online', screen?: ScreenName) => {
-    if (!user?.id) return;
-    try {
-      await supabase.from('rider_presence' as any).upsert(
-        {
-          user_id: user.id,
-          role: 'rider',
-          status,
-          current_screen: screen ?? screenRef.current,
-          last_seen: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          display_name: displayName,
-        },
-        { onConflict: 'user_id' }
-      );
-    } catch (e: any) {
-      console.error('[RiderPresence] upsert error:', e.message);
-    }
-  }, [user?.id, displayName]);
-
-  // Main effect: gated on BOTH auth ready AND user available
   useEffect(() => {
-    if (!isAuthReady || !user?.id || !isRider) return;
+    if (!effectiveUserId) return;
 
-    // Initial upsert
-    upsertPresence('online');
+    void upsertPresence('online');
 
-    // Heartbeat
-    intervalRef.current = setInterval(() => upsertPresence('online'), HEARTBEAT_MS);
+    intervalRef.current = setInterval(() => {
+      void upsertPresence('online');
+    }, HEARTBEAT_MS);
 
-    // Visibility handling
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         hiddenAtRef.current = Date.now();
         offlineTimerRef.current = setTimeout(() => {
-          upsertPresence('offline');
+          void upsertPresence('offline');
         }, OFFLINE_AFTER_MS);
       } else {
         if (offlineTimerRef.current) {
           clearTimeout(offlineTimerRef.current);
           offlineTimerRef.current = null;
         }
-        upsertPresence('online');
+        void upsertPresence('online');
         hiddenAtRef.current = null;
       }
     };
+
     document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
       document.removeEventListener('visibilitychange', handleVisibility);
-      upsertPresence('offline');
+      void upsertPresence('offline');
     };
-  }, [isAuthReady, user?.id, isRider, upsertPresence]);
+  }, [effectiveUserId, upsertPresence]);
 
-  // Update screen when it changes
   useEffect(() => {
-    if (!isAuthReady || !user?.id || !isRider) return;
-    upsertPresence('online', currentScreen);
-  }, [currentScreen, isAuthReady, user?.id, isRider, upsertPresence]);
+    if (!effectiveUserId) return;
+    void upsertPresence('online', currentScreen);
+  }, [currentScreen, effectiveUserId, upsertPresence]);
 }
