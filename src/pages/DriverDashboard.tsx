@@ -352,11 +352,36 @@ const DriverDashboard = () => {
     return () => clearTimeout(timer);
   }, [session?.user?.id]);
 
-  // Initialize driver status — always start offline on login/load
+  // Auto-online: driver should always be online when opening the app.
+  // They only need to explicitly click "Go Offline" when done.
+  const autoOnlineTriggeredRef = useRef(false);
   useEffect(() => {
-    // Don't sync from DB; driver must manually go online each session
-    setIsOnline(false);
-  }, []);
+    if (autoOnlineTriggeredRef.current) return;
+    const userId = session?.user?.id;
+    if (!userId) return;
+    autoOnlineTriggeredRef.current = true;
+
+    const goOnline = async () => {
+      console.log('[DriverDashboard] Auto-setting driver online');
+      const { error } = await supabase
+        .from('driver_profiles')
+        .update({ is_online: true })
+        .eq('user_id', userId);
+      if (!error) {
+        setIsOnline(true);
+      } else {
+        console.error('[DriverDashboard] auto-online failed:', error);
+        // Fallback: read current status from DB
+        const { data } = await supabase
+          .from('driver_profiles')
+          .select('is_online')
+          .eq('user_id', userId)
+          .maybeSingle();
+        setIsOnline(data?.is_online ?? false);
+      }
+    };
+    goOnline();
+  }, [session?.user?.id]);
 
   // Restore active ride on page load (critical for iOS resume / page refresh)
   // NOTE: use the session user id (more reliable than the derived `user` field in edge cases)

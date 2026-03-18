@@ -51,7 +51,7 @@ export default function RideMessagesPanel() {
   const { toast } = useToast();
   
   const [activeRide, setActiveRide] = useState<ActiveRide | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<RideMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
