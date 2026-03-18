@@ -352,11 +352,44 @@ const DriverDashboard = () => {
     return () => clearTimeout(timer);
   }, [session?.user?.id]);
 
-  // Initialize driver status — always start offline on login/load
+  // Track whether driver manually went offline this session
+  const manuallyToggledOffRef = useRef(false);
+
+  // Auto-online: set driver online on mount and on app resume (unless manually toggled off)
   useEffect(() => {
-    // Don't sync from DB; driver must manually go online each session
-    setIsOnline(false);
-  }, []);
+    const driverId = session?.user?.id;
+    if (!driverId) return;
+
+    const goOnline = async () => {
+      if (manuallyToggledOffRef.current) return;
+      const { error } = await supabase
+        .from('driver_profiles')
+        .update({ is_online: true })
+        .eq('user_id', driverId);
+      if (!error) {
+        setIsOnline(true);
+      }
+    };
+
+    // Go online immediately on mount
+    goOnline();
+
+    // Go online on visibility resume (app foregrounded)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') goOnline();
+    };
+    const handleFocus = () => goOnline();
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handleFocus);
+    };
+  }, [session?.user?.id]);
 
   // Restore active ride on page load (critical for iOS resume / page refresh)
   // NOTE: use the session user id (more reliable than the derived `user` field in edge cases)
