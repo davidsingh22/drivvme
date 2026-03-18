@@ -2,11 +2,9 @@ import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
-const HEARTBEAT_MS = 15_000;
-
 /**
  * Single global rider presence hook — mount once OUTSIDE routes.
- * Fires initial upsert + self-healing heartbeat + visibility resume fire.
+ * Uses ref-persisted recursive setTimeout so React re-renders never kill the loop.
  */
 export function useRiderPresenceTracking() {
   const { user, profile, roles } = useAuth();
@@ -17,45 +15,58 @@ export function useRiderPresenceTracking() {
     user?.email ||
     '';
 
+  const heartbeatRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const isRider = roles.includes('rider');
   const skip = !isRider || roles.includes('driver') || roles.includes('admin');
 
   useEffect(() => {
     if (!user?.id || skip) return;
 
-    let isActive = true;
-    let timeoutId: number | undefined;
+    // Prevent multiple loops
+    if (heartbeatRef.current) return;
 
-    const heartbeat = async () => {
-      if (!isActive || !user?.id) return;
+    const uid = user.id;
 
-      console.log('RIDER HEARTBEAT', user.id);
-
+    const runHeartbeat = async () => {
+      console.log('RIDER HEARTBEAT', uid);
       await supabase.from('presence').upsert(
         {
-          user_id: user.id,
+          user_id: uid,
           role: 'RIDER',
-          display_name: displayNameRef.current || user.email || user.id.slice(0, 8),
+          display_name: displayNameRef.current || uid.slice(0, 8),
           source: 'web',
           last_seen_at: new Date().toISOString(),
         },
         { onConflict: 'user_id' }
       );
-
-      if (!isActive) return;
-      timeoutId = window.setTimeout(heartbeat, HEARTBEAT_MS);
+      heartbeatRef.current = setTimeout(runHeartbeat, 15000);
     };
 
-    void heartbeat();
+    runHeartbeat();
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && user?.id) {
-        console.log('RIDER RESUME FIRE', user.id);
+    return () => {
+      if (heartbeatRef.current) {
+        clearTimeout(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
+    };
+  }, [user?.id]);
+
+  // Visibility resume — instant fire when app is foregrounded
+  useEffect(() => {
+    if (!user?.id || skip) return;
+
+    const uid = user.id;
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('RIDER RESUME FIRE', uid);
         void supabase.from('presence').upsert(
           {
-            user_id: user.id,
+            user_id: uid,
             role: 'RIDER',
-            display_name: displayNameRef.current || user.email || user.id.slice(0, 8),
+            display_name: displayNameRef.current || uid.slice(0, 8),
             source: 'web',
             last_seen_at: new Date().toISOString(),
           },
@@ -64,12 +75,7 @@ export function useRiderPresenceTracking() {
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      isActive = false;
-      if (timeoutId) window.clearTimeout(timeoutId);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [user?.id, user?.email, skip]);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [user?.id]);
 }
