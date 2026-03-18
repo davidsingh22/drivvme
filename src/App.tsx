@@ -110,78 +110,77 @@ const RiderLocationTracker = () => {
   return null;
 };
 
-// Instant rider presence — fires the moment auth is ready, no GPS/profile wait
+/**
+ * Instant rider presence — mirrors the driver pattern exactly.
+ * Fires a minimal upsert into `presence` the INSTANT user.id is known.
+ * No firedRef guard, no GPS, no profile wait.
+ */
+async function fireInstantRiderPresence(userId: string, email?: string) {
+  const now = new Date().toISOString();
+  console.log("RIDER PRESENCE FIRED", userId, now);
+  const { error } = await supabase.from('presence').upsert(
+    {
+      user_id: userId,
+      role: 'RIDER',
+      display_name: email || userId.slice(0, 8),
+      source: 'home',
+      last_seen_at: now,
+      updated_at: now,
+    },
+    { onConflict: 'user_id' }
+  );
+  if (error) console.warn('[RiderPresence] instant fire error:', error.message);
+}
+
 const InstantRiderPresence = () => {
-  const { user, roles } = useAuth();
-  const firedRef = useRef<string | null>(null);
+  const { user, roles, profile } = useAuth();
+  const isDriver = roles.includes('driver');
 
+  // Resolve display name: profile name > email > uid
+  const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || user?.id || '';
+
+  // ── INSTANT FIRE: runs the moment user.id is available ──
   useEffect(() => {
-    if (!user?.id) return;
-    // Only for riders (not drivers — they have their own instant presence)
-    if (roles.includes('driver')) return;
-    if (firedRef.current === user.id) return;
-    firedRef.current = user.id;
+    if (!user?.id || isDriver) return;
+    void fireInstantRiderPresence(user.id, displayName);
+  }, [user?.id, isDriver, displayName]);
 
-    const fire = async () => {
-      console.log("RIDER PRESENCE FIRED", user.id);
-      await supabase.from('presence').upsert({
-        user_id: user.id,
-        role: 'RIDER',
-        source: 'home',
-        last_seen_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
-    };
-    void fire();
-  }, [user?.id, roles]);
-
-  // Resume / focus / pageshow
+  // ── VISIBILITY / FOCUS / PAGESHOW: re-fire on every resume ──
   useEffect(() => {
-    if (!user?.id) return;
-    if (roles.includes('driver')) return;
+    if (!user?.id || isDriver) return;
 
-    const fire = () => {
-      console.log("RIDER PRESENCE FIRED", user.id);
-      void supabase.from('presence').upsert({
-        user_id: user.id,
-        role: 'RIDER',
-        source: 'home',
-        last_seen_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' });
+    const onResume = () => {
+      if (document.visibilityState === 'visible') {
+        void fireInstantRiderPresence(user.id, displayName);
+      }
     };
+    const onFocus = () => void fireInstantRiderPresence(user.id, displayName);
 
-    const onVisible = () => { if (document.visibilityState === 'visible') fire(); };
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', fire);
-    window.addEventListener('pageshow', fire);
+    document.addEventListener('visibilitychange', onResume);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onFocus);
 
     return () => {
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', fire);
-      window.removeEventListener('pageshow', fire);
+      document.removeEventListener('visibilitychange', onResume);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onFocus);
     };
-  }, [user?.id, roles]);
+  }, [user?.id, isDriver, displayName]);
 
-  // Auth state change
+  // ── AUTH STATE: fire on SIGNED_IN / TOKEN_REFRESHED ──
   useEffect(() => {
-    if (roles.includes('driver')) return;
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user?.id) {
-        console.log("RIDER PRESENCE FIRED", session.user.id);
-        void supabase.from('presence').upsert({
-          user_id: session.user.id,
-          role: 'RIDER',
-          source: 'home',
-          last_seen_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'user_id' });
+        // Quick role check: don't fire for drivers
+        supabase.rpc('is_driver', { _user_id: session.user.id }).then(({ data }) => {
+          if (!data) {
+            void fireInstantRiderPresence(session.user.id, session.user.email || '');
+          }
+        });
       }
     });
-
     return () => subscription.unsubscribe();
-  }, [roles]);
+  }, []);
 
   return null;
 };
