@@ -144,18 +144,27 @@ export function useRiderPresenceTracking() {
     };
   }, [user?.id, skip, getName]);
 
-  // ── LAYER 4: HEARTBEAT (15s) ──
+  // ── LAYER 4: HEARTBEAT (15s) — unconditional while user exists ──
   useEffect(() => {
-    if (!user?.id || skip) return;
+    if (skip) return;
 
     const tick = () => {
+      // Re-check user inside interval since it may become available later
+      const uid = user?.id;
+      if (!uid) return;
       if (isDriverOrAdminRoute()) return;
-      void firePresence(user.id, getName(user.email, user.id));
+      console.log('RIDER HEARTBEAT SENT', uid);
+      void firePresence(uid, getName(user?.email, uid));
     };
+
+    // Fire immediately on mount/re-mount
+    tick();
 
     intervalRef.current = setInterval(tick, HEARTBEAT_MS);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [user?.id, skip, getName]);
+  // Only depend on skip — user ref is read inside the callback
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skip, user?.id, getName]);
 }
