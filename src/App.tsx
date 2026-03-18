@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useState, useRef, lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -110,6 +110,82 @@ const RiderLocationTracker = () => {
   return null;
 };
 
+// Instant rider presence — fires the moment auth is ready, no GPS/profile wait
+const InstantRiderPresence = () => {
+  const { user, roles } = useAuth();
+  const firedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    // Only for riders (not drivers — they have their own instant presence)
+    if (roles.includes('driver')) return;
+    if (firedRef.current === user.id) return;
+    firedRef.current = user.id;
+
+    const fire = async () => {
+      console.log("RIDER PRESENCE FIRED", user.id);
+      await supabase.from('presence').upsert({
+        user_id: user.id,
+        role: 'RIDER',
+        source: 'home',
+        last_seen_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    };
+    void fire();
+  }, [user?.id, roles]);
+
+  // Resume / focus / pageshow
+  useEffect(() => {
+    if (!user?.id) return;
+    if (roles.includes('driver')) return;
+
+    const fire = () => {
+      console.log("RIDER PRESENCE FIRED", user.id);
+      void supabase.from('presence').upsert({
+        user_id: user.id,
+        role: 'RIDER',
+        source: 'home',
+        last_seen_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+    };
+
+    const onVisible = () => { if (document.visibilityState === 'visible') fire(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', fire);
+    window.addEventListener('pageshow', fire);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', fire);
+      window.removeEventListener('pageshow', fire);
+    };
+  }, [user?.id, roles]);
+
+  // Auth state change
+  useEffect(() => {
+    if (roles.includes('driver')) return;
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user?.id) {
+        console.log("RIDER PRESENCE FIRED", session.user.id);
+        void supabase.from('presence').upsert({
+          user_id: session.user.id,
+          role: 'RIDER',
+          source: 'home',
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [roles]);
+
+  return null;
+};
+
 // Global presence heartbeat for all authenticated users
 const PresenceTracker = () => {
   usePresenceHeartbeat();
@@ -210,6 +286,7 @@ const AppRoutes = () => {
       </Suspense>
       <RiderLocationTracker />
       <PresenceTracker />
+      <InstantRiderPresence />
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
