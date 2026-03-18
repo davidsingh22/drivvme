@@ -348,10 +348,10 @@ export default function LiveMonitor() {
       }
     });
 
-    // Drivers flagged as is_online=true in driver_profiles always appear,
-    // even if heartbeat/location data is stale (backgrounded app)
+    // Drivers flagged as is_online=true in driver_profiles appear as a fallback,
+    // but only if they are real drivers and their online flag is not stale.
     ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
-      driverRoleSet.add(row.user_id);
+      if (!driverRoleSet.has(row.user_id)) return;
       roleByUserRef.current.set(row.user_id, 'driver');
       if (!allUsersLatest.has(row.user_id)) {
         allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
