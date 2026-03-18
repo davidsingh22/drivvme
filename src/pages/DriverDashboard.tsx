@@ -1169,6 +1169,7 @@ const DriverDashboard = () => {
           return;
         }
         setIsOnline(newStatus);
+        manuallyToggledOffRef.current = !newStatus;
         await refreshDriverProfile();
         toast({
           title: newStatus ? 'You are now online' : 'You are now offline',
