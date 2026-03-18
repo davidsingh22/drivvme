@@ -1,17 +1,12 @@
+import type { Session } from '@supabase/supabase-js';
+import { supabase } from '@/integrations/supabase/client';
+
 /**
  * Session Recovery Utility
- * 
- * Bypasses the Supabase JS client's GoTrue layer entirely to refresh tokens.
- * This is critical for mobile WebViews (Median/GoNative) where the JS client's
- * internal auto-refresh timer gets corrupted after backgrounding for 10+ minutes,
- * causing all client methods (getSession, refreshSession, from().insert()) to hang.
  *
- * Strategy:
- * 1. Read tokens from localStorage (synchronous, never hangs)
- * 2. Check if access_token is expired by decoding the JWT
- * 3. If expired, do a raw POST to /auth/v1/token?grant_type=refresh_token
- * 4. Write the new session back to localStorage so the Supabase client picks it up
- * 5. Return a valid access_token
+ * Bypasses the auth client's normal timing when mobile WebViews wake up with a
+ * stale or half-restored session. It can read/write the stored session directly,
+ * refresh tokens over raw HTTP, and then re-hydrate the auth client.
  */
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
@@ -26,6 +21,31 @@ interface StoredSession {
   token_type?: string;
   user?: any;
   [key: string]: any;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: number | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(`TIMEOUT_${timeoutMs}`)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Unknown error';
+  }
 }
 
 /** Decode JWT payload without a library */
@@ -43,9 +63,9 @@ function decodeJwtPayload(token: string): { exp?: number; [key: string]: any } |
 /** Check if a JWT is expired (with 60s buffer) */
 function isTokenExpired(token: string): boolean {
   const payload = decodeJwtPayload(token);
-  if (!payload?.exp) return true; // Can't determine — treat as expired
+  if (!payload?.exp) return true;
   const nowSec = Math.floor(Date.now() / 1000);
-  return payload.exp < nowSec + 60; // 60s buffer
+  return payload.exp < nowSec + 60;
 }
 
 /** Read stored session from localStorage */
@@ -54,7 +74,6 @@ function readStoredSession(): StoredSession | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    // Handle both direct format and nested currentSession format
     if (parsed?.access_token && parsed?.refresh_token) return parsed;
     if (parsed?.currentSession?.access_token) return parsed.currentSession;
     return null;
@@ -63,7 +82,7 @@ function readStoredSession(): StoredSession | null {
   }
 }
 
-/** Write session back to localStorage so Supabase client stays in sync */
+/** Write session back to localStorage so the auth client stays in sync */
 function writeStoredSession(session: StoredSession): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
@@ -73,19 +92,19 @@ function writeStoredSession(session: StoredSession): void {
 }
 
 /**
- * Raw token refresh — POST directly to the Supabase Auth endpoint.
- * This NEVER touches the Supabase JS client or GoTrue internals.
+ * Raw token refresh — POST directly to the auth endpoint.
+ * This never depends on the auth client being healthy.
  */
 async function rawRefreshToken(refreshToken: string): Promise<StoredSession> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000); // 8s hard timeout
+  const timeout = setTimeout(() => controller.abort(), 8000);
 
   try {
     const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': ANON_KEY,
+        apikey: ANON_KEY,
       },
       body: JSON.stringify({ refresh_token: refreshToken }),
       signal: controller.signal,
@@ -94,10 +113,13 @@ async function rawRefreshToken(refreshToken: string): Promise<StoredSession> {
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      // If the refresh token itself is expired/invalid, clear session
       if (res.status === 400 || res.status === 401) {
         console.error('[sessionRecovery] Refresh token expired/invalid — clearing session');
-        try { localStorage.removeItem(STORAGE_KEY); } catch {}
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch {
+          // ignore
+        }
         throw new Error('SESSION_EXPIRED');
       }
       throw new Error(`Token refresh failed (${res.status}): ${body}`);
@@ -114,6 +136,7 @@ async function rawRefreshToken(refreshToken: string): Promise<StoredSession> {
     if (!data?.access_token || !data?.refresh_token) {
       throw new Error('Invalid refresh response — missing tokens');
     }
+
     return data as StoredSession;
   } catch (err: any) {
     clearTimeout(timeout);
@@ -125,11 +148,89 @@ async function rawRefreshToken(refreshToken: string): Promise<StoredSession> {
 }
 
 /**
- * Get a valid access token. This is the ONLY function you need to call.
- * 
- * - If the stored token is still valid, returns it immediately (synchronous path).
- * - If expired, performs a raw HTTP refresh and updates localStorage.
- * - Throws if no session exists or refresh fails (caller should redirect to /login).
+ * Ensure the auth client has a real active session, recovering it when needed.
+ * Returns null only after getSession, raw recovery, setSession, and refreshSession
+ * have all failed.
+ */
+export async function ensureSupabaseSession(): Promise<Session | null> {
+  try {
+    const { data, error } = await withTimeout(supabase.auth.getSession(), 3500);
+    if (error) console.warn('[sessionRecovery] getSession error:', error.message);
+    if (data.session?.user?.id) return data.session;
+    console.warn('[sessionRecovery] No active session from auth client, attempting recovery');
+  } catch (error) {
+    console.warn('[sessionRecovery] getSession threw:', getErrorMessage(error));
+  }
+
+  const stored = readStoredSession();
+  if (!stored?.refresh_token) {
+    console.error('[sessionRecovery] No stored session available for recovery');
+    return null;
+  }
+
+  let recovered = stored;
+
+  if (isTokenExpired(recovered.access_token)) {
+    try {
+      console.warn('[sessionRecovery] Stored access token expired, refreshing via raw HTTP');
+      recovered = { ...stored, ...(await rawRefreshToken(stored.refresh_token)) };
+      writeStoredSession(recovered);
+    } catch (error) {
+      console.error('[sessionRecovery] Raw refresh failed:', getErrorMessage(error));
+      return null;
+    }
+  }
+
+  try {
+    const { data, error } = await withTimeout(
+      supabase.auth.setSession({
+        access_token: recovered.access_token,
+        refresh_token: recovered.refresh_token,
+      }),
+      5000
+    );
+
+    if (error) {
+      console.error('[sessionRecovery] setSession error:', error.message);
+    }
+    if (data.session?.user?.id) {
+      return data.session;
+    }
+  } catch (error) {
+    console.error('[sessionRecovery] setSession threw:', getErrorMessage(error));
+  }
+
+  try {
+    const { data, error } = await withTimeout(supabase.auth.refreshSession(), 5000);
+    if (error) {
+      console.error('[sessionRecovery] refreshSession error:', error.message);
+    }
+    if (data.session?.user?.id) {
+      return data.session;
+    }
+  } catch (error) {
+    console.error('[sessionRecovery] refreshSession threw:', getErrorMessage(error));
+  }
+
+  try {
+    const { data, error } = await withTimeout(supabase.auth.getSession(), 3500);
+    if (error) {
+      console.error('[sessionRecovery] final getSession error:', error.message);
+    }
+    if (data.session?.user?.id) return data.session;
+  } catch (error) {
+    console.error('[sessionRecovery] final getSession threw:', getErrorMessage(error));
+  }
+
+  console.error('[sessionRecovery] Session recovery failed');
+  return null;
+}
+
+/**
+ * Get a valid access token.
+ * - Returns immediately if the stored token is still valid.
+ * - Refreshes via raw HTTP if expired.
+ * - Throws if no recoverable session exists.
  */
 export async function getValidAccessToken(): Promise<string> {
   const stored = readStoredSession();
@@ -137,22 +238,19 @@ export async function getValidAccessToken(): Promise<string> {
     throw new Error('NO_SESSION');
   }
 
-  // Fast path: token is still valid
   if (!isTokenExpired(stored.access_token)) {
     return stored.access_token;
   }
 
-  // Slow path: token expired — do a raw refresh
   console.log('[sessionRecovery] Access token expired, refreshing via raw HTTP...');
   const newSession = await rawRefreshToken(stored.refresh_token);
-  
-  // Merge with existing stored data (preserve user metadata etc.)
+
   const merged: StoredSession = {
     ...stored,
     ...newSession,
   };
   writeStoredSession(merged);
-  
+
   console.log('[sessionRecovery] Token refreshed successfully');
   return newSession.access_token;
 }
@@ -162,5 +260,4 @@ export function hasStoredSession(): boolean {
   return readStoredSession() !== null;
 }
 
-/** Export constants for use in raw fetch calls */
-export { SUPABASE_URL, ANON_KEY, STORAGE_KEY };
+export { ANON_KEY, STORAGE_KEY, SUPABASE_URL };
