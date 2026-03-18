@@ -34,7 +34,7 @@ function forceSetNewRide(rideId: string) {
 function routeAfterRideNotification() {
   try {
     const lastRoute = localStorage.getItem('last_route');
-    window.location.href = lastRoute === '/driver' ? '/driver' : '/ride';
+    window.location.href = lastRoute === '/ride' ? '/ride' : '/driver';
   } catch {
     window.location.href = '/driver';
   }
