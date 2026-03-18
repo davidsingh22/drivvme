@@ -1,194 +1,117 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { getValidAccessToken } from '@/lib/sessionRecovery';
 
 const HEARTBEAT_MS = 15_000;
-const FAST_RETRY_MS = 1_200;
 
-type RiderScreen = 'home' | 'searching' | 'booking';
-
-function getPathname() {
+function detectScreen(): string {
   try {
-    return window.location.pathname || '/';
+    const p = window.location.pathname || '/';
+    if (p.startsWith('/search')) return 'searching';
+    if (p.startsWith('/ride')) return 'booking';
+    return 'home';
   } catch {
-    return '/';
+    return 'home';
   }
 }
 
-function detectRiderScreen(pathname = getPathname()): RiderScreen {
-  if (pathname.startsWith('/search')) return 'searching';
-  if (pathname.startsWith('/ride')) return 'booking';
-  return 'home';
+function isDriverOrAdminRoute(): boolean {
+  try {
+    const p = window.location.pathname || '/';
+    return p.startsWith('/driver') || p.startsWith('/admin');
+  } catch {
+    return false;
+  }
 }
 
-function shouldSkipRiderPresence(pathname = getPathname()) {
-  return pathname.startsWith('/driver') || pathname.startsWith('/admin');
-}
-
-async function writeRiderPresence(userId: string, displayName?: string, pathname = getPathname()) {
-  if (shouldSkipRiderPresence(pathname)) return true;
+async function sendPresence(userId: string, displayName?: string) {
+  if (isDriverOrAdminRoute()) return;
 
   const now = new Date().toISOString();
+  console.log('RIDER PRESENCE GLOBAL', userId);
+
   try {
     const { error } = await supabase.from('presence').upsert(
       {
         user_id: userId,
         role: 'RIDER',
         display_name: displayName || userId.slice(0, 8),
-        source: detectRiderScreen(pathname),
+        source: detectScreen(),
         last_seen_at: now,
         updated_at: now,
       },
       { onConflict: 'user_id' }
     );
-
-    if (error) {
-      console.error('[RiderPresence] FAILED', error.message);
-      return false;
-    }
-
-    return true;
-  } catch (error: any) {
-    console.error('[RiderPresence] FAILED', error?.message || error);
-    return false;
+    if (error) console.error('[RiderPresence] upsert failed:', error.message);
+  } catch (e: any) {
+    console.error('[RiderPresence] upsert error:', e?.message || e);
   }
 }
 
+/**
+ * Global rider presence — mount once at app root.
+ * Fires on: user ready, SIGNED_IN, focus, visibilitychange, pageshow, heartbeat.
+ * Does NOT depend on any page or booking component.
+ */
 export function useRiderPresenceTracking() {
   const { user, profile, isDriver, isAdmin } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const firedRef = useRef(false);
-
   const skip = isDriver || isAdmin;
-  const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || '';
 
-  const fire = useCallback(async (reason: string) => {
-    const pathname = getPathname();
-    if (skip || shouldSkipRiderPresence(pathname)) return true;
+  const name = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ')
+    || user?.email || '';
 
-    // Try getSession first (non-destructive, no auth state disruption)
-    let userId: string | undefined;
-    let email: string | undefined;
+  const fire = useCallback(() => {
+    if (!user?.id || skip) return;
+    void sendPresence(user.id, name || user.email || user.id);
+  }, [user?.id, user?.email, name, skip]);
 
-    const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } } as any));
-    if (session?.user?.id) {
-      userId = session.user.id;
-      email = session.user.email ?? undefined;
-    } else {
-      // Fallback: refresh token via raw HTTP (doesn't call setSession, no auth cascade)
-      try {
-        await getValidAccessToken();
-        const { data: { session: recovered } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } } as any));
-        if (recovered?.user?.id) {
-          userId = recovered.user.id;
-          email = recovered.user.email ?? undefined;
-        }
-      } catch {
-        // token refresh failed
-      }
-    }
-
-    if (!userId) {
-      console.error(`[RiderPresence] No recoverable session (${reason})`);
-      return false;
-    }
-
-    const name = displayName || email || userId;
-    return writeRiderPresence(userId, name, pathname);
-  }, [displayName, skip]);
-
-  const queueRetry = useCallback((reason: string) => {
-    if (skip || shouldSkipRiderPresence()) return;
-    if (retryTimeoutRef.current) return;
-
-    retryTimeoutRef.current = setTimeout(() => {
-      retryTimeoutRef.current = null;
-      void fire(`${reason}:retry`);
-    }, FAST_RETRY_MS);
-  }, [fire, skip]);
-
-  useEffect(() => {
-    if (skip || firedRef.current) return;
-    firedRef.current = true;
-    void fire('app_open').then((ok) => {
-      if (!ok) queueRetry('app_open');
-    });
-  }, [fire, queueRetry, skip]);
-
+  // 1. Trigger on user ready (app mount + auth hydration)
   useEffect(() => {
     if (!user?.id || skip) return;
-    void fire('user_ready').then((ok) => {
-      if (!ok) queueRetry('user_ready');
-    });
-  }, [user?.id, skip, fire, queueRetry]);
+    fire();
+  }, [user?.id, skip, fire]);
 
+  // 2. Trigger on resume / focus / pageshow
   useEffect(() => {
-    if (skip) return;
+    if (!user?.id || skip) return;
 
-    const onResume = () => {
-      if (document.visibilityState !== 'visible') return;
-      void fire('resume').then((ok) => {
-        if (!ok) queueRetry('resume');
-      });
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fire();
     };
+    const onFocus = () => fire();
 
-    const onFocus = () => {
-      void fire('focus').then((ok) => {
-        if (!ok) queueRetry('focus');
-      });
-    };
-
-    document.addEventListener('visibilitychange', onResume);
+    document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onFocus);
     window.addEventListener('pageshow', onFocus);
 
     return () => {
-      document.removeEventListener('visibilitychange', onResume);
+      document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pageshow', onFocus);
     };
-  }, [fire, queueRetry, skip]);
+  }, [user?.id, skip, fire]);
 
+  // 3. Heartbeat every 15s
   useEffect(() => {
-    if (skip) return;
+    if (!user?.id || skip) return;
 
-    intervalRef.current = setInterval(() => {
-      void fire('heartbeat').then((ok) => {
-        if (!ok) queueRetry('heartbeat');
-      });
-    }, HEARTBEAT_MS);
-
+    intervalRef.current = setInterval(fire, HEARTBEAT_MS);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [fire, queueRetry, skip]);
+  }, [user?.id, skip, fire]);
 
+  // 4. SIGNED_IN auth event
   useEffect(() => {
     if (skip) return;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event !== 'SIGNED_IN') return;
-      if (shouldSkipRiderPresence()) return;
-
-      if (!session?.user?.id) {
-        queueRetry('signed_in_missing_session');
-        return;
-      }
-
-      const name = displayName || session.user.email || session.user.id;
-      void writeRiderPresence(session.user.id, name).then((ok) => {
-        if (!ok) queueRetry('signed_in');
-      });
+      if (event !== 'SIGNED_IN' || !session?.user?.id) return;
+      if (isDriverOrAdminRoute()) return;
+      void sendPresence(session.user.id, name || session.user.email || session.user.id);
     });
 
     return () => subscription.unsubscribe();
-  }, [displayName, queueRetry, skip]);
-
-  useEffect(() => {
-    return () => {
-      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
-    };
-  }, []);
+  }, [name, skip]);
 }
