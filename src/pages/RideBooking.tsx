@@ -152,6 +152,9 @@ const RideBooking = () => {
   } = usePushNotifications();
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
+  // Track rider presence — booking screen
+  useRiderPresence('booking');
+
   // Active ride persistence hook
   const {
     activeRide,
@@ -161,15 +164,6 @@ const RideBooking = () => {
   } = useActiveRide(user?.id);
   const hasRestoredRide = useRef(false);
   const [step, setStep] = useState<RideStep>('input');
-
-  const riderPresenceScreen: 'home' | 'searching' | 'booking' = step === 'searching'
-    ? 'searching'
-    : ['matched', 'arriving', 'arrived', 'inProgress', 'completed'].includes(step)
-      ? 'booking'
-      : 'home';
-
-  // Track rider presence based on actual booking stage
-  useRiderPresence(riderPresenceScreen);
   const [isCancelling, setIsCancelling] = useState(false);
   const [pickup, setPickup] = useState<Location | null>(null);
   const [dropoff, setDropoff] = useState<Location | null>(null);

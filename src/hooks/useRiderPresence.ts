@@ -13,12 +13,14 @@ const OFFLINE_AFTER_MS = 60_000; // mark offline after 60s inactivity
  * Marks offline on unmount / visibility hidden > 60s.
  */
 export function useRiderPresence(currentScreen: ScreenName) {
-  const { user, profile } = useAuth();
+  const { user, profile, roles } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hiddenAtRef = useRef<number | null>(null);
   const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenRef = useRef(currentScreen);
   screenRef.current = currentScreen;
+
+  const isRider = roles.includes('rider');
 
   const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || '';
 
@@ -43,7 +45,7 @@ export function useRiderPresence(currentScreen: ScreenName) {
   }, [user?.id, displayName]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || !isRider) return;
 
     // Initial upsert
     upsertPresence('online');
@@ -55,7 +57,7 @@ export function useRiderPresence(currentScreen: ScreenName) {
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
         hiddenAtRef.current = Date.now();
-        // Start offline timer only when app is actually backgrounded/inactive.
+        // Start offline timer
         offlineTimerRef.current = setTimeout(() => {
           upsertPresence('offline');
         }, OFFLINE_AFTER_MS);
@@ -71,18 +73,19 @@ export function useRiderPresence(currentScreen: ScreenName) {
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
-    // Cleanup: do NOT mark offline on route/page transitions.
-    // Let the 60s inactivity timer own offline state to avoid false offline/home regressions.
+    // Cleanup
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
       document.removeEventListener('visibilitychange', handleVisibility);
+      // Mark offline on unmount (best effort)
+      upsertPresence('offline');
     };
-  }, [user?.id, upsertPresence]);
+  }, [user?.id, isRider, upsertPresence]);
 
   // Update screen when it changes
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || !isRider) return;
     upsertPresence('online', currentScreen);
-  }, [currentScreen, user?.id, upsertPresence]);
+  }, [currentScreen, user?.id, isRider, upsertPresence]);
 }

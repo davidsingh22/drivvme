@@ -96,7 +96,6 @@ interface RideActivityRow {
 
 const ONLINE_THRESHOLD_MS = 5 * 60_000;
 const LOCATION_FEED_COOLDOWN_MS = 45_000;
-const DRIVER_PROFILE_FALLBACK_MS = 12 * 60 * 60_000;
 const ACTIVE_RIDER_RIDE_STATUSES = ['searching', 'pending_payment', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'] as const;
 const BOOKING_SUCCESS_STATUSES = new Set(['confirmed', 'paid']);
 
@@ -253,9 +252,8 @@ export default function LiveMonitor() {
 
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
-    const driverProfileFallbackCutoff = new Date(Date.now() - DRIVER_PROFILE_FALLBACK_MS).toISOString();
 
-    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes, driverPresenceRes, onlineDriverProfilesRes] = await Promise.all([
+    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes, onlineDriverProfilesRes] = await Promise.all([
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
@@ -276,27 +274,23 @@ export default function LiveMonitor() {
         .from('presence')
         .select('user_id, last_seen_at, role')
         .gte('last_seen_at', cutoff),
-      supabase
-        .from('driver_presence')
-        .select('driver_id, last_seen, updated_at, status')
-        .gte('updated_at', cutoff),
+      // Always show drivers who are flagged as online in their profile,
+      // even if their heartbeat is stale (e.g. app backgrounded on mobile)
       supabase
         .from('driver_profiles')
         .select('user_id, updated_at')
-        .eq('is_online', true)
-        .gte('updated_at', driverProfileFallbackCutoff),
+        .eq('is_online', true),
     ]);
 
-    if (riderRes.error || driverRes.error || activeRidesRes.error || presenceRes.error || driverPresenceRes.error) {
+    if (riderRes.error || driverRes.error || activeRidesRes.error) {
       console.error('LiveMonitor: failed loading online presence sources', {
         riderError: riderRes.error,
         driverError: driverRes.error,
         rideActivityError: activeRidesRes.error,
-        presenceError: presenceRes.error,
-        driverPresenceError: driverPresenceRes.error,
       });
     }
 
+    // Build a set of driver user_ids from user_roles for accurate classification
     const driverRoleSet = new Set<string>();
     (rolesRes.data || []).forEach((r: any) => {
       const normalizedRole: 'rider' | 'driver' = r.role === 'driver' ? 'driver' : 'rider';
@@ -308,8 +302,8 @@ export default function LiveMonitor() {
     const driverRows = (driverRes.data || []) as DriverLocationRow[];
     const rideActivityRows = (activeRidesRes.data || []) as RideActivityRow[];
     const presenceRows = (presenceRes.data || []) as { user_id: string; last_seen_at: string; role: string }[];
-    const driverPresenceRows = (driverPresenceRes.data || []) as { driver_id: string; last_seen: string | null; updated_at: string | null; status: string | null }[];
 
+    // Collect latest timestamps per user across all sources
     const allUsersLatest = new Map<string, string>();
 
     riderRows.forEach((row) => {
@@ -326,20 +320,6 @@ export default function LiveMonitor() {
       if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
         allUsersLatest.set(row.user_id, ts);
       }
-      driverRoleSet.add(row.user_id);
-      roleByUserRef.current.set(row.user_id, 'driver');
-    });
-
-    driverPresenceRows.forEach((row) => {
-      const userId = row.driver_id;
-      const ts = row.last_seen || row.updated_at;
-      if (!userId || !ts) return;
-      const prev = allUsersLatest.get(userId);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(userId, ts);
-      }
-      driverRoleSet.add(userId);
-      roleByUserRef.current.set(userId, 'driver');
     });
 
     rideActivityRows.forEach((row) => {
@@ -351,6 +331,7 @@ export default function LiveMonitor() {
       }
     });
 
+    // Also consider presence heartbeat as an online signal
     presenceRows.forEach((row) => {
       const ts = row.last_seen_at;
       const prev = allUsersLatest.get(row.user_id);
@@ -365,14 +346,13 @@ export default function LiveMonitor() {
       }
     });
 
+    // Drivers flagged as is_online=true in driver_profiles always appear,
+    // even if heartbeat/location data is stale (backgrounded app)
     ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
-      if (!driverRoleSet.has(row.user_id)) return;
+      driverRoleSet.add(row.user_id);
       roleByUserRef.current.set(row.user_id, 'driver');
-
-      const ts = row.updated_at || new Date().toISOString();
-      const prev = allUsersLatest.get(row.user_id);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(row.user_id, ts);
+      if (!allUsersLatest.has(row.user_id)) {
+        allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
       }
     });
 
@@ -705,32 +685,9 @@ export default function LiveMonitor() {
       })
       .subscribe();
 
-    const globalPresenceCh = supabase
-      .channel('admin-driver-global-presence')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'presence' }, async (payload: any) => {
-        const row = payload.new as { user_id?: string; role?: string; last_seen_at?: string; updated_at?: string } | undefined;
-        if (row?.user_id && String(row.role || '').toLowerCase() === 'driver') {
-          const seenAt = row.last_seen_at || row.updated_at || new Date().toISOString();
-          void maybePushLocationFeed('driver', row.user_id, seenAt);
-        }
-        void loadOnlineUsers();
-      })
-      .subscribe();
+    const poll = setInterval(loadOnlineUsers, 15_000);
 
-    const driverPresenceCh = supabase
-      .channel('admin-driver-presence')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_presence' }, async (payload: any) => {
-        const row = payload.new as { driver_id?: string; last_seen?: string; updated_at?: string } | undefined;
-        if (row?.driver_id) {
-          const seenAt = row.last_seen || row.updated_at || new Date().toISOString();
-          void maybePushLocationFeed('driver', row.driver_id, seenAt);
-        }
-        void loadOnlineUsers();
-      })
-      .subscribe();
-
-    const poll = setInterval(loadOnlineUsers, 2_000);
-
+    // Polling fallback: catch ride status changes that realtime may silently miss
     const lastPollTsRef = { current: new Date().toISOString() };
     const ridePoll = setInterval(async () => {
       const since = lastPollTsRef.current;
@@ -748,6 +705,8 @@ export default function LiveMonitor() {
         for (const ride of recentRides) {
           const status = String(ride.status || '').toLowerCase();
           const feedId = `ride-${ride.id}-${status}`;
+
+          // Skip if we already have this exact status update in the feed
           if (feedIdsRef.current.has(feedId)) continue;
 
           const riderId = ride.rider_id as string | null;
@@ -779,6 +738,7 @@ export default function LiveMonitor() {
 
           const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
 
+          // Remove active offers for cancelled/completed/assigned rides
           if (['driver_assigned', 'cancelled', 'completed'].includes(status)) {
             removeOffersForRide(ride.id);
           }
@@ -804,8 +764,6 @@ export default function LiveMonitor() {
       supabase.removeChannel(notifCh);
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
-      supabase.removeChannel(globalPresenceCh);
-      supabase.removeChannel(driverPresenceCh);
     };
   }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
 
