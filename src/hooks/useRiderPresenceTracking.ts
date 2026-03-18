@@ -85,7 +85,25 @@ export function useRiderPresenceTracking() {
     void firePresence(user.id, getName(user.email, user.id));
   }, [user?.id, skip, getName]);
 
-  // ── LAYER 2: AUTH STATE CHANGE (backup — catches SIGNED_IN before useAuth updates) ──
+  // ── LAYER 2: EXISTING SESSION CHECK (fires on mount even without auth events) ──
+  useEffect(() => {
+    if (skip) return;
+
+    const checkExistingSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        if (isDriverOrAdminRoute()) return;
+        console.log('RIDER FIRE FROM EXISTING SESSION', session.user.id);
+        void firePresence(
+          session.user.id,
+          getName(session.user.email, session.user.id)
+        );
+      }
+    };
+    void checkExistingSession();
+  }, [skip, getName]);
+
+  // ── LAYER 3: AUTH STATE CHANGE (backup — catches SIGNED_IN before useAuth updates) ──
   useEffect(() => {
     if (skip) return;
 
