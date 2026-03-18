@@ -415,6 +415,7 @@ export default function LiveMonitor() {
 
     const riderIds = [
       ...(ridesRes.data || []).map((r) => r.rider_id).filter(Boolean) as string[],
+      ...(ridesRes.data || []).map((r) => (r as any).driver_id).filter(Boolean) as string[],
       ...((riderLocRes.data || []).map((r) => r.user_id)),
       ...((driverLocRes.data || []).map((d) => d.user_id)),
     ];
