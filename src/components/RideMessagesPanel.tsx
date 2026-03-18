@@ -67,10 +67,11 @@ export default function RideMessagesPanel() {
   // Fetch active ride for current driver (rides.driver_id = auth.uid())
   const fetchActiveRide = useCallback(async () => {
     if (!currentUserId) {
-      setIsLoading(false);
-      setLastError('No currentUserId');
+      // No user yet — don't show loading, just show the "accept a ride" message
       return;
     }
+
+    setIsLoading(true);
 
     try {
       setLastError(null);
