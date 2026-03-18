@@ -757,9 +757,35 @@ const DriverDashboard = () => {
           return;
         }
 
-        if (!pending?.ride_id) {
-          console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications found`);
-          return;
+        let pendingRideId = pending?.ride_id ?? null;
+        let pendingCreatedAt = pending?.created_at ?? null;
+
+        if (!pendingRideId) {
+          const recoveryCutoff = new Date(Date.now() - MAX_OFFER_AGE_SECONDS * 1000).toISOString();
+          const { data: dispatchedRide, error: dispatchedRideError } = await supabase
+            .from('rides')
+            .select('id, updated_at, requested_at, created_at')
+            .eq('status', 'searching')
+            .is('driver_id', null)
+            .contains('notified_driver_ids', [effectiveUserId])
+            .gte('updated_at', recoveryCutoff)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (dispatchedRideError) {
+            console.warn(`[Recovery] ❌ (attempt ${attempt}) Ride dispatch fallback error:`, dispatchedRideError.message);
+            return;
+          }
+
+          if (!dispatchedRide?.id) {
+            console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications or dispatched rides found`);
+            return;
+          }
+
+          pendingRideId = dispatchedRide.id;
+          pendingCreatedAt = dispatchedRide.requested_at || dispatchedRide.created_at || dispatchedRide.updated_at;
+          console.log(`[Recovery] (attempt ${attempt}) 🛟 Recovered ride from rides.notified_driver_ids:`, pendingRideId);
         }
 
         if (isCurrentlyDisplayed(pending.ride_id)) {
