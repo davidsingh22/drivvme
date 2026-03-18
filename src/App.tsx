@@ -315,7 +315,8 @@ const App = () => {
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
         <AuthProvider>
-          <TooltipProvider>
+      <TooltipProvider>
+            <RiderPresenceGlobal />
             <GlobalRideOfferGuard />
             <Toaster />
             <Sonner />
