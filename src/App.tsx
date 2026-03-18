@@ -132,9 +132,12 @@ const DriverRoute = () => {
     if (checked && !authLoading) {
       // Already rendering — still verify role in background
       if (session?.user?.id && !isDriver) {
-        supabase.rpc('is_driver', { _user_id: session.user.id }).then(({ data }) => {
-          if (!data) navigate('/ride', { replace: true });
-        }).catch(() => {});
+        (async () => {
+          try {
+            const { data } = await supabase.rpc('is_driver', { _user_id: session.user.id });
+            if (!data) navigate('/ride', { replace: true });
+          } catch {}
+        })();
       }
       return;
     }
