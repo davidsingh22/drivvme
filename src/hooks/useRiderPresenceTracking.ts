@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { ensureSupabaseSession } from '@/lib/sessionRecovery';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 
 const HEARTBEAT_MS = 15_000;
 const FAST_RETRY_MS = 1_200;
