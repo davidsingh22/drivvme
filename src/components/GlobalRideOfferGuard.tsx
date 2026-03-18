@@ -199,6 +199,66 @@ export function GlobalRideOfferGuard() {
     };
   }, [handleNewRide]);
 
+  // Source 6: Realtime notification inserts — guarantees modal while driver app is already open
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+
+    const cleanupChannel = () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
+    };
+
+    const subscribeForUser = (userId: string) => {
+      if (cancelled || !userId) return;
+      cleanupChannel();
+
+      channel = supabase
+        .channel(`global-ride-offers-${userId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            const notif = payload.new as { type?: string; ride_id?: string | null };
+            if (notif.type === 'new_ride' && notif.ride_id) {
+              console.log('[GlobalGuard] 📡 Realtime notification:', notif.ride_id);
+              handleNewRide(notif.ride_id);
+              broadcastNewRide(notif.ride_id);
+            }
+          }
+        )
+        .subscribe((status) => {
+          console.log('[GlobalGuard] notifications channel:', status);
+        });
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.id) subscribeForUser(session.user.id);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const userId = session?.user?.id;
+      if (!userId) {
+        cleanupChannel();
+        return;
+      }
+      subscribeForUser(userId);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+      cleanupChannel();
+    };
+  }, [handleNewRide]);
+
   // === ASYNC DATA ENRICHMENT — does NOT block modal display ===
   useEffect(() => {
     if (!rideId) return;
