@@ -388,7 +388,7 @@ export default function LiveMonitor() {
     const [ridesRes, riderLocRes, driverLocRes, rolesRes] = await Promise.all([
       supabase
         .from('rides')
-        .select('id, rider_id, status, pickup_address, dropoff_address, estimated_fare, created_at, updated_at')
+        .select('id, rider_id, driver_id, status, pickup_address, dropoff_address, estimated_fare, created_at, updated_at')
         .gte('updated_at', tenMinAgo)
         .order('updated_at', { ascending: false })
         .limit(40),
@@ -415,6 +415,7 @@ export default function LiveMonitor() {
 
     const riderIds = [
       ...(ridesRes.data || []).map((r) => r.rider_id).filter(Boolean) as string[],
+      ...(ridesRes.data || []).map((r) => (r as any).driver_id).filter(Boolean) as string[],
       ...((riderLocRes.data || []).map((r) => r.user_id)),
       ...((driverLocRes.data || []).map((d) => d.user_id)),
     ];
@@ -463,17 +464,35 @@ export default function LiveMonitor() {
       const riderName = ride.rider_id ? getCachedName(ride.rider_id) : 'Unknown';
       const status = String(ride.status || '').toLowerCase();
       const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
+      const route = `${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+      const driverId = (ride as any).driver_id as string | null;
+      const driverName = driverId ? getCachedName(driverId) : null;
 
-      const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived'].includes(status) ? 'both' : 'rider';
+      let message: string;
+      if (status === 'driver_assigned' && driverName) {
+        message = `${driverName} accepted ${riderName}'s ride — ${route}`;
+      } else if (status === 'driver_en_route' && driverName) {
+        message = `${driverName} is on the way to pick up ${riderName} — ${route}`;
+      } else if (status === 'arrived' && driverName) {
+        message = `${driverName} has arrived at pickup for ${riderName}`;
+      } else if (status === 'in_progress' && driverName) {
+        message = `${driverName} started the ride with ${riderName} — ${route}`;
+      } else if (status === 'completed' && driverName) {
+        message = `${driverName} completed the ride with ${riderName} — ${route}`;
+      } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
+        message = `${riderName}: Booking Successful`;
+      } else if (status === 'searching') {
+        message = `${riderName} is booking a ride — ${route} ($${Number(ride.estimated_fare || 0).toFixed(2)})`;
+      } else {
+        message = `${riderName}: ${statusInfo.label} — ${route}`;
+      }
+
+      const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
 
       items.push({
         id: `ride-${ride.id}-${status}`,
         icon: statusInfo.icon,
-        message: BOOKING_SUCCESS_STATUSES.has(status)
-          ? `${riderName}: Booking Successful`
-          : status === 'searching'
-            ? `${riderName} is booking a ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'} ($${Number(ride.estimated_fare || 0).toFixed(2)})`
-            : `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
+        message,
         source: 'rides',
         created_at: ride.updated_at || ride.created_at,
         feedRole,
@@ -545,21 +564,30 @@ export default function LiveMonitor() {
         if (driverId) await upsertProfileNames([driverId]);
 
         const riderName = riderId ? getCachedName(riderId) : 'Unknown';
+        const driverName = driverId ? getCachedName(driverId) : null;
         const status = String(ride.status || '').toLowerCase();
         const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
+        const route = `${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
 
-        // If driver_assigned, show who accepted
+        // Show driver-centric messages for ride lifecycle events
         let message: string;
-        if (status === 'driver_assigned' && driverId) {
-          const driverName = getCachedName(driverId);
-          message = `${driverName} accepted ${riderName}'s ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+        if (status === 'driver_assigned' && driverName) {
+          message = `${driverName} accepted ${riderName}'s ride — ${route}`;
+        } else if (status === 'driver_en_route' && driverName) {
+          message = `${driverName} is on the way to pick up ${riderName} — ${route}`;
+        } else if (status === 'arrived' && driverName) {
+          message = `${driverName} has arrived at pickup for ${riderName}`;
+        } else if (status === 'in_progress' && driverName) {
+          message = `${driverName} started the ride with ${riderName} — ${route}`;
+        } else if (status === 'completed' && driverName) {
+          message = `${driverName} completed the ride with ${riderName} — ${route}`;
         } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
           message = `${riderName}: Booking Successful`;
         } else {
-          message = `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+          message = `${riderName}: ${statusInfo.label} — ${route}`;
         }
 
-        const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
+        const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
 
         pushFeedItem({
           id: `ride-${ride.id}-${status}`,
@@ -687,19 +715,28 @@ export default function LiveMonitor() {
           if (driverId) await upsertProfileNames([driverId]);
 
           const riderName = riderId ? getCachedName(riderId) : 'Unknown';
+          const driverName = driverId ? getCachedName(driverId) : null;
           const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
+          const route = `${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
 
           let message: string;
-          if (status === 'driver_assigned' && driverId) {
-            const driverName = getCachedName(driverId);
-            message = `${driverName} accepted ${riderName}'s ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+          if (status === 'driver_assigned' && driverName) {
+            message = `${driverName} accepted ${riderName}'s ride — ${route}`;
+          } else if (status === 'driver_en_route' && driverName) {
+            message = `${driverName} is on the way to pick up ${riderName} — ${route}`;
+          } else if (status === 'arrived' && driverName) {
+            message = `${driverName} has arrived at pickup for ${riderName}`;
+          } else if (status === 'in_progress' && driverName) {
+            message = `${driverName} started the ride with ${riderName} — ${route}`;
+          } else if (status === 'completed' && driverName) {
+            message = `${driverName} completed the ride with ${riderName} — ${route}`;
           } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
             message = `${riderName}: Booking Successful`;
           } else {
-            message = `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+            message = `${riderName}: ${statusInfo.label} — ${route}`;
           }
 
-          const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
+          const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
 
           // Remove active offers for cancelled/completed/assigned rides
           if (['driver_assigned', 'cancelled', 'completed'].includes(status)) {

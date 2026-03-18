@@ -393,15 +393,34 @@ serve(async (req) => {
       });
     }
 
-    console.log("Found online drivers:", onlineDrivers?.length || 0);
+    // Cross-reference with driver_presence: only dispatch to drivers
+    // who are 'available' with a heartbeat within the last 60 seconds (MSN-visible)
+    const presenceCutoff = new Date(Date.now() - 60_000).toISOString();
+    const { data: activePresence } = await supabase
+      .from("driver_presence")
+      .select("driver_id, lat, lng")
+      .eq("status", "available")
+      .gte("last_seen", presenceCutoff);
 
-    if (!onlineDrivers || onlineDrivers.length === 0) {
+    const activePresenceIds = new Set((activePresence || []).map((p: any) => p.driver_id));
+    const presenceGps = new Map<string, { lat: number; lng: number }>();
+    (activePresence || []).forEach((p: any) => {
+      if (p.lat && p.lng) presenceGps.set(p.driver_id, { lat: p.lat, lng: p.lng });
+    });
+
+    // Only keep drivers who are visible in MSN (have active presence heartbeat)
+    const eligibleDrivers = (onlineDrivers || []).filter(d => activePresenceIds.has(d.user_id));
+
+    console.log(`[Tier ${tier}] Found ${onlineDrivers?.length || 0} online drivers, ${eligibleDrivers.length} with active presence (MSN-visible)`);
+
+    if (eligibleDrivers.length === 0) {
       return new Response(JSON.stringify({ 
-        message: "No online drivers found", 
+        message: "No online drivers found with active presence", 
         sent: 0,
         tier,
         nearbyDrivers: 0,
-        totalOnline: 0 
+        totalOnline: onlineDrivers?.length || 0,
+        totalWithPresence: 0,
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -411,7 +430,7 @@ serve(async (req) => {
     const { data: busyRides } = await supabase
       .from("rides")
       .select("driver_id, dropoff_lat, dropoff_lng")
-      .in("driver_id", onlineDrivers.map(d => d.user_id))
+      .in("driver_id", eligibleDrivers.map(d => d.user_id))
       .in("status", ["driver_assigned", "driver_en_route", "arrived", "in_progress"]);
 
     const busyDriverDropoffs = new Map<string, { lat: number; lng: number }>();
@@ -422,27 +441,29 @@ serve(async (req) => {
     });
 
     // Filter and sort drivers by distance
-    const driversWithDistance: DriverWithDistance[] = onlineDrivers
+    // Use GPS from driver_presence when available (more real-time)
+    const driversWithDistance: DriverWithDistance[] = eligibleDrivers
       .filter(driver => !mergedExcludedDriverIds.includes(driver.user_id))
       .map(driver => {
-        // For busy drivers, use their dropoff location instead
         const dropoffLocation = busyDriverDropoffs.get(driver.user_id);
+        const presLoc = presenceGps.get(driver.user_id);
         
         let distance = Infinity;
         if (dropoffLocation) {
           distance = calculateDistanceKm(pickupLat, pickupLng, dropoffLocation.lat, dropoffLocation.lng);
+        } else if (presLoc) {
+          distance = calculateDistanceKm(pickupLat, pickupLng, presLoc.lat, presLoc.lng);
         } else if (driver.current_lat && driver.current_lng) {
           distance = calculateDistanceKm(pickupLat, pickupLng, driver.current_lat, driver.current_lng);
         }
-        // Drivers without location are excluded (distance stays Infinity)
 
         const isPriority = driver.priority_driver_until && 
           new Date(driver.priority_driver_until) > new Date();
 
         return {
           user_id: driver.user_id,
-          current_lat: driver.current_lat,
-          current_lng: driver.current_lng,
+          current_lat: presLoc?.lat || driver.current_lat,
+          current_lng: presLoc?.lng || driver.current_lng,
           distance_km: distance,
           is_priority: !!isPriority,
         };
