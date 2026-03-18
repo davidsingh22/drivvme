@@ -199,6 +199,141 @@ export function GlobalRideOfferGuard() {
     };
   }, [handleNewRide]);
 
+  // Source 6: Realtime notification inserts — guarantees modal while driver app is already open
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+
+    const cleanupChannel = () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
+    };
+
+    const subscribeForUser = (userId: string) => {
+      if (cancelled || !userId) return;
+      cleanupChannel();
+
+      channel = supabase
+        .channel(`global-ride-offers-${userId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            const notif = payload.new as { type?: string; ride_id?: string | null };
+            if (notif.type === 'new_ride' && notif.ride_id) {
+              console.log('[GlobalGuard] 📡 Realtime notification:', notif.ride_id);
+              handleNewRide(notif.ride_id);
+              broadcastNewRide(notif.ride_id);
+            }
+          }
+        )
+        .subscribe((status) => {
+          console.log('[GlobalGuard] notifications channel:', status);
+        });
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user?.id) subscribeForUser(session.user.id);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const userId = session?.user?.id;
+      if (!userId) {
+        cleanupChannel();
+        return;
+      }
+      subscribeForUser(userId);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+      cleanupChannel();
+    };
+  }, [handleNewRide]);
+
+  // Source 7: polling fallback for unread ride offers.
+  // Mobile realtime can silently disconnect, so this guarantees the modal still appears.
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: number | null = null;
+
+    const stopPolling = () => {
+      if (intervalId) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const startPolling = (userId: string) => {
+      if (!userId || intervalId) return;
+
+      const poll = async () => {
+        if (cancelled) return;
+
+        const { data: pending } = await supabase
+          .from('notifications')
+          .select('ride_id, created_at')
+          .eq('user_id', userId)
+          .eq('type', 'new_ride')
+          .eq('is_read', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (pending?.ride_id) {
+          handleNewRide(pending.ride_id);
+          broadcastNewRide(pending.ride_id);
+          return;
+        }
+
+        const recoveryCutoff = new Date(Date.now() - 90 * 1000).toISOString();
+        const { data: dispatchedRide } = await supabase
+          .from('rides')
+          .select('id, updated_at, requested_at, created_at')
+          .eq('status', 'searching')
+          .is('driver_id', null)
+          .contains('notified_driver_ids', [userId])
+          .gte('updated_at', recoveryCutoff)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (dispatchedRide?.id) {
+          handleNewRide(dispatchedRide.id);
+          broadcastNewRide(dispatchedRide.id);
+        }
+      };
+
+      void poll();
+      intervalId = window.setInterval(poll, 3000);
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const userId = session?.user?.id;
+      if (userId) startPolling(userId);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      stopPolling();
+      const userId = session?.user?.id;
+      if (userId) startPolling(userId);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+      stopPolling();
+    };
+  }, [handleNewRide]);
+
   // === ASYNC DATA ENRICHMENT — does NOT block modal display ===
   useEffect(() => {
     if (!rideId) return;

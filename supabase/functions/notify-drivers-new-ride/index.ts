@@ -427,12 +427,16 @@ serve(async (req) => {
       return { enabled: true, escalatedTiers };
     };
 
-    // Get all online drivers with their current location
-    const { data: onlineDrivers, error: driverError } = await supabase
+    // Get dispatch-eligible drivers.
+    // Ignore stale online flags and require a real driver role to prevent ghost users
+    // from being treated as active dispatch targets.
+    const activeDriverCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+    const { data: onlineDriverProfiles, error: driverError } = await supabase
       .from("driver_profiles")
-      .select("user_id, current_lat, current_lng")
+      .select("user_id, current_lat, current_lng, updated_at")
       .eq("is_online", true)
-      .eq("is_verified", true);
+      .eq("is_verified", true)
+      .gte("updated_at", activeDriverCutoff);
 
     if (driverError) {
       console.error("Error fetching online drivers:", driverError);
@@ -442,51 +446,66 @@ serve(async (req) => {
       });
     }
 
-    // Cross-reference with driver_presence: only dispatch to drivers
-    // who are 'available' with a heartbeat within the last 60 seconds (MSN-visible)
+    let onlineDrivers = onlineDriverProfiles || [];
+    if (onlineDrivers.length > 0) {
+      const { data: driverRoles, error: driverRoleError } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "driver")
+        .in("user_id", onlineDrivers.map((driver) => driver.user_id));
+
+      if (driverRoleError) {
+        console.error("Error fetching driver roles:", driverRoleError);
+        return new Response(JSON.stringify({ error: "Failed to validate driver roles" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const driverRoleSet = new Set((driverRoles || []).map((row) => row.user_id));
+      onlineDrivers = onlineDrivers.filter((driver) => driverRoleSet.has(driver.user_id));
+    }
+
+    // driver_presence is used as a real-time GPS enhancement only.
     const presenceCutoff = new Date(Date.now() - 60_000).toISOString();
     const { data: activePresence } = await supabase
       .from("driver_presence")
-      .select("driver_id, lat, lng")
-      .eq("status", "available")
+      .select("driver_id, status, lat, lng")
       .gte("last_seen", presenceCutoff);
 
-    const activePresenceIds = new Set((activePresence || []).map((p: any) => p.driver_id));
     const presenceGps = new Map<string, { lat: number; lng: number }>();
     (activePresence || []).forEach((p: any) => {
-      if (p.lat && p.lng) presenceGps.set(p.driver_id, { lat: p.lat, lng: p.lng });
+      if (typeof p.lat === "number" && typeof p.lng === "number") {
+        presenceGps.set(p.driver_id, { lat: p.lat, lng: p.lng });
+      }
     });
 
-    // Only keep drivers who are visible in MSN (have active presence heartbeat)
-    const eligibleDrivers = (onlineDrivers || []).filter(d => activePresenceIds.has(d.user_id));
+    console.log(`Found ${onlineDrivers.length} dispatch-eligible drivers, ${activePresence?.length || 0} fresh presence rows`);
 
-    console.log(`Found ${onlineDrivers?.length || 0} online drivers, ${eligibleDrivers.length} with active presence (MSN-visible)`);
-
-    if (eligibleDrivers.length === 0) {
+    if (onlineDrivers.length === 0) {
       return new Response(JSON.stringify({ 
-        message: "No online drivers found with active presence", 
+        message: "No online drivers found", 
         sent: 0,
         nearbyDrivers: 0,
-        totalOnline: onlineDrivers?.length || 0,
-        totalWithPresence: 0,
+        totalOnline: 0 
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Sequential waterfall: only notify the SINGLE closest driver
+    // Sequential waterfall: only notify the SINGLE closest online driver
     // The escalation hook will handle notifying the next driver after 25s timeout
-    let nearbyDrivers = eligibleDrivers;
+    let nearbyDrivers = onlineDrivers;
     
     if (pickupLat && pickupLng) {
-      // Calculate distance for each driver and sort by closest
-      // Use GPS from driver_presence when available (more real-time)
-      const driversWithDistance = eligibleDrivers
+      // Calculate distance for each driver and sort by closest.
+      // Prefer driver_presence GPS when it's fresh, otherwise fall back to driver_profiles.
+      const driversWithDistance = onlineDrivers
         .map(driver => {
           const presLoc = presenceGps.get(driver.user_id);
-          const lat = presLoc?.lat || driver.current_lat;
-          const lng = presLoc?.lng || driver.current_lng;
-          if (!lat || !lng) return null;
+          const lat = presLoc?.lat ?? driver.current_lat;
+          const lng = presLoc?.lng ?? driver.current_lng;
+          if (typeof lat !== "number" || typeof lng !== "number") return null;
           return {
             ...driver,
             current_lat: lat,

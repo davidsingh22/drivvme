@@ -1,6 +1,52 @@
 import { supabase } from "@/integrations/supabase/client";
+import { setPendingRideFromNotification } from "@/lib/pendingRideStore";
+import { broadcastNewRide } from "@/lib/rideBroadcast";
 
 let lastId: string | null = null;
+
+function extractRideId(payload: any): string | null {
+  const data = payload?.additionalData || payload?.custom?.a || payload?.data || {};
+  return data?.ride_id || data?.rideId || null;
+}
+
+function forceSetNewRide(rideId: string) {
+  try {
+    localStorage.removeItem('pendingRideFromPush');
+    localStorage.removeItem('last_notified_ride');
+    delete (window as any).__FAST_PATH_RIDE_ID;
+  } catch {
+    // ignore storage issues
+  }
+
+  try {
+    localStorage.setItem('pendingRideFromPush', rideId);
+    localStorage.setItem('last_notified_ride', rideId);
+    (window as any).__FAST_PATH_RIDE_ID = rideId;
+  } catch {
+    // ignore storage issues
+  }
+
+  setPendingRideFromNotification(rideId);
+  broadcastNewRide(rideId);
+  console.log("🔔 Median push: force-set new ride:", rideId);
+}
+
+function routeAfterRideNotification() {
+  try {
+    const lastRoute = localStorage.getItem('last_route');
+    window.location.href = lastRoute === '/ride' ? '/ride' : '/driver';
+  } catch {
+    window.location.href = '/driver';
+  }
+}
+
+function handleRideNotificationOpen(payload: any) {
+  const rideId = extractRideId(payload);
+  if (!rideId) return;
+
+  forceSetNewRide(rideId);
+  routeAfterRideNotification();
+}
 
 /**
  * Median-native OneSignal auth linker.
@@ -59,10 +105,7 @@ export function initMedianOneSignalAuthLink() {
         // Median v2+ callback
         (window as any).gonative_onesignal_push_opened = (payload: any) => {
           console.log("🔔 Median push opened, payload:", payload);
-          const data = payload?.additionalData || payload?.custom?.a || {};
-          if (data.ride_id) {
-            window.location.href = "/ride";
-          }
+          handleRideNotificationOpen(payload);
         };
         console.log("✅ Median push open handler registered");
       }
@@ -74,10 +117,7 @@ export function initMedianOneSignalAuthLink() {
   // Also register the global handler for Median GoNative push opens
   (window as any).gonative_onesignal_push_opened = (payload: any) => {
     console.log("🔔 Median push opened (early), payload:", payload);
-    const data = payload?.additionalData || payload?.custom?.a || {};
-    if (data.ride_id) {
-      window.location.href = "/ride";
-    }
+    handleRideNotificationOpen(payload);
   };
 
   supabase.auth.onAuthStateChange((_event, session) => {
