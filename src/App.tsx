@@ -115,8 +115,6 @@ const InstantRiderPresence = () => {
   useRiderPresenceTracking();
   return null;
 };
-  return null;
-};
 
 // Global presence heartbeat for all authenticated users
 const PresenceTracker = () => {
