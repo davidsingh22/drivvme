@@ -3,18 +3,27 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
 
-const HEARTBEAT_MS = 15_000; // 15 seconds — matches rider cadence
+const HEARTBEAT_MS = 15_000;
+const OFFLINE_AFTER_MS = 60_000;
 
 /**
- * Global driver presence tracker — mirrors the rider's useRiderLocationTracking.
- * Runs at the App level for authenticated drivers to ensure driver_locations,
- * driver_presence, and presence tables stay fresh even on mobile resume.
+ * Global driver presence tracker.
+ * Mirrors the rider presence behavior so drivers show up in MSN immediately
+ * when the app reopens, even before the dashboard fully settles.
  */
 export function useDriverPresenceTracking() {
-  const { user, profile, roles, isDriver, driverProfile } = useAuth();
+  const { user, profile, roles, authLoading, driverProfile } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastWriteRef = useRef(0);
-  const mountedRef = useRef(true);
+
+  const shouldTrackDriver = !!user?.id && (roles.includes('driver') || (() => {
+    try {
+      return localStorage.getItem('last_route') === '/driver';
+    } catch {
+      return false;
+    }
+  })());
 
   const ensureSession = useCallback(async (): Promise<boolean> => {
     try {
@@ -31,43 +40,48 @@ export function useDriverPresenceTracking() {
     }
   }, []);
 
-  const upsertPresence = useCallback(async () => {
-    const userId = user?.id;
-    if (!userId || !mountedRef.current) return;
-
-    // Throttle — no more than once per 10s
-    if (Date.now() - lastWriteRef.current < 10_000) return;
+  const writePresence = useCallback(async (status: 'available' | 'offline' | 'on_trip' = 'available') => {
+    if (!user?.id) return;
 
     const hasSession = await ensureSession();
-    if (!hasSession) {
-      console.warn('[DriverPresence] No valid session — skipping heartbeat');
-      return;
-    }
+    if (!hasSession) return;
 
     const now = new Date().toISOString();
-    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user.email || userId;
-    const isOnline = driverProfile?.is_online ?? true;
+    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user.email || user.id;
+    const lat = driverProfile?.current_lat ?? 45.5017;
+    const lng = driverProfile?.current_lng ?? -73.5673;
+    const isOnline = status !== 'offline';
 
     lastWriteRef.current = Date.now();
 
-    // Update all 3 tables in parallel — same pattern the rider tracker uses
-    const [locRes, presRes, dpRes] = await Promise.all([
-      // driver_locations — upsert so it works even if row doesn't exist yet
+    const [driverLocationsRes, driverPresenceRes, presenceRes] = await Promise.all([
       supabase.from('driver_locations').upsert(
         {
-          driver_id: userId,
-          user_id: userId,
-          lat: driverProfile?.current_lat ?? 45.5017,
-          lng: driverProfile?.current_lng ?? -73.5673,
+          driver_id: user.id,
+          user_id: user.id,
+          lat,
+          lng,
           is_online: isOnline,
           updated_at: now,
         },
         { onConflict: 'driver_id' }
       ),
-      // presence table (generic — used by MSN)
+      supabase.from('driver_presence').upsert(
+        {
+          driver_id: user.id,
+          last_seen: now,
+          updated_at: now,
+          status,
+          current_screen: 'dashboard',
+          display_name: displayName,
+          lat,
+          lng,
+        },
+        { onConflict: 'driver_id' }
+      ),
       supabase.from('presence').upsert(
         {
-          user_id: userId,
+          user_id: user.id,
           role: 'DRIVER',
           display_name: displayName,
           source: 'web',
@@ -76,64 +90,66 @@ export function useDriverPresenceTracking() {
         },
         { onConflict: 'user_id' }
       ),
-      // driver_presence — upsert
-      supabase.from('driver_presence').upsert(
-        {
-          driver_id: userId,
-          last_seen: now,
-          updated_at: now,
-          status: isOnline ? 'available' : 'offline',
-          current_screen: 'dashboard',
-          display_name: displayName,
-        },
-        { onConflict: 'driver_id' }
-      ),
     ]);
 
-    if (locRes.error) console.warn('[DriverPresence] driver_locations error:', locRes.error.message);
-    if (presRes.error) console.warn('[DriverPresence] presence error:', presRes.error.message);
-    if (dpRes.error) console.warn('[DriverPresence] driver_presence error:', dpRes.error.message);
-  }, [user?.id, user?.email, profile?.first_name, profile?.last_name, driverProfile?.is_online, driverProfile?.current_lat, driverProfile?.current_lng, ensureSession]);
+    if (driverLocationsRes.error) console.warn('[DriverPresence] driver_locations error:', driverLocationsRes.error.message);
+    if (driverPresenceRes.error) console.warn('[DriverPresence] driver_presence error:', driverPresenceRes.error.message);
+    if (presenceRes.error) console.warn('[DriverPresence] presence error:', presenceRes.error.message);
+  }, [user?.id, user?.email, profile?.first_name, profile?.last_name, driverProfile?.current_lat, driverProfile?.current_lng, ensureSession]);
+
+  const heartbeat = useCallback(async () => {
+    if (!shouldTrackDriver || authLoading || !user?.id) return;
+    if (Date.now() - lastWriteRef.current < 5_000) return;
+
+    const status = driverProfile?.is_online === false ? 'offline' : 'available';
+    await writePresence(status);
+  }, [shouldTrackDriver, authLoading, user?.id, driverProfile?.is_online, writePresence]);
 
   useEffect(() => {
-    mountedRef.current = true;
+    if (authLoading || !shouldTrackDriver || !user?.id) return;
 
-    if (!user?.id || !isDriver) {
-      return () => { mountedRef.current = false; };
-    }
+    void heartbeat();
+    intervalRef.current = setInterval(heartbeat, HEARTBEAT_MS);
 
-    // Immediate write on mount
-    void upsertPresence();
-
-    // Heartbeat interval
-    intervalRef.current = setInterval(upsertPresence, HEARTBEAT_MS);
-
-    // Visibility change — aggressive recovery on app resume (same as rider)
-    const handleVisibility = async () => {
+    const resume = () => {
       if (document.visibilityState === 'visible') {
-        lastWriteRef.current = 0; // force through throttle
-        void upsertPresence();
+        if (offlineTimerRef.current) {
+          clearTimeout(offlineTimerRef.current);
+          offlineTimerRef.current = null;
+        }
+        lastWriteRef.current = 0;
+        void heartbeat();
       }
     };
-    const handleFocus = () => {
-      lastWriteRef.current = 0;
-      void upsertPresence();
-    };
-    const handlePageShow = () => {
-      lastWriteRef.current = 0;
-      void upsertPresence();
+
+    const hide = () => {
+      if (document.visibilityState === 'hidden') {
+        offlineTimerRef.current = setTimeout(() => {
+          void writePresence('offline');
+        }, OFFLINE_AFTER_MS);
+      }
     };
 
-    document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('pageshow', handlePageShow);
+    const authSub = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        lastWriteRef.current = 0;
+        void heartbeat();
+      }
+    });
+
+    document.addEventListener('visibilitychange', hide);
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('pageshow', resume);
 
     return () => {
-      mountedRef.current = false;
       if (intervalRef.current) clearInterval(intervalRef.current);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('pageshow', handlePageShow);
+      if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+      authSub.data.subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', hide);
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('pageshow', resume);
     };
-  }, [user?.id, isDriver, upsertPresence]);
+  }, [authLoading, shouldTrackDriver, user?.id, heartbeat, writePresence]);
 }
