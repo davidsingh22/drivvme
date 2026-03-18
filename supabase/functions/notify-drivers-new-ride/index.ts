@@ -427,12 +427,16 @@ serve(async (req) => {
       return { enabled: true, escalatedTiers };
     };
 
-    // Get all online drivers with their current location
-    const { data: onlineDrivers, error: driverError } = await supabase
+    // Get dispatch-eligible drivers.
+    // Ignore stale online flags and require a real driver role to prevent ghost users
+    // from being treated as active dispatch targets.
+    const activeDriverCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+    const { data: onlineDriverProfiles, error: driverError } = await supabase
       .from("driver_profiles")
-      .select("user_id, current_lat, current_lng")
+      .select("user_id, current_lat, current_lng, updated_at")
       .eq("is_online", true)
-      .eq("is_verified", true);
+      .eq("is_verified", true)
+      .gte("updated_at", activeDriverCutoff);
 
     if (driverError) {
       console.error("Error fetching online drivers:", driverError);
@@ -442,9 +446,27 @@ serve(async (req) => {
       });
     }
 
+    let onlineDrivers = onlineDriverProfiles || [];
+    if (onlineDrivers.length > 0) {
+      const { data: driverRoles, error: driverRoleError } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "driver")
+        .in("user_id", onlineDrivers.map((driver) => driver.user_id));
+
+      if (driverRoleError) {
+        console.error("Error fetching driver roles:", driverRoleError);
+        return new Response(JSON.stringify({ error: "Failed to validate driver roles" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const driverRoleSet = new Set((driverRoles || []).map((row) => row.user_id));
+      onlineDrivers = onlineDrivers.filter((driver) => driverRoleSet.has(driver.user_id));
+    }
+
     // driver_presence is used as a real-time GPS enhancement only.
-    // Do NOT hard-filter eligibility on it because the current driver app's
-    // online source of truth is driver_profiles.is_online, which is what MSN also shows.
     const presenceCutoff = new Date(Date.now() - 60_000).toISOString();
     const { data: activePresence } = await supabase
       .from("driver_presence")
@@ -458,9 +480,9 @@ serve(async (req) => {
       }
     });
 
-    console.log(`Found ${onlineDrivers?.length || 0} online drivers, ${activePresence?.length || 0} fresh presence rows`);
+    console.log(`Found ${onlineDrivers.length} dispatch-eligible drivers, ${activePresence?.length || 0} fresh presence rows`);
 
-    if (!onlineDrivers || onlineDrivers.length === 0) {
+    if (onlineDrivers.length === 0) {
       return new Response(JSON.stringify({ 
         message: "No online drivers found", 
         sent: 0,
