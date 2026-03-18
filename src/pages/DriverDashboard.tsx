@@ -806,10 +806,10 @@ const DriverDashboard = () => {
 
   // Push-based ride offer listener — no polling, no feed.
   // Listen for in-app notifications of type "new_ride" to trigger the offer modal.
-  // Use a unique channel name per user to avoid conflicts across re-renders.
+  // Use session user id first so the listener is active even if context hydration is slow.
   useEffect(() => {
-    if (!user?.id) return;
-    const userId = user.id;
+    const userId = session?.user?.id || user?.id;
+    if (!userId) return;
 
     const channelName = `driver-ride-offers-${userId}-${Date.now()}`;
     console.log('[Realtime] 📡 Subscribing to notifications channel:', channelName);
@@ -929,7 +929,7 @@ const DriverDashboard = () => {
       console.log('[Realtime] 🔌 Removing channel:', channelName);
       supabase.removeChannel(channel);
     };
-  }, [user?.id]);
+  }, [session?.user?.id, user?.id]);
 
   // Watch alerted ride for cancellation — dismiss modal if rider cancels
   // Uses BOTH realtime (may fail due to RLS on cancelled rows) AND polling fallback
