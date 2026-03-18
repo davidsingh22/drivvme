@@ -442,6 +442,72 @@ const DriverDashboard = () => {
     }
   }, [session?.user?.id, session?.user?.email, user?.email, isOnline, currentRide]);
 
+  // === IMMEDIATE driver_presence upsert on mount — no waiting for roles ===
+  const presenceBootedRef = useRef(false);
+  useEffect(() => {
+    const driverUserId = session?.user?.id;
+    if (!driverUserId || presenceBootedRef.current) return;
+    presenceBootedRef.current = true;
+
+    const now = new Date().toISOString();
+    const displayName = user?.email || session?.user?.email || driverUserId;
+
+    // Fire-and-forget upsert — makes driver appear in MSN instantly
+    supabase
+      .from('driver_presence')
+      .upsert(
+        {
+          driver_id: driverUserId,
+          status: 'available',
+          current_screen: 'driver_home',
+          last_seen: now,
+          updated_at: now,
+          display_name: displayName,
+        },
+        { onConflict: 'driver_id' }
+      )
+      .then(({ error }) => {
+        if (error) console.warn('[Presence] immediate upsert failed:', error);
+        else console.log('[Presence] ✅ Driver immediately visible in MSN');
+      });
+  }, [session?.user?.id]);
+
+  // === 30s heartbeat for driver_presence ===
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    const driverUserId = session?.user?.id;
+    if (!driverUserId) return;
+
+    // Clear any existing heartbeat
+    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+
+    heartbeatRef.current = setInterval(() => {
+      const now = new Date().toISOString();
+      const hasRide = !!currentRideRef.current;
+      supabase
+        .from('driver_presence')
+        .upsert(
+          {
+            driver_id: driverUserId,
+            status: hasRide ? 'on_trip' : (isOnline ? 'available' : 'offline'),
+            current_screen: hasRide ? 'ride' : 'dashboard',
+            last_seen: now,
+            updated_at: now,
+            display_name: user?.email || session?.user?.email || driverUserId,
+          },
+          { onConflict: 'driver_id' }
+        )
+        .then(({ error }) => {
+          if (error) console.warn('[Presence] heartbeat failed:', error);
+        });
+    }, 30_000);
+
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    };
+  }, [session?.user?.id, isOnline]);
+
+  // === touchDriverActivity on mount + visibility/focus ===
   useEffect(() => {
     if (!session?.user?.id) return;
     void touchDriverActivity('mount');
@@ -452,6 +518,22 @@ const DriverDashboard = () => {
 
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
+        // Also re-upsert presence immediately on resume
+        const now = new Date().toISOString();
+        supabase
+          .from('driver_presence')
+          .upsert(
+            {
+              driver_id: session.user.id,
+              status: currentRideRef.current ? 'on_trip' : (isOnline ? 'available' : 'offline'),
+              current_screen: currentRideRef.current ? 'ride' : 'driver_home',
+              last_seen: now,
+              updated_at: now,
+              display_name: user?.email || session?.user?.email || session.user.id,
+            },
+            { onConflict: 'driver_id' }
+          )
+          .then(() => {});
         void touchDriverActivity('visibilitychange');
       }
     };
@@ -467,7 +549,7 @@ const DriverDashboard = () => {
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pageshow', handlePageShow);
     };
-  }, [session?.user?.id, touchDriverActivity]);
+  }, [session?.user?.id, touchDriverActivity, isOnline]);
 
   // Restore active ride on page load (critical for iOS resume / page refresh)
   // NOTE: use the session user id (more reliable than the derived `user` field in edge cases)
