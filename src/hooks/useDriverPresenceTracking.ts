@@ -11,10 +11,11 @@ const OFFLINE_AFTER_MS = 60_000;
  * This is the "first packet" that makes the driver appear online in MSN < 1s.
  */
 async function fireInstantPresence(userId: string) {
-  const now = new Date().toISOString();
-  console.log("DRIVER PRESENCE SENT", now);
+  console.log("DRIVER PRESENCE SENT", new Date().toISOString());
 
+  const now = new Date().toISOString();
   // Fire all 3 tables in parallel — minimal payload, no blocking deps
+  // presence table uses DB trigger for timestamps; other tables still use client time
   const [dpRes, pRes, dlRes] = await Promise.all([
     supabase.from('driver_presence').upsert(
       {
@@ -31,8 +32,6 @@ async function fireInstantPresence(userId: string) {
         user_id: userId,
         role: 'DRIVER',
         source: 'web',
-        last_seen_at: now,
-        updated_at: now,
       },
       { onConflict: 'user_id' }
     ),
