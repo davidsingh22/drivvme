@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { ensureSupabaseSession } from '@/lib/sessionRecovery';
 
 const HEARTBEAT_MS = 15_000;
+const FAST_RETRY_MS = 1_200;
 
 type RiderScreen = 'home' | 'searching' | 'booking';
 
@@ -21,54 +23,73 @@ function detectRiderScreen(pathname = getPathname()): RiderScreen {
 }
 
 function shouldSkipRiderPresence(pathname = getPathname()) {
-  return pathname.startsWith('/driver') || pathname.startsWith('/admin') || pathname.startsWith('/login') || pathname.startsWith('/signup');
+  return pathname.startsWith('/driver') || pathname.startsWith('/admin');
 }
 
-async function fireInstantRiderPresence(userId: string, displayName?: string, pathname = getPathname()) {
+async function writeRiderPresence(userId: string, displayName?: string, pathname = getPathname()) {
   const now = new Date().toISOString();
-  console.log('RIDER PRESENCE FIRED', userId, now);
 
-  const { error } = await supabase.from('presence').upsert(
-    {
-      user_id: userId,
-      role: 'RIDER',
-      display_name: displayName || userId.slice(0, 8),
-      source: detectRiderScreen(pathname),
-      last_seen_at: now,
-      updated_at: now,
-    },
-    { onConflict: 'user_id' }
-  );
+  try {
+    const { error } = await supabase.from('presence').upsert(
+      {
+        user_id: userId,
+        role: 'RIDER',
+        display_name: displayName || userId.slice(0, 8),
+        source: detectRiderScreen(pathname),
+        last_seen_at: now,
+        updated_at: now,
+      },
+      { onConflict: 'user_id' }
+    );
 
-  if (error) console.warn('[RiderPresence] presence error:', error.message);
+    if (error) {
+      console.error('RIDER PRESENCE FAILED', error);
+      return false;
+    }
+
+    console.log('RIDER PRESENCE SENT', userId, detectRiderScreen(pathname), now);
+    return true;
+  } catch (error) {
+    console.error('RIDER PRESENCE FAILED', error);
+    return false;
+  }
 }
 
 export function useRiderPresenceTracking() {
-  const { user, profile, isDriver } = useAuth();
+  const { user, profile } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const instantFiredRef = useRef<string | null>(null);
 
   const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || user?.id || '';
 
-  const fireFromSession = useCallback(async () => {
+  const fireFromSession = useCallback(async (reason: string) => {
     const pathname = getPathname();
-    if (shouldSkipRiderPresence(pathname)) return;
+    if (shouldSkipRiderPresence(pathname)) return true;
 
-    const { data, error } = await supabase.auth.getSession();
-    if (error) {
-      console.warn('[RiderPresence] session lookup error:', error.message);
-      return;
+    const session = await ensureSupabaseSession();
+    if (!session?.user?.id) {
+      console.warn(`[RiderPresence] No session, cannot send rider presence (${reason})`);
+      return false;
     }
 
-    const sessionUser = data.session?.user;
-    const activeUserId = sessionUser?.id || user?.id;
-    if (!activeUserId) return;
-    if (isDriver) return;
+    const activeDisplayName = displayName || session.user.email || session.user.id;
+    const ok = await writeRiderPresence(session.user.id, activeDisplayName, pathname);
 
-    const activeDisplayName = displayName || sessionUser?.email || activeUserId;
-    await fireInstantRiderPresence(activeUserId, activeDisplayName, pathname);
-    instantFiredRef.current = activeUserId;
-  }, [displayName, isDriver, user?.id]);
+    if (ok) {
+      instantFiredRef.current = session.user.id;
+    }
+
+    return ok;
+  }, [displayName]);
+
+  const queueRetry = useCallback((reason: string) => {
+    if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+
+    retryTimeoutRef.current = setTimeout(() => {
+      void fireFromSession(reason);
+    }, FAST_RETRY_MS);
+  }, [fireFromSession]);
 
   useEffect(() => {
     if (!user?.id) {
@@ -77,26 +98,35 @@ export function useRiderPresenceTracking() {
   }, [user?.id]);
 
   useEffect(() => {
-    void fireFromSession();
-  }, [fireFromSession]);
+    void fireFromSession('app_open').then((ok) => {
+      if (!ok) queueRetry('app_open_retry');
+    });
+  }, [fireFromSession, queueRetry]);
 
   useEffect(() => {
-    if (!user?.id || isDriver || shouldSkipRiderPresence()) return;
+    if (!user?.id) return;
     if (instantFiredRef.current === user.id) return;
 
-    instantFiredRef.current = user.id;
-    void fireInstantRiderPresence(user.id, displayName);
-  }, [user?.id, isDriver, displayName]);
+    void fireFromSession('user_ready').then((ok) => {
+      if (!ok) queueRetry('user_ready_retry');
+    });
+  }, [user?.id, fireFromSession, queueRetry]);
 
   useEffect(() => {
+    const runPresenceFire = (reason: string) => {
+      void fireFromSession(reason).then((ok) => {
+        if (!ok) queueRetry(`${reason}_retry`);
+      });
+    };
+
     const onResume = () => {
       if (document.visibilityState === 'visible') {
-        void fireFromSession();
+        runPresenceFire('app_resume');
       }
     };
 
     const onFocus = () => {
-      void fireFromSession();
+      runPresenceFire('window_focus');
     };
 
     document.addEventListener('visibilitychange', onResume);
@@ -108,11 +138,11 @@ export function useRiderPresenceTracking() {
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('pageshow', onFocus);
     };
-  }, [fireFromSession]);
+  }, [fireFromSession, queueRetry]);
 
   useEffect(() => {
     intervalRef.current = setInterval(() => {
-      void fireFromSession();
+      void fireFromSession('heartbeat');
     }, HEARTBEAT_MS);
 
     return () => {
@@ -123,14 +153,35 @@ export function useRiderPresenceTracking() {
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event !== 'SIGNED_IN' && event !== 'TOKEN_REFRESHED') return;
-      if (!session?.user?.id) return;
+
+      if (!session?.user?.id) {
+        console.warn(`[RiderPresence] No session, cannot send rider presence (${event})`);
+        queueRetry(`auth_${event.toLowerCase()}_retry`);
+        return;
+      }
+
       if (shouldSkipRiderPresence()) return;
 
       const activeDisplayName = displayName || session.user.email || session.user.id;
-      void fireInstantRiderPresence(session.user.id, activeDisplayName);
-      instantFiredRef.current = session.user.id;
+
+      window.setTimeout(() => {
+        void writeRiderPresence(session.user.id, activeDisplayName).then((ok) => {
+          if (!ok) {
+            queueRetry(`auth_${event.toLowerCase()}_retry`);
+            return;
+          }
+
+          instantFiredRef.current = session.user.id;
+        });
+      }, 0);
     });
 
     return () => subscription.unsubscribe();
-  }, [displayName]);
+  }, [displayName, queueRetry]);
+
+  useEffect(() => {
+    return () => {
+      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+    };
+  }, []);
 }
