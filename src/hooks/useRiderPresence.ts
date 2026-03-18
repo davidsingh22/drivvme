@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 type ScreenName = 'home' | 'searching' | 'booking';
 
-const HEARTBEAT_MS = 30_000;
+const HEARTBEAT_MS = 15_000;
 const OFFLINE_AFTER_MS = 60_000;
 
 /**
