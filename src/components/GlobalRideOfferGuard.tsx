@@ -278,24 +278,22 @@ export function GlobalRideOfferGuard() {
       const poll = async () => {
         if (cancelled) return;
 
-        // PRIMARY: Check rides table directly for rides assigned to this driver
-        // This is the authoritative source — no dependency on notifications
-        const { data: assignedRide } = await supabase
-          .from('rides')
-          .select('id, updated_at, requested_at, created_at')
-          .eq('driver_id', userId)
-          .in('status', ['driver_assigned', 'driver_en_route', 'arrived'])
-          .order('updated_at', { ascending: false })
+        const { data: pending } = await supabase
+          .from('notifications')
+          .select('ride_id, created_at')
+          .eq('user_id', userId)
+          .eq('type', 'new_ride')
+          .eq('is_read', false)
+          .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        // If driver already has an assigned ride, don't show offer modal
-        // (that's handled by DriverDashboard's restoreActiveRide)
-        if (assignedRide) {
+        if (pending?.ride_id) {
+          handleNewRide(pending.ride_id);
+          broadcastNewRide(pending.ride_id);
           return;
         }
 
-        // SECONDARY: Check for searching rides where this driver was notified
         const recoveryCutoff = new Date(Date.now() - 90 * 1000).toISOString();
         const { data: dispatchedRide } = await supabase
           .from('rides')
@@ -311,23 +309,6 @@ export function GlobalRideOfferGuard() {
         if (dispatchedRide?.id) {
           handleNewRide(dispatchedRide.id);
           broadcastNewRide(dispatchedRide.id);
-          return;
-        }
-
-        // TERTIARY: Check unread notifications as last resort
-        const { data: pending } = await supabase
-          .from('notifications')
-          .select('ride_id, created_at')
-          .eq('user_id', userId)
-          .eq('type', 'new_ride')
-          .eq('is_read', false)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (pending?.ride_id) {
-          handleNewRide(pending.ride_id);
-          broadcastNewRide(pending.ride_id);
         }
       };
 
