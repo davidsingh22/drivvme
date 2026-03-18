@@ -101,7 +101,7 @@ export function useDriverPresenceTracking() {
             { onConflict: 'driver_id' }
           );
           void supabase.from('presence').upsert(
-            { user_id: user.id, role: 'DRIVER', source: 'web', last_seen_at: now, updated_at: now },
+            { user_id: user.id, role: 'DRIVER', source: 'web' },
             { onConflict: 'user_id' }
           );
           void supabase.from('driver_locations').update({ is_online: false, updated_at: now }).eq('driver_id', user.id);
