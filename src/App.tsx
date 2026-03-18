@@ -111,7 +111,8 @@ const RiderLocationTracker = () => {
   return null;
 };
 
-const InstantRiderPresence = () => {
+// Mounted OUTSIDE routes, directly inside AuthProvider
+const RiderPresenceGlobal = () => {
   useRiderPresenceTracking();
   return null;
 };
