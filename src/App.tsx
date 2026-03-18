@@ -119,40 +119,69 @@ const PresenceTracker = () => {
 const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
   const navigate = useNavigate();
-  const [checked, setChecked] = useState(false);
+  const [checked, setChecked] = useState(() => {
+    // Fast-path: if localStorage says last route was /driver, render immediately
+    try {
+      return localStorage.getItem('last_route') === '/driver';
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
-    if (authLoading) return;
-    if (!session?.user?.id) {
-      navigate('/login', { replace: true });
+    if (checked && !authLoading) {
+      // Already rendering — still verify role in background
+      if (session?.user?.id && !isDriver) {
+        supabase.rpc('is_driver', { _user_id: session.user.id }).then(({ data }) => {
+          if (!data) navigate('/ride', { replace: true });
+        }).catch(() => {});
+      }
       return;
+    }
+
+    // Safety timeout: never block longer than 3s
+    const timeout = setTimeout(() => {
+      setChecked(true);
+    }, 3000);
+
+    if (authLoading) return () => clearTimeout(timeout);
+
+    if (!session?.user?.id) {
+      clearTimeout(timeout);
+      navigate('/login', { replace: true });
+      return () => {};
     }
 
     let cancelled = false;
     (async () => {
       try {
-        // Fast path: context already knows
         if (isDriver) {
           if (!cancelled) setChecked(true);
           return;
         }
 
-        // Hard guarantee: backend role check
-        const { data } = await supabase.rpc('is_driver', { _user_id: session.user.id });
+        const raceResult = await Promise.race([
+          supabase.rpc('is_driver', { _user_id: session.user.id }),
+          new Promise<{ data: null }>((resolve) => setTimeout(() => resolve({ data: null }), 4000)),
+        ]);
         if (cancelled) return;
-        if (!data) {
+        if (raceResult.data === false) {
           navigate('/ride', { replace: true });
           return;
         }
       } finally {
+        clearTimeout(timeout);
         if (!cancelled) setChecked(true);
       }
     })();
 
-    return () => { cancelled = true; };
-  }, [authLoading, session?.user?.id, isDriver, navigate]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [authLoading, session?.user?.id, isDriver, navigate, checked]);
 
-  if (authLoading || (session?.user?.id && !checked)) {
+  if (!checked) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading…</div>
