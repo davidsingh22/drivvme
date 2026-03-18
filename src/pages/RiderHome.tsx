@@ -8,7 +8,6 @@ import { getValidAccessToken } from '@/lib/sessionRecovery';
 import riderHomeBg from '@/assets/rider-home-bg.png';
 import Logo from '@/components/Logo';
 import { clearMapboxTokenCache } from '@/hooks/useMapboxToken';
-import { useRiderPresence } from '@/hooks/useRiderPresence';
 
 function detectSource(): 'web' | 'ios' | 'android' {
   const ua = (navigator.userAgent || '').toLowerCase();
@@ -60,9 +59,6 @@ const RiderHome = () => {
   const navigate = useNavigate();
   const { isAdmin, user, profile } = useAuth();
   const gpsStarted = useRef(false);
-
-  // Track rider presence on home screen
-  useRiderPresence('home');
 
   
 

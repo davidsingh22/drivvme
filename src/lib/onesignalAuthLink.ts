@@ -59,7 +59,7 @@ export function initOneSignalAuthLink() {
               if (data.ride_id) {
                 forceSetNewRide(data.ride_id);
                 const lastRoute = localStorage.getItem('last_route');
-                window.location.href = lastRoute === '/ride' ? '/ride' : '/driver';
+                window.location.href = lastRoute === '/driver' ? '/driver' : '/ride';
               }
             });
 

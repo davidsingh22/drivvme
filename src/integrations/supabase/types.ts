@@ -248,42 +248,6 @@ export type Database = {
         }
         Relationships: []
       }
-      driver_presence: {
-        Row: {
-          current_screen: string
-          display_name: string | null
-          driver_id: string
-          id: string
-          last_seen: string
-          lat: number | null
-          lng: number | null
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          current_screen?: string
-          display_name?: string | null
-          driver_id: string
-          id?: string
-          last_seen?: string
-          lat?: number | null
-          lng?: number | null
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          current_screen?: string
-          display_name?: string | null
-          driver_id?: string
-          id?: string
-          last_seen?: string
-          lat?: number | null
-          lng?: number | null
-          status?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
       driver_profiles: {
         Row: {
           agreement_accepted: boolean | null
@@ -873,39 +837,6 @@ export type Database = {
           latitude?: number | null
           lng?: number
           longitude?: number | null
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
-      rider_presence: {
-        Row: {
-          current_screen: string
-          display_name: string | null
-          id: string
-          last_seen: string
-          role: string
-          status: string
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          current_screen?: string
-          display_name?: string | null
-          id?: string
-          last_seen?: string
-          role?: string
-          status?: string
-          updated_at?: string
-          user_id: string
-        }
-        Update: {
-          current_screen?: string
-          display_name?: string | null
-          id?: string
-          last_seen?: string
-          role?: string
-          status?: string
           updated_at?: string
           user_id?: string
         }

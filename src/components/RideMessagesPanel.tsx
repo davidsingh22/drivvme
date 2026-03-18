@@ -51,7 +51,7 @@ export default function RideMessagesPanel() {
   const { toast } = useToast();
   
   const [activeRide, setActiveRide] = useState<ActiveRide | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [messages, setMessages] = useState<RideMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -67,11 +67,10 @@ export default function RideMessagesPanel() {
   // Fetch active ride for current driver (rides.driver_id = auth.uid())
   const fetchActiveRide = useCallback(async () => {
     if (!currentUserId) {
-      // No user yet — don't show loading, just show the "accept a ride" message
+      setIsLoading(false);
+      setLastError('No currentUserId');
       return;
     }
-
-    setIsLoading(true);
 
     try {
       setLastError(null);

@@ -378,16 +378,12 @@ serve(async (req) => {
     const config = tierConfig[tier as keyof typeof tierConfig] || tierConfig[1];
     const effectiveMaxEta = maxEtaMinutes ?? config.maxEta;
 
-    // Get dispatch-eligible drivers with priority status.
-    // Ignore stale online flags and require a real driver role to prevent ghost users
-    // from being treated as active dispatch targets.
-    const activeDriverCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
-    const { data: onlineDriverProfiles, error: driverError } = await supabase
+    // Get all online drivers with their current location and priority status
+    const { data: onlineDrivers, error: driverError } = await supabase
       .from("driver_profiles")
-      .select("user_id, current_lat, current_lng, priority_driver_until, updated_at")
+      .select("user_id, current_lat, current_lng, priority_driver_until")
       .eq("is_online", true)
-      .eq("is_verified", true)
-      .gte("updated_at", activeDriverCutoff);
+      .eq("is_verified", true);
 
     if (driverError) {
       console.error("Error fetching online drivers:", driverError);
@@ -397,43 +393,9 @@ serve(async (req) => {
       });
     }
 
-    let onlineDrivers = onlineDriverProfiles || [];
-    if (onlineDrivers.length > 0) {
-      const { data: driverRoles, error: driverRoleError } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", "driver")
-        .in("user_id", onlineDrivers.map((driver) => driver.user_id));
+    console.log("Found online drivers:", onlineDrivers?.length || 0);
 
-      if (driverRoleError) {
-        console.error("Error fetching driver roles:", driverRoleError);
-        return new Response(JSON.stringify({ error: "Failed to validate driver roles" }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const driverRoleSet = new Set((driverRoles || []).map((row) => row.user_id));
-      onlineDrivers = onlineDrivers.filter((driver) => driverRoleSet.has(driver.user_id));
-    }
-
-    // driver_presence is used as a real-time GPS enhancement only.
-    const presenceCutoff = new Date(Date.now() - 60_000).toISOString();
-    const { data: activePresence } = await supabase
-      .from("driver_presence")
-      .select("driver_id, status, lat, lng")
-      .gte("last_seen", presenceCutoff);
-
-    const presenceGps = new Map<string, { lat: number; lng: number }>();
-    (activePresence || []).forEach((p: any) => {
-      if (typeof p.lat === "number" && typeof p.lng === "number") {
-        presenceGps.set(p.driver_id, { lat: p.lat, lng: p.lng });
-      }
-    });
-
-    console.log(`[Tier ${tier}] Found ${onlineDrivers.length} dispatch-eligible drivers, ${activePresence?.length || 0} fresh presence rows`);
-
-    if (onlineDrivers.length === 0) {
+    if (!onlineDrivers || onlineDrivers.length === 0) {
       return new Response(JSON.stringify({ 
         message: "No online drivers found", 
         sent: 0,
@@ -460,29 +422,27 @@ serve(async (req) => {
     });
 
     // Filter and sort drivers by distance
-    // Prefer driver_presence GPS when it's fresh, otherwise fall back to driver_profiles.
     const driversWithDistance: DriverWithDistance[] = onlineDrivers
       .filter(driver => !mergedExcludedDriverIds.includes(driver.user_id))
       .map(driver => {
+        // For busy drivers, use their dropoff location instead
         const dropoffLocation = busyDriverDropoffs.get(driver.user_id);
-        const presLoc = presenceGps.get(driver.user_id);
         
         let distance = Infinity;
         if (dropoffLocation) {
           distance = calculateDistanceKm(pickupLat, pickupLng, dropoffLocation.lat, dropoffLocation.lng);
-        } else if (presLoc) {
-          distance = calculateDistanceKm(pickupLat, pickupLng, presLoc.lat, presLoc.lng);
         } else if (driver.current_lat && driver.current_lng) {
           distance = calculateDistanceKm(pickupLat, pickupLng, driver.current_lat, driver.current_lng);
         }
+        // Drivers without location are excluded (distance stays Infinity)
 
         const isPriority = driver.priority_driver_until && 
           new Date(driver.priority_driver_until) > new Date();
 
         return {
           user_id: driver.user_id,
-          current_lat: presLoc?.lat || driver.current_lat,
-          current_lng: presLoc?.lng || driver.current_lng,
+          current_lat: driver.current_lat,
+          current_lng: driver.current_lng,
           distance_km: distance,
           is_priority: !!isPriority,
         };

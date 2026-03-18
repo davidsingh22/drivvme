@@ -5,7 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell, Search, Home, ShoppingCart } from 'lucide-react';
+import { ArrowLeft, Users, Zap, CheckCircle, Car, Bell } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Navbar from '@/components/Navbar';
 
@@ -96,7 +96,6 @@ interface RideActivityRow {
 
 const ONLINE_THRESHOLD_MS = 5 * 60_000;
 const LOCATION_FEED_COOLDOWN_MS = 45_000;
-const DRIVER_PROFILE_FALLBACK_MS = 12 * 60 * 60_000;
 const ACTIVE_RIDER_RIDE_STATUSES = ['searching', 'pending_payment', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'] as const;
 const BOOKING_SUCCESS_STATUSES = new Set(['confirmed', 'paid']);
 
@@ -131,16 +130,6 @@ export default function LiveMonitor() {
   const [activeOffers, setActiveOffers] = useState<ActiveRideOffer[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Rider presence state
-  interface RiderPresenceRow {
-    user_id: string;
-    display_name: string | null;
-    status: string;
-    current_screen: string;
-    last_seen: string;
-  }
-  const [riderPresence, setRiderPresence] = useState<RiderPresenceRow[]>([]);
-
   const feedIdsRef = useRef(new Set<string>());
   const profileNameRef = useRef(new Map<string, string>());
   const locationFeedCooldownRef = useRef(new Map<string, number>());
@@ -169,33 +158,6 @@ export default function LiveMonitor() {
   useEffect(() => {
     if (!authLoading && !isAdmin) navigate('/login', { replace: true });
   }, [authLoading, isAdmin, navigate]);
-
-  // ── Rider Presence: fetch + realtime ──
-  const loadRiderPresence = useCallback(async () => {
-    const cutoff = new Date(Date.now() - 60_000).toISOString();
-    const { data } = await supabase
-      .from('rider_presence' as any)
-      .select('user_id, display_name, status, current_screen, last_seen')
-      .eq('status', 'online')
-      .gte('last_seen', cutoff);
-    if (data) setRiderPresence(data as any);
-  }, []);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    loadRiderPresence();
-    const interval = setInterval(loadRiderPresence, 15_000);
-    const channel = supabase
-      .channel('rider-presence-monitor')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_presence' }, () => {
-        loadRiderPresence();
-      })
-      .subscribe();
-    return () => {
-      clearInterval(interval);
-      supabase.removeChannel(channel);
-    };
-  }, [isAdmin, loadRiderPresence]);
 
   const getCachedName = useCallback((uid: string) => {
     return profileNameRef.current.get(uid) || uid.slice(0, 8);
@@ -253,7 +215,6 @@ export default function LiveMonitor() {
 
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
-    const driverProfileFallbackCutoff = new Date(Date.now() - DRIVER_PROFILE_FALLBACK_MS).toISOString();
 
     const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes, onlineDriverProfilesRes] = await Promise.all([
       supabase
@@ -276,12 +237,12 @@ export default function LiveMonitor() {
         .from('presence')
         .select('user_id, last_seen_at, role')
         .gte('last_seen_at', cutoff),
-      // Keep driver-profile fallback, but ignore stale rows older than 12h.
+      // Always show drivers who are flagged as online in their profile,
+      // even if their heartbeat is stale (e.g. app backgrounded on mobile)
       supabase
         .from('driver_profiles')
         .select('user_id, updated_at')
-        .eq('is_online', true)
-        .gte('updated_at', driverProfileFallbackCutoff),
+        .eq('is_online', true),
     ]);
 
     if (riderRes.error || driverRes.error || activeRidesRes.error) {
@@ -348,16 +309,13 @@ export default function LiveMonitor() {
       }
     });
 
-    // Drivers flagged as is_online=true in driver_profiles are a fallback source,
-    // but they should also refresh the timestamp when GPS/location rows are stale.
+    // Drivers flagged as is_online=true in driver_profiles always appear,
+    // even if heartbeat/location data is stale (backgrounded app)
     ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
-      if (!driverRoleSet.has(row.user_id)) return;
+      driverRoleSet.add(row.user_id);
       roleByUserRef.current.set(row.user_id, 'driver');
-
-      const ts = row.updated_at || new Date().toISOString();
-      const prev = allUsersLatest.get(row.user_id);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(row.user_id, ts);
+      if (!allUsersLatest.has(row.user_id)) {
+        allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
       }
     });
 
@@ -393,7 +351,7 @@ export default function LiveMonitor() {
     const [ridesRes, riderLocRes, driverLocRes, rolesRes] = await Promise.all([
       supabase
         .from('rides')
-        .select('id, rider_id, driver_id, status, pickup_address, dropoff_address, estimated_fare, created_at, updated_at')
+        .select('id, rider_id, status, pickup_address, dropoff_address, estimated_fare, created_at, updated_at')
         .gte('updated_at', tenMinAgo)
         .order('updated_at', { ascending: false })
         .limit(40),
@@ -420,7 +378,6 @@ export default function LiveMonitor() {
 
     const riderIds = [
       ...(ridesRes.data || []).map((r) => r.rider_id).filter(Boolean) as string[],
-      ...(ridesRes.data || []).map((r) => (r as any).driver_id).filter(Boolean) as string[],
       ...((riderLocRes.data || []).map((r) => r.user_id)),
       ...((driverLocRes.data || []).map((d) => d.user_id)),
     ];
@@ -469,35 +426,17 @@ export default function LiveMonitor() {
       const riderName = ride.rider_id ? getCachedName(ride.rider_id) : 'Unknown';
       const status = String(ride.status || '').toLowerCase();
       const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
-      const route = `${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
-      const driverId = (ride as any).driver_id as string | null;
-      const driverName = driverId ? getCachedName(driverId) : null;
 
-      let message: string;
-      if (status === 'driver_assigned' && driverName) {
-        message = `${driverName} accepted ${riderName}'s ride — ${route}`;
-      } else if (status === 'driver_en_route' && driverName) {
-        message = `${driverName} is on the way to pick up ${riderName} — ${route}`;
-      } else if (status === 'arrived' && driverName) {
-        message = `${driverName} has arrived at pickup for ${riderName}`;
-      } else if (status === 'in_progress' && driverName) {
-        message = `${driverName} started the ride with ${riderName} — ${route}`;
-      } else if (status === 'completed' && driverName) {
-        message = `${driverName} completed the ride with ${riderName} — ${route}`;
-      } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
-        message = `${riderName}: Booking Successful`;
-      } else if (status === 'searching') {
-        message = `${riderName} is booking a ride — ${route} ($${Number(ride.estimated_fare || 0).toFixed(2)})`;
-      } else {
-        message = `${riderName}: ${statusInfo.label} — ${route}`;
-      }
-
-      const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
+      const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived'].includes(status) ? 'both' : 'rider';
 
       items.push({
         id: `ride-${ride.id}-${status}`,
         icon: statusInfo.icon,
-        message,
+        message: BOOKING_SUCCESS_STATUSES.has(status)
+          ? `${riderName}: Booking Successful`
+          : status === 'searching'
+            ? `${riderName} is booking a ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'} ($${Number(ride.estimated_fare || 0).toFixed(2)})`
+            : `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
         source: 'rides',
         created_at: ride.updated_at || ride.created_at,
         feedRole,
@@ -569,30 +508,21 @@ export default function LiveMonitor() {
         if (driverId) await upsertProfileNames([driverId]);
 
         const riderName = riderId ? getCachedName(riderId) : 'Unknown';
-        const driverName = driverId ? getCachedName(driverId) : null;
         const status = String(ride.status || '').toLowerCase();
         const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
-        const route = `${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
 
-        // Show driver-centric messages for ride lifecycle events
+        // If driver_assigned, show who accepted
         let message: string;
-        if (status === 'driver_assigned' && driverName) {
-          message = `${driverName} accepted ${riderName}'s ride — ${route}`;
-        } else if (status === 'driver_en_route' && driverName) {
-          message = `${driverName} is on the way to pick up ${riderName} — ${route}`;
-        } else if (status === 'arrived' && driverName) {
-          message = `${driverName} has arrived at pickup for ${riderName}`;
-        } else if (status === 'in_progress' && driverName) {
-          message = `${driverName} started the ride with ${riderName} — ${route}`;
-        } else if (status === 'completed' && driverName) {
-          message = `${driverName} completed the ride with ${riderName} — ${route}`;
+        if (status === 'driver_assigned' && driverId) {
+          const driverName = getCachedName(driverId);
+          message = `${driverName} accepted ${riderName}'s ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
         } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
           message = `${riderName}: Booking Successful`;
         } else {
-          message = `${riderName}: ${statusInfo.label} — ${route}`;
+          message = `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
         }
 
-        const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
+        const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
 
         pushFeedItem({
           id: `ride-${ride.id}-${status}`,
@@ -720,28 +650,19 @@ export default function LiveMonitor() {
           if (driverId) await upsertProfileNames([driverId]);
 
           const riderName = riderId ? getCachedName(riderId) : 'Unknown';
-          const driverName = driverId ? getCachedName(driverId) : null;
           const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
-          const route = `${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
 
           let message: string;
-          if (status === 'driver_assigned' && driverName) {
-            message = `${driverName} accepted ${riderName}'s ride — ${route}`;
-          } else if (status === 'driver_en_route' && driverName) {
-            message = `${driverName} is on the way to pick up ${riderName} — ${route}`;
-          } else if (status === 'arrived' && driverName) {
-            message = `${driverName} has arrived at pickup for ${riderName}`;
-          } else if (status === 'in_progress' && driverName) {
-            message = `${driverName} started the ride with ${riderName} — ${route}`;
-          } else if (status === 'completed' && driverName) {
-            message = `${driverName} completed the ride with ${riderName} — ${route}`;
+          if (status === 'driver_assigned' && driverId) {
+            const driverName = getCachedName(driverId);
+            message = `${driverName} accepted ${riderName}'s ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
           } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
             message = `${riderName}: Booking Successful`;
           } else {
-            message = `${riderName}: ${statusInfo.label} — ${route}`;
+            message = `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
           }
 
-          const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
+          const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
 
           // Remove active offers for cancelled/completed/assigned rides
           if (['driver_assigned', 'cancelled', 'completed'].includes(status)) {
@@ -785,22 +706,6 @@ export default function LiveMonitor() {
   const bookingEvents5m = feed.filter((e) => e.icon === '⚡' && e.created_at >= fiveMinAgo).length;
   const successEvents5m = feed.filter((e) => e.message.includes('Booking Successful') && e.created_at >= fiveMinAgo).length;
 
-  // Rider presence breakdown
-  const ridersOnHome = riderPresence.filter((r) => r.current_screen === 'home');
-  const ridersSearching = riderPresence.filter((r) => r.current_screen === 'searching');
-  const ridersBooking = riderPresence.filter((r) => r.current_screen === 'booking');
-
-  const screenIcon = (screen: string) => {
-    if (screen === 'searching') return <Search className="h-3.5 w-3.5 text-yellow-500" />;
-    if (screen === 'booking') return <ShoppingCart className="h-3.5 w-3.5 text-green-500" />;
-    return <Home className="h-3.5 w-3.5 text-blue-500" />;
-  };
-  const screenLabel = (screen: string) => {
-    if (screen === 'searching') return 'Searching';
-    if (screen === 'booking') return 'Booking';
-    return 'Home';
-  };
-
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
@@ -842,61 +747,6 @@ export default function LiveMonitor() {
             </div>
           </Card>
         </div>
-
-        {/* Rider Presence Breakdown */}
-        <div className="grid grid-cols-3 gap-4">
-          <Card className="p-4 flex items-center gap-3 border-blue-500/30">
-            <Home className="h-6 w-6 text-blue-500" />
-            <div>
-              <div className="text-2xl font-bold">{ridersOnHome.length}</div>
-              <div className="text-xs text-muted-foreground">On Home</div>
-            </div>
-          </Card>
-          <Card className="p-4 flex items-center gap-3 border-yellow-500/30">
-            <Search className="h-6 w-6 text-yellow-500" />
-            <div>
-              <div className="text-2xl font-bold">{ridersSearching.length}</div>
-              <div className="text-xs text-muted-foreground">Searching</div>
-            </div>
-          </Card>
-          <Card className="p-4 flex items-center gap-3 border-green-500/30">
-            <ShoppingCart className="h-6 w-6 text-green-500" />
-            <div>
-              <div className="text-2xl font-bold">{ridersBooking.length}</div>
-              <div className="text-xs text-muted-foreground">Booking</div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Rider Presence Detail List */}
-        {riderPresence.length > 0 && (
-          <Card className="p-4">
-            <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-              <Users className="h-5 w-5 text-primary" />
-              Rider Presence (Real-Time)
-              <Badge variant="secondary" className="ml-auto">{riderPresence.length}</Badge>
-            </h2>
-            <div className="space-y-2 max-h-[300px] overflow-y-auto">
-              {riderPresence
-                .sort((a, b) => new Date(b.last_seen).getTime() - new Date(a.last_seen).getTime())
-                .map((r) => (
-                  <div key={r.user_id} className="flex items-center justify-between p-2 rounded-lg border border-border">
-                    <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-green-500 animate-pulse" />
-                      <span className="text-sm font-medium truncate max-w-[140px]">
-                        {r.display_name || r.user_id.slice(0, 8)}
-                      </span>
-                      <Badge variant="outline" className="text-xs flex items-center gap-1">
-                        {screenIcon(r.current_screen)}
-                        {screenLabel(r.current_screen)}
-                      </Badge>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{timeAgo(r.last_seen)}</span>
-                  </div>
-                ))}
-            </div>
-          </Card>
-        )}
 
         <div className="grid md:grid-cols-2 gap-6">
           <Card className="p-4">

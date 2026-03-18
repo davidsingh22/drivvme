@@ -120,13 +120,6 @@ const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
   const navigate = useNavigate();
   const [checked, setChecked] = useState(false);
-  const [timedOut, setTimedOut] = useState(false);
-
-  // Safety timeout: never show Loading for more than 3s — render dashboard anyway
-  useEffect(() => {
-    const t = setTimeout(() => setTimedOut(true), 3000);
-    return () => clearTimeout(t);
-  }, []);
 
   useEffect(() => {
     if (authLoading) return;
@@ -136,11 +129,6 @@ const DriverRoute = () => {
     }
 
     let cancelled = false;
-    const timeout = setTimeout(() => {
-      // If RPC hangs, stop blocking after 4s
-      if (!cancelled) setChecked(true);
-    }, 4000);
-
     (async () => {
       try {
         // Fast path: context already knows
@@ -149,31 +137,22 @@ const DriverRoute = () => {
           return;
         }
 
-        // Also check last_route as a hint (iOS cold start)
-        const lastRoute = (() => { try { return localStorage.getItem('last_route'); } catch { return null; } })();
-        if (lastRoute === '/driver') {
-          // Trust localStorage hint — render immediately, verify in background
-          if (!cancelled) setChecked(true);
-        }
-
         // Hard guarantee: backend role check
         const { data } = await supabase.rpc('is_driver', { _user_id: session.user.id });
         if (cancelled) return;
-        if (!data && lastRoute !== '/driver') {
+        if (!data) {
           navigate('/ride', { replace: true });
           return;
         }
       } finally {
-        clearTimeout(timeout);
         if (!cancelled) setChecked(true);
       }
     })();
 
-    return () => { cancelled = true; clearTimeout(timeout); };
+    return () => { cancelled = true; };
   }, [authLoading, session?.user?.id, isDriver, navigate]);
 
-  // Show loading ONLY briefly — timedOut forces render after 3s no matter what
-  if (!timedOut && (authLoading || (session?.user?.id && !checked))) {
+  if (authLoading || (session?.user?.id && !checked)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading…</div>
