@@ -788,7 +788,6 @@ export default function LiveMonitor() {
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
       supabase.removeChannel(globalPresenceCh);
-      supabase.removeChannel(driverPresenceCh);
     };
   }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
 
