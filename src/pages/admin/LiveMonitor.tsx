@@ -699,28 +699,18 @@ export default function LiveMonitor() {
       .subscribe();
 
     const globalPresenceCh = supabase
-      .channel('admin-driver-global-presence')
+      .channel('admin-global-presence')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'presence' }, async (payload: any) => {
         const row = payload.new as { user_id?: string; role?: string; last_seen_at?: string; updated_at?: string } | undefined;
-        if (row?.user_id && String(row.role || '').toLowerCase() === 'driver') {
+        if (row?.user_id) {
+          const role = String(row.role || '').toLowerCase() === 'driver' ? 'driver' as const : 'rider' as const;
           const seenAt = row.last_seen_at || row.updated_at || new Date().toISOString();
-          void maybePushLocationFeed('driver', row.user_id, seenAt);
+          void maybePushLocationFeed(role, row.user_id, seenAt);
         }
         void loadOnlineUsers();
       })
       .subscribe();
 
-    const driverPresenceCh = supabase
-      .channel('admin-driver-presence')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_presence' }, async (payload: any) => {
-        const row = payload.new as { driver_id?: string; last_seen?: string; updated_at?: string } | undefined;
-        if (row?.driver_id) {
-          const seenAt = row.last_seen || row.updated_at || new Date().toISOString();
-          void maybePushLocationFeed('driver', row.driver_id, seenAt);
-        }
-        void loadOnlineUsers();
-      })
-      .subscribe();
 
     const poll = setInterval(loadOnlineUsers, 2_000);
 
