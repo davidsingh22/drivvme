@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 /**
  * Single global rider presence hook — mount once OUTSIDE routes.
- * Uses ref-persisted recursive setTimeout so React re-renders never kill the loop.
+ * Uses ref-persisted setInterval so React re-renders never duplicate or kill the loop.
  */
 export function useRiderPresenceTracking() {
   const { user, profile, roles } = useAuth();
@@ -15,7 +15,7 @@ export function useRiderPresenceTracking() {
     user?.email ||
     '';
 
-  const heartbeatRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isRider = roles.includes('rider');
   const skip = !isRider || roles.includes('driver') || roles.includes('admin');
@@ -23,12 +23,11 @@ export function useRiderPresenceTracking() {
   useEffect(() => {
     if (!user?.id || skip) return;
 
-    // Prevent multiple loops
-    if (heartbeatRef.current) return;
+    if (intervalRef.current) return;
 
     const uid = user.id;
 
-    const runHeartbeat = async () => {
+    const sendHeartbeat = async () => {
       console.log('RIDER HEARTBEAT', uid);
       await supabase.from('presence').upsert(
         {
@@ -40,38 +39,43 @@ export function useRiderPresenceTracking() {
         },
         { onConflict: 'user_id' }
       );
-      heartbeatRef.current = setTimeout(runHeartbeat, 15000);
     };
 
-    runHeartbeat();
+    void sendHeartbeat();
+    intervalRef.current = setInterval(() => {
+      void sendHeartbeat();
+    }, 15000);
 
     return () => {
-      if (heartbeatRef.current) {
-        clearTimeout(heartbeatRef.current);
-        heartbeatRef.current = null;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
   }, [user?.id]);
 
-  // Visibility resume — instant fire when app is foregrounded
   useEffect(() => {
     if (!user?.id || skip) return;
 
     const uid = user.id;
 
+    const sendHeartbeat = async () => {
+      console.log('RIDER RESUME FIRE', uid);
+      await supabase.from('presence').upsert(
+        {
+          user_id: uid,
+          role: 'RIDER',
+          display_name: displayNameRef.current || uid.slice(0, 8),
+          source: 'web',
+          last_seen_at: new Date().toISOString(),
+        },
+        { onConflict: 'user_id' }
+      );
+    };
+
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        console.log('RIDER RESUME FIRE', uid);
-        void supabase.from('presence').upsert(
-          {
-            user_id: uid,
-            role: 'RIDER',
-            display_name: displayNameRef.current || uid.slice(0, 8),
-            source: 'web',
-            last_seen_at: new Date().toISOString(),
-          },
-          { onConflict: 'user_id' }
-        );
+        void sendHeartbeat();
       }
     };
 
