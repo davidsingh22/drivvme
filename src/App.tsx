@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -14,6 +14,7 @@ import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useDriverPresenceTracking } from "@/hooks/useDriverPresenceTracking";
+import { useRiderPresenceTracking } from "@/hooks/useRiderPresenceTracking";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
