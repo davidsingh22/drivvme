@@ -259,6 +259,62 @@ export function GlobalRideOfferGuard() {
     };
   }, [handleNewRide]);
 
+  // Source 7: polling fallback for unread ride offers.
+  // Mobile realtime can silently disconnect, so this guarantees the modal still appears.
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: number | null = null;
+
+    const stopPolling = () => {
+      if (intervalId) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const startPolling = (userId: string) => {
+      if (!userId || intervalId) return;
+
+      const poll = async () => {
+        if (cancelled) return;
+        const { data: pending } = await supabase
+          .from('notifications')
+          .select('ride_id, created_at')
+          .eq('user_id', userId)
+          .eq('type', 'new_ride')
+          .eq('is_read', false)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (pending?.ride_id) {
+          handleNewRide(pending.ride_id);
+          broadcastNewRide(pending.ride_id);
+        }
+      };
+
+      void poll();
+      intervalId = window.setInterval(poll, 3000);
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const userId = session?.user?.id;
+      if (userId) startPolling(userId);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      stopPolling();
+      const userId = session?.user?.id;
+      if (userId) startPolling(userId);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+      stopPolling();
+    };
+  }, [handleNewRide]);
+
   // === ASYNC DATA ENRICHMENT — does NOT block modal display ===
   useEffect(() => {
     if (!rideId) return;

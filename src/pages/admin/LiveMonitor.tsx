@@ -96,6 +96,7 @@ interface RideActivityRow {
 
 const ONLINE_THRESHOLD_MS = 5 * 60_000;
 const LOCATION_FEED_COOLDOWN_MS = 45_000;
+const DRIVER_PROFILE_FALLBACK_MS = 12 * 60 * 60_000;
 const ACTIVE_RIDER_RIDE_STATUSES = ['searching', 'pending_payment', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'] as const;
 const BOOKING_SUCCESS_STATUSES = new Set(['confirmed', 'paid']);
 
@@ -252,6 +253,7 @@ export default function LiveMonitor() {
 
   const loadOnlineUsers = useCallback(async () => {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
+    const driverProfileFallbackCutoff = new Date(Date.now() - DRIVER_PROFILE_FALLBACK_MS).toISOString();
 
     const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes, onlineDriverProfilesRes] = await Promise.all([
       supabase
@@ -274,12 +276,12 @@ export default function LiveMonitor() {
         .from('presence')
         .select('user_id, last_seen_at, role')
         .gte('last_seen_at', cutoff),
-      // Always show drivers who are flagged as online in their profile,
-      // even if their heartbeat is stale (e.g. app backgrounded on mobile)
+      // Keep driver-profile fallback, but ignore stale rows older than 12h.
       supabase
         .from('driver_profiles')
         .select('user_id, updated_at')
-        .eq('is_online', true),
+        .eq('is_online', true)
+        .gte('updated_at', driverProfileFallbackCutoff),
     ]);
 
     if (riderRes.error || driverRes.error || activeRidesRes.error) {
@@ -346,10 +348,10 @@ export default function LiveMonitor() {
       }
     });
 
-    // Drivers flagged as is_online=true in driver_profiles always appear,
-    // even if heartbeat/location data is stale (backgrounded app)
+    // Drivers flagged as is_online=true in driver_profiles appear as a fallback,
+    // but only if they are real drivers and their online flag is not stale.
     ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
-      driverRoleSet.add(row.user_id);
+      if (!driverRoleSet.has(row.user_id)) return;
       roleByUserRef.current.set(row.user_id, 'driver');
       if (!allUsersLatest.has(row.user_id)) {
         allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
