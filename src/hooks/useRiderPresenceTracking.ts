@@ -144,18 +144,24 @@ export function useRiderPresenceTracking() {
     };
   }, [user?.id, skip, getName]);
 
-  // ── LAYER 4: HEARTBEAT (15s) ──
+  // ── LAYER 4: UNCONDITIONAL HEARTBEAT (15s) ──
+  // No debounce, no locks, no route checks — runs ALWAYS when rider is logged in
   useEffect(() => {
-    if (!user?.id || skip) return;
+    if (!user?.id) return;
 
-    const tick = () => {
-      if (isDriverOrAdminRoute()) return;
-      void firePresence(user.id, getName(user.email, user.id));
-    };
+    const interval = setInterval(() => {
+      console.log('RIDER HEARTBEAT', user.id);
+      supabase.from('presence').upsert(
+        {
+          user_id: user.id,
+          role: 'RIDER',
+          display_name: displayNameRef.current || user.email || user.id.slice(0, 8),
+          source: detectScreen(),
+        },
+        { onConflict: 'user_id' }
+      );
+    }, HEARTBEAT_MS);
 
-    intervalRef.current = setInterval(tick, HEARTBEAT_MS);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [user?.id, skip, getName]);
+    return () => clearInterval(interval);
+  }, [user?.id]);
 }
