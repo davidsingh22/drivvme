@@ -37,7 +37,7 @@ import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 import { logActivity } from '@/lib/activityEvents';
-import { useRiderPresence } from '@/hooks/useRiderPresence';
+
 import { useOneSignalRiderPrompt } from '@/hooks/useOneSignalRiderPrompt';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
