@@ -757,43 +757,71 @@ const DriverDashboard = () => {
           return;
         }
 
-        if (!pending?.ride_id) {
-          console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications found`);
+        let pendingRideId = pending?.ride_id ?? null;
+        let pendingCreatedAt = pending?.created_at ?? null;
+
+        if (!pendingRideId) {
+          const recoveryCutoff = new Date(Date.now() - MAX_OFFER_AGE_SECONDS * 1000).toISOString();
+          const { data: dispatchedRide, error: dispatchedRideError } = await supabase
+            .from('rides')
+            .select('id, updated_at, requested_at, created_at')
+            .eq('status', 'searching')
+            .is('driver_id', null)
+            .contains('notified_driver_ids', [effectiveUserId])
+            .gte('updated_at', recoveryCutoff)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (dispatchedRideError) {
+            console.warn(`[Recovery] ❌ (attempt ${attempt}) Ride dispatch fallback error:`, dispatchedRideError.message);
+            return;
+          }
+
+          if (!dispatchedRide?.id) {
+            console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications or dispatched rides found`);
+            return;
+          }
+
+          pendingRideId = dispatchedRide.id;
+          pendingCreatedAt = dispatchedRide.requested_at || dispatchedRide.created_at || dispatchedRide.updated_at;
+          console.log(`[Recovery] (attempt ${attempt}) 🛟 Recovered ride from rides.notified_driver_ids:`, pendingRideId);
+        }
+
+        if (isCurrentlyDisplayed(pendingRideId)) {
+          console.log(`[Recovery] (attempt ${attempt}) ⏭️ Ride already displayed:`, pendingRideId);
           return;
         }
 
-        if (isCurrentlyDisplayed(pending.ride_id)) {
-          console.log(`[Recovery] (attempt ${attempt}) ⏭️ Ride already displayed:`, pending.ride_id);
-          return;
-        }
-
-        const shouldForceReopen = wasAlreadyHandled(pending.ride_id);
+        const shouldForceReopen = wasAlreadyHandled(pendingRideId);
         if (shouldForceReopen) {
-          console.log(`[Recovery] (attempt ${attempt}) 🔁 Unread ride still pending — forcing reopen:`, pending.ride_id);
+          console.log(`[Recovery] (attempt ${attempt}) 🔁 Unread ride still pending — forcing reopen:`, pendingRideId);
         }
 
-        const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
-        console.log(`[Recovery] (attempt ${attempt}) 📋 Found notification — ride:`, pending.ride_id, 'age:', Math.round(notifAge), 's');
+        const notifAge = pendingCreatedAt
+          ? (Date.now() - new Date(pendingCreatedAt).getTime()) / 1000
+          : 0;
+        console.log(`[Recovery] (attempt ${attempt}) 📋 Found recoverable ride — ride:`, pendingRideId, 'age:', Math.round(notifAge), 's');
 
         if (notifAge > MAX_OFFER_AGE_SECONDS) {
           console.log(`[Recovery] ⏰ Expired (age: ${Math.round(notifAge)}s > ${MAX_OFFER_AGE_SECONDS}s) — marking read`);
           await supabase
             .from('notifications')
             .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
+            .eq('ride_id', pendingRideId)
             .eq('user_id', effectiveUserId)
             .eq('type', 'new_ride');
           return;
         }
 
-        const shown = await showOfferForRide(pending.ride_id, { force: shouldForceReopen });
+        const shown = await showOfferForRide(pendingRideId, { force: shouldForceReopen });
         if (!shown) {
           // Ride no longer searching — mark notification read to avoid re-querying
           console.log('[Recovery] Ride not available — marking notification read');
           await supabase
             .from('notifications')
             .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
+            .eq('ride_id', pendingRideId)
             .eq('user_id', effectiveUserId)
             .eq('type', 'new_ride');
         }
