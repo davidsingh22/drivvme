@@ -24,8 +24,6 @@ const RideSearch = () => {
   const { language } = useLanguage();
   const { user } = useAuth();
 
-  // Track rider presence on search screen
-  useRiderPresence('searching');
   const { token: mapboxToken, loading: tokenLoading } = useMapboxToken();
   const mapboxTokenRef = useRef<string | null>(null);
   // Keep ref always in sync so callbacks never see stale token

@@ -61,8 +61,6 @@ const RiderHome = () => {
   const { isAdmin, user, profile } = useAuth();
   const gpsStarted = useRef(false);
 
-  // Track rider presence on home screen
-  useRiderPresence('home');
 
   
 
