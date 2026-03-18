@@ -762,20 +762,14 @@ const DriverDashboard = () => {
           return;
         }
 
-        if (wasAlreadyHandled(pending.ride_id)) {
-          console.log(`[Recovery] (attempt ${attempt}) ♻️ Skipping handled notification ride:`, pending.ride_id);
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
-            .eq('user_id', effectiveUserId)
-            .eq('type', 'new_ride');
-          return;
-        }
-
         if (isCurrentlyDisplayed(pending.ride_id)) {
           console.log(`[Recovery] (attempt ${attempt}) ⏭️ Ride already displayed:`, pending.ride_id);
           return;
+        }
+
+        const shouldForceReopen = wasAlreadyHandled(pending.ride_id);
+        if (shouldForceReopen) {
+          console.log(`[Recovery] (attempt ${attempt}) 🔁 Unread ride still pending — forcing reopen:`, pending.ride_id);
         }
 
         const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
@@ -792,7 +786,7 @@ const DriverDashboard = () => {
           return;
         }
 
-        const shown = await showOfferForRide(pending.ride_id);
+        const shown = await showOfferForRide(pending.ride_id, { force: shouldForceReopen });
         if (!shown) {
           // Ride no longer searching — mark notification read to avoid re-querying
           console.log('[Recovery] Ride not available — marking notification read');

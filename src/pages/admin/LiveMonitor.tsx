@@ -348,13 +348,16 @@ export default function LiveMonitor() {
       }
     });
 
-    // Drivers flagged as is_online=true in driver_profiles appear as a fallback,
-    // but only if they are real drivers and their online flag is not stale.
+    // Drivers flagged as is_online=true in driver_profiles are a fallback source,
+    // but they should also refresh the timestamp when GPS/location rows are stale.
     ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
       if (!driverRoleSet.has(row.user_id)) return;
       roleByUserRef.current.set(row.user_id, 'driver');
-      if (!allUsersLatest.has(row.user_id)) {
-        allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
+
+      const ts = row.updated_at || new Date().toISOString();
+      const prev = allUsersLatest.get(row.user_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        allUsersLatest.set(row.user_id, ts);
       }
     });
 
