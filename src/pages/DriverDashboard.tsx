@@ -383,6 +383,92 @@ const DriverDashboard = () => {
     goOnline();
   }, [session?.user?.id]);
 
+  const touchDriverActivity = useCallback(async (reason: string) => {
+    const driverUserId = session?.user?.id;
+    if (!driverUserId) return;
+
+    const now = new Date().toISOString();
+    const hasCurrentRide = !!currentRideRef.current || !!currentRide;
+    const driverStatus = hasCurrentRide ? 'on_trip' : (isOnline ? 'available' : 'offline');
+    const currentScreen = hasCurrentRide ? 'ride' : 'dashboard';
+    const displayName = user?.email || session?.user?.email || driverUserId;
+    const presencePayload = {
+      driver_id: driverUserId,
+      last_seen: now,
+      updated_at: now,
+      status: driverStatus,
+      current_screen: currentScreen,
+      display_name: displayName,
+    };
+
+    try {
+      const [profileRes, locationRes, presenceUpdateRes] = await Promise.all([
+        supabase
+          .from('driver_profiles')
+          .update({ updated_at: now, is_online: isOnline })
+          .eq('user_id', driverUserId),
+        supabase
+          .from('driver_locations')
+          .update({ updated_at: now, is_online: isOnline })
+          .eq('user_id', driverUserId),
+        supabase
+          .from('driver_presence')
+          .update(presencePayload)
+          .eq('driver_id', driverUserId)
+          .select('id'),
+      ]);
+
+      if (profileRes.error) {
+        console.warn('[DriverDashboard] driver activity profile touch failed:', profileRes.error);
+      }
+      if (locationRes.error) {
+        console.warn('[DriverDashboard] driver activity location touch failed:', locationRes.error);
+      }
+
+      if (presenceUpdateRes.error) {
+        console.warn('[DriverDashboard] driver presence update failed:', presenceUpdateRes.error);
+      } else if (!presenceUpdateRes.data?.length) {
+        const { error: presenceInsertError } = await supabase
+          .from('driver_presence')
+          .insert(presencePayload);
+        if (presenceInsertError) {
+          console.warn('[DriverDashboard] driver presence insert failed:', presenceInsertError);
+        }
+      }
+
+      console.log(`[DriverDashboard] Driver activity touched (${reason})`);
+    } catch (error) {
+      console.warn('[DriverDashboard] driver activity touch failed:', error);
+    }
+  }, [session?.user?.id, session?.user?.email, user?.email, isOnline, currentRide]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    void touchDriverActivity('mount');
+  }, [session?.user?.id, touchDriverActivity]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void touchDriverActivity('visibilitychange');
+      }
+    };
+    const handleFocus = () => void touchDriverActivity('focus');
+    const handlePageShow = () => void touchDriverActivity('pageshow');
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handlePageShow);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [session?.user?.id, touchDriverActivity]);
+
   // Restore active ride on page load (critical for iOS resume / page refresh)
   // NOTE: use the session user id (more reliable than the derived `user` field in edge cases)
   useEffect(() => {
@@ -518,9 +604,10 @@ const DriverDashboard = () => {
      * Show a ride offer from a ride_id (used by both recovery query and global store).
      * Returns true if successfully showed the modal.
      */
-    const showOfferForRide = async (rideId: string): Promise<boolean> => {
+    const showOfferForRide = async (rideId: string, options?: { force?: boolean }): Promise<boolean> => {
+      const force = options?.force ?? false;
       if (cancelled || !rideId || currentRideRef.current) return false;
-      if (wasAlreadyHandled(rideId)) {
+      if (!force && wasAlreadyHandled(rideId)) {
         console.log('[Recovery] ⛔ Ignoring already-handled ride:', rideId);
         return false;
       }
@@ -553,7 +640,7 @@ const DriverDashboard = () => {
         console.log('[Recovery] Ride not in searching status for', rideId);
         return false;
       }
-      if (cancelled || currentRideRef.current || wasAlreadyHandled(ride.id) || isCurrentlyDisplayed(ride.id)) return false;
+      if (cancelled || currentRideRef.current || (!force && wasAlreadyHandled(ride.id)) || isCurrentlyDisplayed(ride.id)) return false;
 
       // Only reject if ride is truly expired (>90s). Visual countdown always starts fresh at 25s.
       const notifAge = (Date.now() - new Date(ride.requested_at || ride.created_at).getTime()) / 1000;
@@ -675,20 +762,14 @@ const DriverDashboard = () => {
           return;
         }
 
-        if (wasAlreadyHandled(pending.ride_id)) {
-          console.log(`[Recovery] (attempt ${attempt}) ♻️ Skipping handled notification ride:`, pending.ride_id);
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
-            .eq('user_id', effectiveUserId)
-            .eq('type', 'new_ride');
-          return;
-        }
-
         if (isCurrentlyDisplayed(pending.ride_id)) {
           console.log(`[Recovery] (attempt ${attempt}) ⏭️ Ride already displayed:`, pending.ride_id);
           return;
+        }
+
+        const shouldForceReopen = wasAlreadyHandled(pending.ride_id);
+        if (shouldForceReopen) {
+          console.log(`[Recovery] (attempt ${attempt}) 🔁 Unread ride still pending — forcing reopen:`, pending.ride_id);
         }
 
         const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
@@ -705,7 +786,7 @@ const DriverDashboard = () => {
           return;
         }
 
-        const shown = await showOfferForRide(pending.ride_id);
+        const shown = await showOfferForRide(pending.ride_id, { force: shouldForceReopen });
         if (!shown) {
           // Ride no longer searching — mark notification read to avoid re-querying
           console.log('[Recovery] Ride not available — marking notification read');
