@@ -604,9 +604,10 @@ const DriverDashboard = () => {
      * Show a ride offer from a ride_id (used by both recovery query and global store).
      * Returns true if successfully showed the modal.
      */
-    const showOfferForRide = async (rideId: string): Promise<boolean> => {
+    const showOfferForRide = async (rideId: string, options?: { force?: boolean }): Promise<boolean> => {
+      const force = options?.force ?? false;
       if (cancelled || !rideId || currentRideRef.current) return false;
-      if (wasAlreadyHandled(rideId)) {
+      if (!force && wasAlreadyHandled(rideId)) {
         console.log('[Recovery] ⛔ Ignoring already-handled ride:', rideId);
         return false;
       }
@@ -639,7 +640,7 @@ const DriverDashboard = () => {
         console.log('[Recovery] Ride not in searching status for', rideId);
         return false;
       }
-      if (cancelled || currentRideRef.current || wasAlreadyHandled(ride.id) || isCurrentlyDisplayed(ride.id)) return false;
+      if (cancelled || currentRideRef.current || (!force && wasAlreadyHandled(ride.id)) || isCurrentlyDisplayed(ride.id)) return false;
 
       // Only reject if ride is truly expired (>90s). Visual countdown always starts fresh at 25s.
       const notifAge = (Date.now() - new Date(ride.requested_at || ride.created_at).getTime()) / 1000;
