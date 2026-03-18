@@ -383,6 +383,92 @@ const DriverDashboard = () => {
     goOnline();
   }, [session?.user?.id]);
 
+  const touchDriverActivity = useCallback(async (reason: string) => {
+    const driverUserId = session?.user?.id;
+    if (!driverUserId) return;
+
+    const now = new Date().toISOString();
+    const hasCurrentRide = !!currentRideRef.current || !!currentRide;
+    const driverStatus = hasCurrentRide ? 'on_trip' : (isOnline ? 'available' : 'offline');
+    const currentScreen = hasCurrentRide ? 'ride' : 'dashboard';
+    const displayName = user?.email || session?.user?.email || driverUserId;
+    const presencePayload = {
+      driver_id: driverUserId,
+      last_seen: now,
+      updated_at: now,
+      status: driverStatus,
+      current_screen: currentScreen,
+      display_name: displayName,
+    };
+
+    try {
+      const [profileRes, locationRes, presenceUpdateRes] = await Promise.all([
+        supabase
+          .from('driver_profiles')
+          .update({ updated_at: now, is_online: isOnline })
+          .eq('user_id', driverUserId),
+        supabase
+          .from('driver_locations')
+          .update({ updated_at: now, is_online: isOnline })
+          .eq('user_id', driverUserId),
+        supabase
+          .from('driver_presence')
+          .update(presencePayload)
+          .eq('driver_id', driverUserId)
+          .select('id'),
+      ]);
+
+      if (profileRes.error) {
+        console.warn('[DriverDashboard] driver activity profile touch failed:', profileRes.error);
+      }
+      if (locationRes.error) {
+        console.warn('[DriverDashboard] driver activity location touch failed:', locationRes.error);
+      }
+
+      if (presenceUpdateRes.error) {
+        console.warn('[DriverDashboard] driver presence update failed:', presenceUpdateRes.error);
+      } else if (!presenceUpdateRes.data?.length) {
+        const { error: presenceInsertError } = await supabase
+          .from('driver_presence')
+          .insert(presencePayload);
+        if (presenceInsertError) {
+          console.warn('[DriverDashboard] driver presence insert failed:', presenceInsertError);
+        }
+      }
+
+      console.log(`[DriverDashboard] Driver activity touched (${reason})`);
+    } catch (error) {
+      console.warn('[DriverDashboard] driver activity touch failed:', error);
+    }
+  }, [session?.user?.id, session?.user?.email, user?.email, isOnline, currentRide]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    void touchDriverActivity('mount');
+  }, [session?.user?.id, touchDriverActivity]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void touchDriverActivity('visibilitychange');
+      }
+    };
+    const handleFocus = () => void touchDriverActivity('focus');
+    const handlePageShow = () => void touchDriverActivity('pageshow');
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('pageshow', handlePageShow);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [session?.user?.id, touchDriverActivity]);
+
   // Restore active ride on page load (critical for iOS resume / page refresh)
   // NOTE: use the session user id (more reliable than the derived `user` field in edge cases)
   useEffect(() => {
