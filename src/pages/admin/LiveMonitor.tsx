@@ -705,9 +705,32 @@ export default function LiveMonitor() {
       })
       .subscribe();
 
-    const poll = setInterval(loadOnlineUsers, 15_000);
+    const globalPresenceCh = supabase
+      .channel('admin-driver-global-presence')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'presence' }, async (payload: any) => {
+        const row = payload.new as { user_id?: string; role?: string; last_seen_at?: string; updated_at?: string } | undefined;
+        if (row?.user_id && String(row.role || '').toLowerCase() === 'driver') {
+          const seenAt = row.last_seen_at || row.updated_at || new Date().toISOString();
+          void maybePushLocationFeed('driver', row.user_id, seenAt);
+        }
+        void loadOnlineUsers();
+      })
+      .subscribe();
 
-    // Polling fallback: catch ride status changes that realtime may silently miss
+    const driverPresenceCh = supabase
+      .channel('admin-driver-presence')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_presence' }, async (payload: any) => {
+        const row = payload.new as { driver_id?: string; last_seen?: string; updated_at?: string } | undefined;
+        if (row?.driver_id) {
+          const seenAt = row.last_seen || row.updated_at || new Date().toISOString();
+          void maybePushLocationFeed('driver', row.driver_id, seenAt);
+        }
+        void loadOnlineUsers();
+      })
+      .subscribe();
+
+    const poll = setInterval(loadOnlineUsers, 2_000);
+
     const lastPollTsRef = { current: new Date().toISOString() };
     const ridePoll = setInterval(async () => {
       const since = lastPollTsRef.current;
@@ -725,8 +748,6 @@ export default function LiveMonitor() {
         for (const ride of recentRides) {
           const status = String(ride.status || '').toLowerCase();
           const feedId = `ride-${ride.id}-${status}`;
-
-          // Skip if we already have this exact status update in the feed
           if (feedIdsRef.current.has(feedId)) continue;
 
           const riderId = ride.rider_id as string | null;
@@ -758,7 +779,6 @@ export default function LiveMonitor() {
 
           const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
 
-          // Remove active offers for cancelled/completed/assigned rides
           if (['driver_assigned', 'cancelled', 'completed'].includes(status)) {
             removeOffersForRide(ride.id);
           }
@@ -784,6 +804,8 @@ export default function LiveMonitor() {
       supabase.removeChannel(notifCh);
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
+      supabase.removeChannel(globalPresenceCh);
+      supabase.removeChannel(driverPresenceCh);
     };
   }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
 
