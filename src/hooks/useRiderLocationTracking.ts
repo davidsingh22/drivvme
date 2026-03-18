@@ -153,9 +153,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     if (isMountedRef.current) {
       setIsTracking(true);
-      void syncPresenceHeartbeat(nowIso);
     }
-  }, [ensureValidSession, syncPresenceHeartbeat]);
+  }, [ensureValidSession]);
 
   const markOnlineWithoutLocation = useCallback(async () => {
     const uid = userIdRef.current;
