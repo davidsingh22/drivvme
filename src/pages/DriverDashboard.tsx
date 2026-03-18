@@ -35,7 +35,6 @@ import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
-import { useDriverPresence, type DriverStatus } from '@/hooks/useDriverPresence';
 
 interface RideRequest {
   id: string;
@@ -69,7 +68,6 @@ const DriverDashboard = () => {
     session,
     roles,
     isDriver,
-    profile,
     driverProfile,
     refreshDriverProfile,
     refreshSession,
@@ -158,14 +156,6 @@ const DriverDashboard = () => {
     isOnline,
     updateIntervalMs: 3000,
   });
-
-  // Driver presence tracking
-  const driverPresenceStatus: DriverStatus = currentRide
-    ? 'on_trip'
-    : isOnline
-      ? 'available'
-      : 'offline';
-  useDriverPresence(driverPresenceStatus, 'dashboard');
 
   // Sync GPS position to local state for map
   const driverLocation = gpsPosition ? { lat: gpsPosition.lat, lng: gpsPosition.lng } : null;
@@ -935,89 +925,9 @@ const DriverDashboard = () => {
         console.log('[Realtime] 📡 Channel status:', status);
       });
 
-    // Secondary fallback: subscribe to rides table for new 'searching' rides
-    // This catches cases where the notification INSERT is delayed but the ride status update is immediate
-    const ridesChannelName = `driver-rides-watch-${userId}-${Date.now()}`;
-    console.log('[Realtime] 📡 Subscribing to rides channel:', ridesChannelName);
-
-    const ridesChannel = supabase
-      .channel(ridesChannelName)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'rides',
-        },
-        async (payload) => {
-          try {
-            const updated = payload.new as any;
-            const old = payload.old as any;
-            // Only react to rides transitioning INTO 'searching'
-            if (updated.status !== 'searching' || old.status === 'searching') return;
-            // Skip if we already have an active ride or this ride is already displayed
-            if (currentRideRef.current) return;
-            if (updated.id === lastHandledOfferIdRef.current) return;
-            if (newRideAlertOpenRef.current && newRideAlertRideIdRef.current === updated.id) return;
-
-            console.log('[Realtime-Rides] 🔔 New searching ride detected:', updated.id);
-
-            // Small delay to let the notification INSERT propagate first (preferred path)
-            await new Promise(r => setTimeout(r, 1500));
-            // If notification handler already showed this ride, skip
-            if (newRideAlertRideIdRef.current === updated.id) return;
-            if (currentRideRef.current) return;
-
-            // Check if this driver was notified (has a notification for this ride)
-            const { data: notif } = await supabase
-              .from('notifications')
-              .select('id')
-              .eq('user_id', userId)
-              .eq('ride_id', updated.id)
-              .eq('type', 'new_ride')
-              .maybeSingle();
-
-            if (!notif) return; // Not targeted at this driver
-
-            console.log('[Realtime-Rides] 📋 Driver was notified — showing offer as fallback');
-
-            const { data: ride } = await supabase
-              .from('rides')
-              .select('*')
-              .eq('id', updated.id)
-              .eq('status', 'searching')
-              .maybeSingle();
-
-            if (!ride || currentRideRef.current) return;
-
-            setCachedAlertRide(ride);
-            setNewRideAlertRideId(ride.id);
-            newRideAlertRideIdRef.current = ride.id;
-            setNewRideAlertOpen(true);
-            newRideAlertOpenRef.current = true;
-            setShowReconnect(false);
-            setRecoveredCountdown(null);
-            alertStartTimeRef.current = Date.now();
-
-            toast({
-              title: '🚗 NEW RIDE REQUEST!',
-              description: 'A rider is looking for a driver now.',
-            });
-
-            if ('vibrate' in navigator) {
-              (navigator as any).vibrate?.([300, 100, 300, 100, 500]);
-            }
-          } catch (err) {
-            console.error('[Realtime-Rides] Error:', err);
-          }
-        }
-      )
-      .subscribe();
-
     return () => {
-      console.log('[Realtime] 🔌 Removing channels:', channelName, ridesChannelName);
+      console.log('[Realtime] 🔌 Removing channel:', channelName);
       supabase.removeChannel(channel);
-      supabase.removeChannel(ridesChannel);
     };
   }, [user?.id]);
 
@@ -1225,19 +1135,6 @@ const DriverDashboard = () => {
           toast({ title: 'Error', description: error.message, variant: 'destructive' });
           return;
         }
-        // Immediately update driver_presence
-        const { error: presErr } = await supabase
-          .from('driver_presence')
-          .upsert({
-            driver_id: recoveredUser.id,
-            status: newStatus ? 'available' : 'offline',
-            current_screen: 'dashboard',
-            last_seen: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            display_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || recoveredUser.email || '',
-          } as any, { onConflict: 'driver_id' });
-        if (presErr) console.error('[DriverDashboard] driver_presence upsert error (recovered):', presErr.message);
-        else console.log('[DriverDashboard] driver_presence upsert OK (recovered) → status:', newStatus ? 'available' : 'offline');
         setIsOnline(newStatus);
         await refreshDriverProfile();
         toast({
@@ -1266,23 +1163,6 @@ const DriverDashboard = () => {
           variant: 'destructive',
         });
         return;
-      }
-
-      // Immediately update driver_presence
-      const { error: presError } = await supabase
-        .from('driver_presence')
-        .upsert({
-          driver_id: user.id,
-          status: newStatus ? 'available' : 'offline',
-          current_screen: 'dashboard',
-          last_seen: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          display_name: [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || '',
-        } as any, { onConflict: 'driver_id' });
-      if (presError) {
-        console.error('[DriverDashboard] driver_presence upsert error:', presError.message, presError.details);
-      } else {
-        console.log('[DriverDashboard] driver_presence upsert OK → status:', newStatus ? 'available' : 'offline');
       }
 
       setIsOnline(newStatus);
