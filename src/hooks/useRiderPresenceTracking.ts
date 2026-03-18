@@ -3,7 +3,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
 const HEARTBEAT_MS = 15_000;
-const DEBOUNCE_MS = 2_000;
 
 function detectScreen(): string {
   try {
@@ -25,11 +24,16 @@ function isDriverOrAdminRoute(): boolean {
   }
 }
 
+/**
+ * Writes ONLY to the unified `presence` table.
+ */
 async function firePresence(userId: string, displayName?: string) {
   if (isDriverOrAdminRoute()) return;
 
   const screen = detectScreen();
   const name = displayName || userId.slice(0, 8);
+
+  console.log('[RiderPresence] FIRE', userId, screen);
 
   const { error } = await supabase.from('presence').upsert(
     {
@@ -47,14 +51,14 @@ async function firePresence(userId: string, displayName?: string) {
 /**
  * Single global rider presence hook — mount once at App root.
  *
- * Uses a lock + debounce to prevent overlapping writes.
- * Primary updater is the 15s heartbeat; initial fire + resume are debounced.
+ * Fires AFTER auth is ready (user.id exists), not before.
+ * Also fires from auth state change events as a fallback.
+ *
+ * Writes ONLY to: `presence` table (onConflict: 'user_id')
  */
 export function useRiderPresenceTracking() {
   const { user, profile, roles } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lockRef = useRef(false);
-  const lastFireRef = useRef(0);
 
   const isDriver = roles.includes('driver');
   const isAdmin = roles.includes('admin');
@@ -72,64 +76,58 @@ export function useRiderPresenceTracking() {
     []
   );
 
-  /** Locked + debounced writer — prevents overlapping upserts */
-  const safeFire = useCallback(
-    async (userId: string, displayName?: string, label?: string) => {
-      if (lockRef.current) return;
+  // ── LAYER 1: FIRE WHEN user.id BECOMES AVAILABLE ──
+  // No dedup guard — fires every time user.id changes (login, token refresh, etc.)
+  useEffect(() => {
+    if (!user?.id || skip) return;
 
-      const now = Date.now();
-      if (now - lastFireRef.current < DEBOUNCE_MS) return;
+    console.log('RIDER FIRE AFTER AUTH', user.id);
+    void firePresence(user.id, getName(user.email, user.id));
+  }, [user?.id, skip, getName]);
 
-      lockRef.current = true;
-      lastFireRef.current = now;
-      try {
-        if (label) console.log(`[RiderPresence] ${label}`, userId);
-        await firePresence(userId, displayName);
-      } finally {
-        lockRef.current = false;
-      }
-    },
-    []
-  );
-
-  // ── INITIAL: fire from existing session on mount ──
+  // ── LAYER 2: EXISTING SESSION CHECK (fires on mount even without auth events) ──
   useEffect(() => {
     if (skip) return;
 
-    const init = async () => {
-      // Try auth context first
-      if (user?.id) {
-        void safeFire(user.id, getName(user.email, user.id), 'INITIAL (auth)');
-        return;
-      }
-      // Fallback: check raw session
+    const checkExistingSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.user?.id) {
-        void safeFire(session.user.id, getName(session.user.email, session.user.id), 'INITIAL (session)');
+        if (isDriverOrAdminRoute()) return;
+        console.log('RIDER FIRE FROM EXISTING SESSION', session.user.id);
+        void firePresence(
+          session.user.id,
+          getName(session.user.email, session.user.id)
+        );
       }
     };
-    void init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skip, user?.id]);
+    void checkExistingSession();
+  }, [skip, getName]);
 
-  // ── AUTH STATE CHANGE (catches SIGNED_IN for fresh logins) ──
+  // ── LAYER 3: AUTH STATE CHANGE (backup — catches SIGNED_IN before useAuth updates) ──
   useEffect(() => {
     if (skip) return;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (session?.user?.id && event === 'SIGNED_IN') {
-        void safeFire(session.user.id, getName(session.user.email, session.user.id), 'AUTH SIGNED_IN');
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user?.id && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+        if (isDriverOrAdminRoute()) return;
+        console.log('RIDER FIRE FROM AUTH EVENT', event, session.user.id);
+        void firePresence(
+          session.user.id,
+          getName(session.user.email, session.user.id)
+        );
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [skip, getName, safeFire]);
+  }, [skip, getName]);
 
-  // ── RESUME: debounced visibility/focus (lightweight, won't collide with heartbeat) ──
+  // ── LAYER 3: RESUME LISTENERS (visibilitychange, focus, pageshow) ──
   useEffect(() => {
     if (!user?.id || skip) return;
 
-    const fire = () => void safeFire(user.id, getName(user.email, user.id), 'RESUME');
+    const fire = () => void firePresence(user.id, getName(user.email, user.id));
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') fire();
@@ -137,31 +135,27 @@ export function useRiderPresenceTracking() {
 
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', fire);
+    window.addEventListener('pageshow', fire);
 
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', fire);
+      window.removeEventListener('pageshow', fire);
     };
-  }, [user?.id, skip, getName, safeFire]);
+  }, [user?.id, skip, getName]);
 
-  // ── HEARTBEAT (15s) — primary updater ──
+  // ── LAYER 4: HEARTBEAT (15s) ──
   useEffect(() => {
-    if (skip) return;
+    if (!user?.id || skip) return;
 
     const tick = () => {
-      const uid = user?.id;
-      if (!uid || isDriverOrAdminRoute()) return;
-      console.log('[RiderPresence] HEARTBEAT', uid);
-      // Heartbeat bypasses debounce — reset lastFire so it always goes through
-      lastFireRef.current = 0;
-      void safeFire(uid, getName(user?.email, uid));
+      if (isDriverOrAdminRoute()) return;
+      void firePresence(user.id, getName(user.email, user.id));
     };
 
-    tick();
     intervalRef.current = setInterval(tick, HEARTBEAT_MS);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [skip, user?.id, getName, safeFire]);
+  }, [user?.id, skip, getName]);
 }
