@@ -13,6 +13,7 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
+import { useDriverPresenceTracking } from "@/hooks/useDriverPresenceTracking";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
@@ -112,6 +113,7 @@ const RiderLocationTracker = () => {
 // Global presence heartbeat for all authenticated users
 const PresenceTracker = () => {
   usePresenceHeartbeat();
+  useDriverPresenceTracking();
   return null;
 };
 
