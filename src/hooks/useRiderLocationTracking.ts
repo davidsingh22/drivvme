@@ -406,13 +406,12 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     if (!user?.id) return;
 
     const handleBeforeUnload = () => {
-      void syncPresenceHeartbeat(new Date().toISOString());
       void markOffline();
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [user?.id, markOffline, syncPresenceHeartbeat]);
+  }, [user?.id, markOffline]);
 
   return { isTracking };
 };
