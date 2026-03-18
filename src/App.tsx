@@ -12,7 +12,7 @@ import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
-import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
+
 import { useDriverPresenceTracking } from "@/hooks/useDriverPresenceTracking";
 import { useRiderPresenceTracking } from "@/hooks/useRiderPresenceTracking";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
@@ -116,9 +116,8 @@ const InstantRiderPresence = () => {
   return null;
 };
 
-// Global presence heartbeat for all authenticated users
+// Global presence tracker for drivers
 const PresenceTracker = () => {
-  usePresenceHeartbeat();
   useDriverPresenceTracking();
   return null;
 };

@@ -118,41 +118,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     return false;
   }, []);
 
-  const syncPresenceHeartbeat = useCallback(async (lastSeenAt: string) => {
-    const uid = userIdRef.current;
-    if (!uid) return;
-
-    const sessionReady = await ensureValidSession();
-    if (!sessionReady) {
-      console.error('[RiderLocation] Presence heartbeat skipped: no valid session');
-      return;
-    }
-
-    const fullName = [user?.user_metadata?.first_name, user?.user_metadata?.last_name]
-      .filter(Boolean)
-      .join(' ')
-      .trim();
-
-    const displayName = fullName || user?.email || uid;
-
-    const { error } = await supabase
-      .from('presence')
-      .upsert(
-        {
-          user_id: uid,
-          role: 'RIDER',
-          display_name: displayName,
-          source: detectSource(),
-          last_seen_at: lastSeenAt,
-          updated_at: lastSeenAt,
-        },
-        { onConflict: 'user_id' }
-      );
-
-    if (error) {
-      console.error('[RiderLocation] presence upsert failed:', error.code, error.message);
-    }
-  }, [ensureValidSession, user?.email, user?.user_metadata?.first_name, user?.user_metadata?.last_name]);
+  // Presence is handled globally by useRiderPresenceTracking — no presence writes here.
 
   const writeLocationCoords = useCallback(async (coords: { lat: number; lng: number; accuracy?: number | null }) => {
     const uid = userIdRef.current;
@@ -187,9 +153,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     if (isMountedRef.current) {
       setIsTracking(true);
-      void syncPresenceHeartbeat(nowIso);
     }
-  }, [ensureValidSession, syncPresenceHeartbeat]);
+  }, [ensureValidSession]);
 
   const markOnlineWithoutLocation = useCallback(async () => {
     const uid = userIdRef.current;
@@ -228,9 +193,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     if (isMountedRef.current) {
       setIsTracking(true);
-      void syncPresenceHeartbeat(nowIso);
     }
-  }, [ensureValidSession, syncPresenceHeartbeat]);
+  }, [ensureValidSession]);
 
   const markOffline = useCallback(async () => {
     const uid = userIdRef.current;
@@ -320,8 +284,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         console.warn('[RiderLocation] Tracker started without valid session; will retry on next heartbeat');
       }
 
-      // 3) Kick presence immediately.
-      void syncPresenceHeartbeat(new Date().toISOString());
+      // 3) Presence is handled by useRiderPresenceTracking globally.
 
       // 4) If HTML5 geolocation is unavailable, still mark online.
       if (!navigator.geolocation) {
@@ -436,21 +399,19 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
       stopMedianBackgroundLocationIfRunning();
 
-      void syncPresenceHeartbeat(new Date().toISOString());
     };
-  }, [shouldTrack, source, ensureValidSession, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, syncPresenceHeartbeat, writeLocationCoords]);
+  }, [shouldTrack, source, ensureValidSession, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, writeLocationCoords]);
 
   useEffect(() => {
     if (!user?.id) return;
 
     const handleBeforeUnload = () => {
-      void syncPresenceHeartbeat(new Date().toISOString());
       void markOffline();
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [user?.id, markOffline, syncPresenceHeartbeat]);
+  }, [user?.id, markOffline]);
 
   return { isTracking };
 };
