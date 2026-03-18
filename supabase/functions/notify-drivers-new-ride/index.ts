@@ -442,51 +442,48 @@ serve(async (req) => {
       });
     }
 
-    // Cross-reference with driver_presence: only dispatch to drivers
-    // who are 'available' with a heartbeat within the last 60 seconds (MSN-visible)
+    // driver_presence is used as a real-time GPS enhancement only.
+    // Do NOT hard-filter eligibility on it because the current driver app's
+    // online source of truth is driver_profiles.is_online, which is what MSN also shows.
     const presenceCutoff = new Date(Date.now() - 60_000).toISOString();
     const { data: activePresence } = await supabase
       .from("driver_presence")
-      .select("driver_id, lat, lng")
-      .eq("status", "available")
+      .select("driver_id, status, lat, lng")
       .gte("last_seen", presenceCutoff);
 
-    const activePresenceIds = new Set((activePresence || []).map((p: any) => p.driver_id));
     const presenceGps = new Map<string, { lat: number; lng: number }>();
     (activePresence || []).forEach((p: any) => {
-      if (p.lat && p.lng) presenceGps.set(p.driver_id, { lat: p.lat, lng: p.lng });
+      if (typeof p.lat === "number" && typeof p.lng === "number") {
+        presenceGps.set(p.driver_id, { lat: p.lat, lng: p.lng });
+      }
     });
 
-    // Only keep drivers who are visible in MSN (have active presence heartbeat)
-    const eligibleDrivers = (onlineDrivers || []).filter(d => activePresenceIds.has(d.user_id));
+    console.log(`Found ${onlineDrivers?.length || 0} online drivers, ${activePresence?.length || 0} fresh presence rows`);
 
-    console.log(`Found ${onlineDrivers?.length || 0} online drivers, ${eligibleDrivers.length} with active presence (MSN-visible)`);
-
-    if (eligibleDrivers.length === 0) {
+    if (!onlineDrivers || onlineDrivers.length === 0) {
       return new Response(JSON.stringify({ 
-        message: "No online drivers found with active presence", 
+        message: "No online drivers found", 
         sent: 0,
         nearbyDrivers: 0,
-        totalOnline: onlineDrivers?.length || 0,
-        totalWithPresence: 0,
+        totalOnline: 0 
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Sequential waterfall: only notify the SINGLE closest driver
+    // Sequential waterfall: only notify the SINGLE closest online driver
     // The escalation hook will handle notifying the next driver after 25s timeout
-    let nearbyDrivers = eligibleDrivers;
+    let nearbyDrivers = onlineDrivers;
     
     if (pickupLat && pickupLng) {
-      // Calculate distance for each driver and sort by closest
-      // Use GPS from driver_presence when available (more real-time)
-      const driversWithDistance = eligibleDrivers
+      // Calculate distance for each driver and sort by closest.
+      // Prefer driver_presence GPS when it's fresh, otherwise fall back to driver_profiles.
+      const driversWithDistance = onlineDrivers
         .map(driver => {
           const presLoc = presenceGps.get(driver.user_id);
-          const lat = presLoc?.lat || driver.current_lat;
-          const lng = presLoc?.lng || driver.current_lng;
-          if (!lat || !lng) return null;
+          const lat = presLoc?.lat ?? driver.current_lat;
+          const lng = presLoc?.lng ?? driver.current_lng;
+          if (typeof lat !== "number" || typeof lng !== "number") return null;
           return {
             ...driver,
             current_lat: lat,
