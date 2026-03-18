@@ -284,8 +284,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         console.warn('[RiderLocation] Tracker started without valid session; will retry on next heartbeat');
       }
 
-      // 3) Kick presence immediately.
-      void syncPresenceHeartbeat(new Date().toISOString());
+      // 3) Presence is handled by useRiderPresenceTracking globally.
 
       // 4) If HTML5 geolocation is unavailable, still mark online.
       if (!navigator.geolocation) {
