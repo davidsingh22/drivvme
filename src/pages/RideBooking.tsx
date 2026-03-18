@@ -37,7 +37,7 @@ import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
 import { logActivity } from '@/lib/activityEvents';
-
+import { useRiderPresence } from '@/hooks/useRiderPresence';
 import { useOneSignalRiderPrompt } from '@/hooks/useOneSignalRiderPrompt';
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
 // Debug UI components - only loaded if localStorage.DEBUG_RIDE === "1"
@@ -162,6 +162,14 @@ const RideBooking = () => {
   const hasRestoredRide = useRef(false);
   const [step, setStep] = useState<RideStep>('input');
 
+  const riderPresenceScreen: 'home' | 'searching' | 'booking' = step === 'searching'
+    ? 'searching'
+    : ['matched', 'arriving', 'arrived', 'inProgress', 'completed'].includes(step)
+      ? 'booking'
+      : 'home';
+
+  // Track rider presence based on actual booking stage
+  useRiderPresence(riderPresenceScreen);
   const [isCancelling, setIsCancelling] = useState(false);
   const [pickup, setPickup] = useState<Location | null>(null);
   const [dropoff, setDropoff] = useState<Location | null>(null);

@@ -7,7 +7,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useMapboxToken, clearMapboxTokenCache } from '@/hooks/useMapboxToken';
-
+import { useRiderPresence } from '@/hooks/useRiderPresence';
 
 interface SavedDestination {
   id: string;
@@ -24,6 +24,8 @@ const RideSearch = () => {
   const { language } = useLanguage();
   const { user } = useAuth();
 
+  // Track rider presence on search screen
+  useRiderPresence('searching');
   const { token: mapboxToken, loading: tokenLoading } = useMapboxToken();
   const mapboxTokenRef = useRef<string | null>(null);
   // Keep ref always in sync so callbacks never see stale token

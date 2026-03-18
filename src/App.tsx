@@ -12,9 +12,7 @@ import Landing from "./pages/Landing";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
-
-import { useDriverPresenceTracking } from "@/hooks/useDriverPresenceTracking";
-import { useRiderPresenceTracking } from "@/hooks/useRiderPresenceTracking";
+import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
@@ -111,15 +109,9 @@ const RiderLocationTracker = () => {
   return null;
 };
 
-// Mounted OUTSIDE routes, directly inside AuthProvider
-const RiderPresenceGlobal = () => {
-  useRiderPresenceTracking();
-  return null;
-};
-
-// Global presence tracker for drivers
+// Global presence heartbeat for all authenticated users
 const PresenceTracker = () => {
-  useDriverPresenceTracking();
+  usePresenceHeartbeat();
   return null;
 };
 
@@ -216,7 +208,6 @@ const AppRoutes = () => {
       </Suspense>
       <RiderLocationTracker />
       <PresenceTracker />
-      
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -316,8 +307,7 @@ const App = () => {
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
         <AuthProvider>
-      <TooltipProvider>
-            <RiderPresenceGlobal />
+          <TooltipProvider>
             <GlobalRideOfferGuard />
             <Toaster />
             <Sonner />

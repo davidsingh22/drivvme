@@ -1,10 +1,23 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { ensureSupabaseSession } from '@/lib/sessionRecovery';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 
 const UPDATE_INTERVAL_MS = 5000; // heartbeat
 const RETRY_DELAY_MS = 3000;
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: number | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => reject(new Error(`TIMEOUT_${timeoutMs}`)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
+}
 
 function detectSource(): 'web' | 'ios' | 'android' {
   const ua = (navigator.userAgent || '').toLowerCase();
@@ -101,24 +114,67 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
   const ensureValidSession = useCallback(async (force = false) => {
     const now = Date.now();
     if (!force && now - lastSessionCheckAtRef.current < 15_000) {
-      const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } } as any));
-      if (session?.access_token) return true;
+      return true;
     }
 
     lastSessionCheckAtRef.current = now;
 
+    // Preferred path: lightweight raw token recovery utility.
     try {
-      const session = await ensureSupabaseSession();
-      if (session?.access_token) return true;
-    } catch (error) {
-      console.error('[RiderLocation] Session recovery failed:', error);
+      await getValidAccessToken();
+      return true;
+    } catch {
+      // Fallback path below.
+    }
+
+    // Fallback 1: in-memory auth session can still be valid even if localStorage read failed.
+    try {
+      const sessionRes = await withTimeout(supabase.auth.getSession(), 3500);
+      if (sessionRes.data.session?.access_token) return true;
+    } catch {
+      // continue to refresh fallback
+    }
+
+    // Fallback 2: explicit refresh through auth client.
+    try {
+      const refreshRes = await withTimeout(supabase.auth.refreshSession(), 5000);
+      if (refreshRes.data.session?.access_token) return true;
+    } catch {
+      // final failure below
     }
 
     console.error('[RiderLocation] Could not validate auth session for heartbeat writes');
     return false;
   }, []);
 
-  // Presence is handled globally by useRiderPresenceTracking — no presence writes here.
+  const syncPresenceHeartbeat = useCallback(async (lastSeenAt: string) => {
+    const uid = userIdRef.current;
+    if (!uid) return;
+
+    const sessionReady = await ensureValidSession();
+    if (!sessionReady) return;
+
+    const fullName = [user?.user_metadata?.first_name, user?.user_metadata?.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    const displayName = fullName || user?.email || uid;
+
+    await supabase
+      .from('presence')
+      .upsert(
+        {
+          user_id: uid,
+          role: 'RIDER',
+          display_name: displayName,
+          source: detectSource(),
+          last_seen_at: lastSeenAt,
+          updated_at: lastSeenAt,
+        },
+        { onConflict: 'user_id' }
+      );
+  }, [ensureValidSession, user?.email, user?.user_metadata?.first_name, user?.user_metadata?.last_name]);
 
   const writeLocationCoords = useCallback(async (coords: { lat: number; lng: number; accuracy?: number | null }) => {
     const uid = userIdRef.current;
@@ -153,8 +209,9 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     if (isMountedRef.current) {
       setIsTracking(true);
+      void syncPresenceHeartbeat(nowIso);
     }
-  }, [ensureValidSession]);
+  }, [ensureValidSession, syncPresenceHeartbeat]);
 
   const markOnlineWithoutLocation = useCallback(async () => {
     const uid = userIdRef.current;
@@ -193,8 +250,9 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     if (isMountedRef.current) {
       setIsTracking(true);
+      void syncPresenceHeartbeat(nowIso);
     }
-  }, [ensureValidSession]);
+  }, [ensureValidSession, syncPresenceHeartbeat]);
 
   const markOffline = useCallback(async () => {
     const uid = userIdRef.current;
@@ -284,7 +342,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         console.warn('[RiderLocation] Tracker started without valid session; will retry on next heartbeat');
       }
 
-      // 3) Presence is handled by useRiderPresenceTracking globally.
+      // 3) Kick presence immediately.
+      void syncPresenceHeartbeat(new Date().toISOString());
 
       // 4) If HTML5 geolocation is unavailable, still mark online.
       if (!navigator.geolocation) {
@@ -399,19 +458,21 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
       stopMedianBackgroundLocationIfRunning();
 
+      void syncPresenceHeartbeat(new Date().toISOString());
     };
-  }, [shouldTrack, source, ensureValidSession, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, writeLocationCoords]);
+  }, [shouldTrack, source, ensureValidSession, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, syncPresenceHeartbeat, writeLocationCoords]);
 
   useEffect(() => {
     if (!user?.id) return;
 
     const handleBeforeUnload = () => {
+      void syncPresenceHeartbeat(new Date().toISOString());
       void markOffline();
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [user?.id, markOffline]);
+  }, [user?.id, markOffline, syncPresenceHeartbeat]);
 
   return { isTracking };
 };
