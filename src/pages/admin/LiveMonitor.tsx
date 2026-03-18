@@ -262,7 +262,15 @@ export default function LiveMonitor() {
     const cutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
     const driverProfileFallbackCutoff = new Date(Date.now() - DRIVER_PROFILE_FALLBACK_MS).toISOString();
 
-    const [riderRes, driverRes, rolesRes, activeRidesRes, presenceRes, driverPresenceRes, onlineDriverProfilesRes] = await Promise.all([
+    const [presenceRes, rolesRes, riderLocRes, driverLocRes, activeRidesRes, onlineDriverProfilesRes] = await Promise.all([
+      // PRIMARY SOURCE: unified presence table
+      supabase
+        .from('presence')
+        .select('user_id, last_seen_at, role, display_name')
+        .gte('last_seen_at', cutoff),
+      supabase
+        .from('user_roles')
+        .select('user_id, role'),
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at')
@@ -272,27 +280,119 @@ export default function LiveMonitor() {
         .select('user_id, updated_at')
         .gte('updated_at', cutoff),
       supabase
-        .from('user_roles')
-        .select('user_id, role'),
-      supabase
         .from('rides')
         .select('rider_id, updated_at, status')
         .gte('updated_at', cutoff)
         .in('status', [...ACTIVE_RIDER_RIDE_STATUSES]),
-      supabase
-        .from('presence')
-        .select('user_id, last_seen_at, role')
-        .gte('last_seen_at', cutoff),
-      supabase
-        .from('driver_presence')
-        .select('driver_id, last_seen, updated_at, status')
-        .gte('updated_at', cutoff),
       supabase
         .from('driver_profiles')
         .select('user_id, updated_at')
         .eq('is_online', true)
         .gte('updated_at', driverProfileFallbackCutoff),
     ]);
+
+    if (presenceRes.error || riderLocRes.error || driverLocRes.error || activeRidesRes.error) {
+      console.error('LiveMonitor: failed loading online presence sources', {
+        presenceError: presenceRes.error,
+        riderError: riderLocRes.error,
+        driverError: driverLocRes.error,
+        rideActivityError: activeRidesRes.error,
+      });
+    }
+
+    const driverRoleSet = new Set<string>();
+    (rolesRes.data || []).forEach((r: any) => {
+      const normalizedRole: 'rider' | 'driver' = r.role === 'driver' ? 'driver' : 'rider';
+      roleByUserRef.current.set(r.user_id, normalizedRole);
+      if (normalizedRole === 'driver') driverRoleSet.add(r.user_id);
+    });
+
+    const allUsersLatest = new Map<string, string>();
+
+    // Presence table is the PRIMARY source
+    const presenceRows = (presenceRes.data || []) as { user_id: string; last_seen_at: string; role: string; display_name: string | null }[];
+    presenceRows.forEach((row) => {
+      const ts = row.last_seen_at;
+      const prev = allUsersLatest.get(row.user_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        allUsersLatest.set(row.user_id, ts);
+      }
+      if (row.display_name) {
+        profileNameRef.current.set(row.user_id, row.display_name);
+      }
+      const normalizedPresenceRole = String(row.role || '').toLowerCase();
+      if (normalizedPresenceRole === 'driver') {
+        driverRoleSet.add(row.user_id);
+        roleByUserRef.current.set(row.user_id, 'driver');
+      }
+    });
+
+    // Secondary: location tables as fallback signals
+    const riderRows = (riderLocRes.data || []) as RiderLocationRow[];
+    riderRows.forEach((row) => {
+      const ts = row.last_seen_at || row.updated_at;
+      const prev = allUsersLatest.get(row.user_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        allUsersLatest.set(row.user_id, ts);
+      }
+    });
+
+    const driverRows = (driverLocRes.data || []) as DriverLocationRow[];
+    driverRows.forEach((row) => {
+      const ts = row.updated_at;
+      const prev = allUsersLatest.get(row.user_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        allUsersLatest.set(row.user_id, ts);
+      }
+      driverRoleSet.add(row.user_id);
+      roleByUserRef.current.set(row.user_id, 'driver');
+    });
+
+    const rideActivityRows = (activeRidesRes.data || []) as RideActivityRow[];
+    rideActivityRows.forEach((row) => {
+      if (!row.rider_id) return;
+      const ts = row.updated_at;
+      const prev = allUsersLatest.get(row.rider_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        allUsersLatest.set(row.rider_id, ts);
+      }
+    });
+
+    ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
+      if (!driverRoleSet.has(row.user_id)) return;
+      roleByUserRef.current.set(row.user_id, 'driver');
+      const ts = row.updated_at || new Date().toISOString();
+      const prev = allUsersLatest.get(row.user_id);
+      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
+        allUsersLatest.set(row.user_id, ts);
+      }
+    });
+
+    const allUserIds = [...allUsersLatest.keys()];
+    await upsertProfileNames(allUserIds);
+
+    const riders: OnlineUser[] = [];
+    const drivers: OnlineUser[] = [];
+
+    allUsersLatest.forEach((last_seen_at, user_id) => {
+      const isDriver = driverRoleSet.has(user_id);
+      const entry: OnlineUser = {
+        user_id,
+        display_name: getCachedName(user_id),
+        source: 'native',
+        last_seen_at,
+        role: isDriver ? 'driver' : 'rider',
+      };
+      if (isDriver) {
+        drivers.push(entry);
+      } else {
+        riders.push(entry);
+      }
+    });
+
+    setOnlineRiders(riders);
+    setOnlineDrivers(drivers);
+  }, [getCachedName, upsertProfileNames]);
 
     if (riderRes.error || driverRes.error || activeRidesRes.error || presenceRes.error || driverPresenceRes.error) {
       console.error('LiveMonitor: failed loading online presence sources', {
