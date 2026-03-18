@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { ensureSupabaseSession } from '@/lib/sessionRecovery';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 
 const HEARTBEAT_MS = 15_000;
 const FAST_RETRY_MS = 1_200;
@@ -68,14 +68,35 @@ export function useRiderPresenceTracking() {
     const pathname = getPathname();
     if (skip || shouldSkipRiderPresence(pathname)) return true;
 
-    const session = await ensureSupabaseSession();
-    if (!session?.user?.id) {
+    // Try getSession first (non-destructive, no auth state disruption)
+    let userId: string | undefined;
+    let email: string | undefined;
+
+    const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } } as any));
+    if (session?.user?.id) {
+      userId = session.user.id;
+      email = session.user.email ?? undefined;
+    } else {
+      // Fallback: refresh token via raw HTTP (doesn't call setSession, no auth cascade)
+      try {
+        await getValidAccessToken();
+        const { data: { session: recovered } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } } as any));
+        if (recovered?.user?.id) {
+          userId = recovered.user.id;
+          email = recovered.user.email ?? undefined;
+        }
+      } catch {
+        // token refresh failed
+      }
+    }
+
+    if (!userId) {
       console.error(`[RiderPresence] No recoverable session (${reason})`);
       return false;
     }
 
-    const name = displayName || session.user.email || session.user.id;
-    return writeRiderPresence(session.user.id, name, pathname);
+    const name = displayName || email || userId;
+    return writeRiderPresence(userId, name, pathname);
   }, [displayName, skip]);
 
   const queueRetry = useCallback((reason: string) => {
