@@ -277,6 +277,7 @@ export function GlobalRideOfferGuard() {
 
       const poll = async () => {
         if (cancelled) return;
+
         const { data: pending } = await supabase
           .from('notifications')
           .select('ride_id, created_at')
@@ -290,6 +291,24 @@ export function GlobalRideOfferGuard() {
         if (pending?.ride_id) {
           handleNewRide(pending.ride_id);
           broadcastNewRide(pending.ride_id);
+          return;
+        }
+
+        const recoveryCutoff = new Date(Date.now() - 90 * 1000).toISOString();
+        const { data: dispatchedRide } = await supabase
+          .from('rides')
+          .select('id, updated_at, requested_at, created_at')
+          .eq('status', 'searching')
+          .is('driver_id', null)
+          .contains('notified_driver_ids', [userId])
+          .gte('updated_at', recoveryCutoff)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (dispatchedRide?.id) {
+          handleNewRide(dispatchedRide.id);
+          broadcastNewRide(dispatchedRide.id);
         }
       };
 
