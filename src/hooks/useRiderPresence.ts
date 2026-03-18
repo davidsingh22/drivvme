@@ -4,37 +4,36 @@ import { useAuth } from '@/contexts/AuthContext';
 
 type ScreenName = 'home' | 'searching' | 'booking';
 
-const HEARTBEAT_MS = 15_000;
-const OFFLINE_AFTER_MS = 60_000;
+const HEARTBEAT_MS = 30_000; // 30s heartbeat
+const OFFLINE_AFTER_MS = 60_000; // mark offline after 60s inactivity
 
 /**
- * Tracks rider presence in the unified `presence` table with role='RIDER'.
- * Fires instantly on mount, resume, and focus — no GPS dependency.
+ * Tracks rider presence in `rider_presence` table.
+ * Call with the current screen name. Heartbeats every 30s.
+ * Marks offline on unmount / visibility hidden > 60s.
  */
 export function useRiderPresence(currentScreen: ScreenName) {
   const { user, profile } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hiddenAtRef = useRef<number | null>(null);
   const offlineTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenRef = useRef(currentScreen);
   screenRef.current = currentScreen;
 
   const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || user?.email || '';
 
-  const upsertPresence = useCallback(async (screen?: ScreenName) => {
+  const upsertPresence = useCallback(async (status: 'online' | 'offline' = 'online', screen?: ScreenName) => {
     if (!user?.id) return;
-
-    const now = new Date().toISOString();
-    console.log("RIDER PRESENCE SENT", user.id);
-
     try {
-      await supabase.from('presence').upsert(
+      await supabase.from('rider_presence' as any).upsert(
         {
           user_id: user.id,
-          role: 'RIDER',
+          role: 'rider',
+          status,
+          current_screen: screen ?? screenRef.current,
+          last_seen: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
           display_name: displayName,
-          source: screen ?? screenRef.current,
-          last_seen_at: now,
-          updated_at: now,
         },
         { onConflict: 'user_id' }
       );
@@ -43,50 +42,47 @@ export function useRiderPresence(currentScreen: ScreenName) {
     }
   }, [user?.id, displayName]);
 
-  // Instant fire on mount + heartbeat + visibility/focus
   useEffect(() => {
     if (!user?.id) return;
 
-    // Instant fire
-    upsertPresence();
+    // Initial upsert
+    upsertPresence('online');
 
     // Heartbeat
-    intervalRef.current = setInterval(() => upsertPresence(), HEARTBEAT_MS);
+    intervalRef.current = setInterval(() => upsertPresence('online'), HEARTBEAT_MS);
 
     // Visibility handling
     const handleVisibility = () => {
       if (document.visibilityState === 'hidden') {
+        hiddenAtRef.current = Date.now();
+        // Start offline timer only when app is actually backgrounded/inactive.
         offlineTimerRef.current = setTimeout(() => {
-          // Don't mark offline — let staleness handle it
+          upsertPresence('offline');
         }, OFFLINE_AFTER_MS);
       } else {
+        // Came back
         if (offlineTimerRef.current) {
           clearTimeout(offlineTimerRef.current);
           offlineTimerRef.current = null;
         }
-        // Instant re-fire on resume
-        upsertPresence();
+        upsertPresence('online');
+        hiddenAtRef.current = null;
       }
     };
-
-    const onFocus = () => upsertPresence();
-
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('pageshow', onFocus);
 
+    // Cleanup: do NOT mark offline on route/page transitions.
+    // Let the 60s inactivity timer own offline state to avoid false offline/home regressions.
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
       document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('pageshow', onFocus);
     };
   }, [user?.id, upsertPresence]);
 
-  // Update screen/source when it changes
+  // Update screen when it changes
   useEffect(() => {
     if (!user?.id) return;
-    upsertPresence(currentScreen);
+    upsertPresence('online', currentScreen);
   }, [currentScreen, user?.id, upsertPresence]);
 }

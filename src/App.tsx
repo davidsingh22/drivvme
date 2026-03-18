@@ -14,7 +14,6 @@ import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useDriverPresenceTracking } from "@/hooks/useDriverPresenceTracking";
-import { useRiderPresenceTracking } from "@/hooks/useRiderPresenceTracking";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
@@ -108,11 +107,6 @@ const RideRoute = () => {
 // Global rider location tracker - runs for all authenticated non-driver users
 const RiderLocationTracker = () => {
   useRiderLocationTracking(true);
-  return null;
-};
-
-const InstantRiderPresence = () => {
-  useRiderPresenceTracking();
   return null;
 };
 
@@ -216,7 +210,6 @@ const AppRoutes = () => {
       </Suspense>
       <RiderLocationTracker />
       <PresenceTracker />
-      <InstantRiderPresence />
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
