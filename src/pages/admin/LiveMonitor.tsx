@@ -388,7 +388,7 @@ export default function LiveMonitor() {
     const [ridesRes, riderLocRes, driverLocRes, rolesRes] = await Promise.all([
       supabase
         .from('rides')
-        .select('id, rider_id, status, pickup_address, dropoff_address, estimated_fare, created_at, updated_at')
+        .select('id, rider_id, driver_id, status, pickup_address, dropoff_address, estimated_fare, created_at, updated_at')
         .gte('updated_at', tenMinAgo)
         .order('updated_at', { ascending: false })
         .limit(40),
