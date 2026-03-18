@@ -7,7 +7,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useMapboxToken, clearMapboxTokenCache } from '@/hooks/useMapboxToken';
-import { useRiderPresence } from '@/hooks/useRiderPresence';
+
 
 interface SavedDestination {
   id: string;
