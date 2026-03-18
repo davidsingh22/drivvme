@@ -492,11 +492,7 @@ export default function LiveMonitor() {
       items.push({
         id: `ride-${ride.id}-${status}`,
         icon: statusInfo.icon,
-        message: BOOKING_SUCCESS_STATUSES.has(status)
-          ? `${riderName}: Booking Successful`
-          : status === 'searching'
-            ? `${riderName} is booking a ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'} ($${Number(ride.estimated_fare || 0).toFixed(2)})`
-            : `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`,
+        message,
         source: 'rides',
         created_at: ride.updated_at || ride.created_at,
         feedRole,
