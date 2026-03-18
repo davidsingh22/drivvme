@@ -1,23 +1,10 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { getValidAccessToken } from '@/lib/sessionRecovery';
+import { ensureSupabaseSession } from '@/lib/sessionRecovery';
 
 const UPDATE_INTERVAL_MS = 5000; // heartbeat
 const RETRY_DELAY_MS = 3000;
-
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
-  let timeoutId: number | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = window.setTimeout(() => reject(new Error(`TIMEOUT_${timeoutMs}`)), timeoutMs);
-  });
-
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timeoutId) window.clearTimeout(timeoutId);
-  }
-}
 
 function detectSource(): 'web' | 'ios' | 'android' {
   const ua = (navigator.userAgent || '').toLowerCase();
@@ -114,33 +101,17 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
   const ensureValidSession = useCallback(async (force = false) => {
     const now = Date.now();
     if (!force && now - lastSessionCheckAtRef.current < 15_000) {
-      return true;
+      const { data: { session } } = await supabase.auth.getSession().catch(() => ({ data: { session: null } } as any));
+      if (session?.access_token) return true;
     }
 
     lastSessionCheckAtRef.current = now;
 
-    // Preferred path: lightweight raw token recovery utility.
     try {
-      await getValidAccessToken();
-      return true;
-    } catch {
-      // Fallback path below.
-    }
-
-    // Fallback 1: in-memory auth session can still be valid even if localStorage read failed.
-    try {
-      const sessionRes = await withTimeout(supabase.auth.getSession(), 3500);
-      if (sessionRes.data.session?.access_token) return true;
-    } catch {
-      // continue to refresh fallback
-    }
-
-    // Fallback 2: explicit refresh through auth client.
-    try {
-      const refreshRes = await withTimeout(supabase.auth.refreshSession(), 5000);
-      if (refreshRes.data.session?.access_token) return true;
-    } catch {
-      // final failure below
+      const session = await ensureSupabaseSession();
+      if (session?.access_token) return true;
+    } catch (error) {
+      console.error('[RiderLocation] Session recovery failed:', error);
     }
 
     console.error('[RiderLocation] Could not validate auth session for heartbeat writes');
@@ -152,7 +123,10 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     if (!uid) return;
 
     const sessionReady = await ensureValidSession();
-    if (!sessionReady) return;
+    if (!sessionReady) {
+      console.error('[RiderLocation] Presence heartbeat skipped: no valid session');
+      return;
+    }
 
     const fullName = [user?.user_metadata?.first_name, user?.user_metadata?.last_name]
       .filter(Boolean)
@@ -161,7 +135,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
     const displayName = fullName || user?.email || uid;
 
-    await supabase
+    const { error } = await supabase
       .from('presence')
       .upsert(
         {
@@ -174,6 +148,10 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
         },
         { onConflict: 'user_id' }
       );
+
+    if (error) {
+      console.error('[RiderLocation] presence upsert failed:', error.code, error.message);
+    }
   }, [ensureValidSession, user?.email, user?.user_metadata?.first_name, user?.user_metadata?.last_name]);
 
   const writeLocationCoords = useCallback(async (coords: { lat: number; lng: number; accuracy?: number | null }) => {
