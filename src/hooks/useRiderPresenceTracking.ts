@@ -26,7 +26,6 @@ function isDriverOrAdminRoute(): boolean {
 
 /**
  * Writes ONLY to the unified `presence` table.
- * No rider_presence, no rider_locations — single source of truth.
  */
 async function firePresence(userId: string, displayName?: string) {
   if (isDriverOrAdminRoute()) return;
@@ -55,93 +54,93 @@ async function firePresence(userId: string, displayName?: string) {
 /**
  * Single global rider presence hook — mount once at App root.
  *
- * Layer 1: Instant fire when user.id is available
- * Layer 2: Resume listeners (visibilitychange, focus, pageshow)
- * Layer 3: Auth events (SIGNED_IN, TOKEN_REFRESHED)
- * Layer 4: 15s heartbeat
+ * Fires AFTER auth is ready (user.id exists), not before.
+ * Also fires from auth state change events as a fallback.
  *
  * Writes ONLY to: `presence` table (onConflict: 'user_id')
  */
 export function useRiderPresenceTracking() {
   const { user, profile, roles } = useAuth();
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const instantFiredRef = useRef<string | null>(null);
 
   const isDriver = roles.includes('driver');
   const isAdmin = roles.includes('admin');
   const skip = isDriver || isAdmin;
 
-  const displayName =
+  const displayNameRef = useRef('');
+  displayNameRef.current =
     [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') ||
     user?.email ||
     '';
 
-  // ── LAYER 1: INSTANT FIRE ──
+  const getName = useCallback(
+    (fallbackEmail?: string | null, fallbackId?: string) =>
+      displayNameRef.current || fallbackEmail || fallbackId || '',
+    []
+  );
+
+  // ── LAYER 1: FIRE WHEN user.id BECOMES AVAILABLE ──
+  // No dedup guard — fires every time user.id changes (login, token refresh, etc.)
   useEffect(() => {
     if (!user?.id || skip) return;
-    if (instantFiredRef.current === user.id) return;
-    instantFiredRef.current = user.id;
 
-    void firePresence(user.id, displayName || user.email || user.id);
-  }, [user?.id, skip, displayName]);
+    console.log('RIDER FIRE AFTER AUTH', user.id);
+    void firePresence(user.id, getName(user.email, user.id));
+  }, [user?.id, skip, getName]);
 
-  // ── LAYER 2: RESUME LISTENERS ──
-  useEffect(() => {
-    if (!user?.id || skip) return;
-
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void firePresence(user.id, displayName || user.email || user.id);
-      }
-    };
-    const onFocus = () =>
-      void firePresence(user.id, displayName || user.email || user.id);
-
-    document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('pageshow', onFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('pageshow', onFocus);
-    };
-  }, [user?.id, skip, displayName]);
-
-  // ── LAYER 3: AUTH EVENTS ──
+  // ── LAYER 2: AUTH STATE CHANGE (backup — catches SIGNED_IN before useAuth updates) ──
   useEffect(() => {
     if (skip) return;
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (
-        (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') &&
-        session?.user?.id
-      ) {
+      if (session?.user?.id && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
         if (isDriverOrAdminRoute()) return;
+        console.log('RIDER FIRE FROM AUTH EVENT', event, session.user.id);
         void firePresence(
           session.user.id,
-          displayName || session.user.email || session.user.id
+          getName(session.user.email, session.user.id)
         );
       }
     });
 
     return () => subscription.unsubscribe();
-  }, [displayName, skip]);
+  }, [skip, getName]);
 
-  // ── LAYER 4: HEARTBEAT (15s) ──
-  const heartbeat = useCallback(async () => {
-    if (!user?.id || skip || isDriverOrAdminRoute()) return;
-    void firePresence(user.id, displayName || user.email || user.id);
-  }, [user?.id, user?.email, skip, displayName]);
-
+  // ── LAYER 3: RESUME LISTENERS (visibilitychange, focus, pageshow) ──
   useEffect(() => {
     if (!user?.id || skip) return;
 
-    intervalRef.current = setInterval(heartbeat, HEARTBEAT_MS);
+    const fire = () => void firePresence(user.id, getName(user.email, user.id));
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fire();
+    };
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', fire);
+    window.addEventListener('pageshow', fire);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', fire);
+      window.removeEventListener('pageshow', fire);
+    };
+  }, [user?.id, skip, getName]);
+
+  // ── LAYER 4: HEARTBEAT (15s) ──
+  useEffect(() => {
+    if (!user?.id || skip) return;
+
+    const tick = () => {
+      if (isDriverOrAdminRoute()) return;
+      void firePresence(user.id, getName(user.email, user.id));
+    };
+
+    intervalRef.current = setInterval(tick, HEARTBEAT_MS);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [user?.id, skip, heartbeat]);
+  }, [user?.id, skip, getName]);
 }
