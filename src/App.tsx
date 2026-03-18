@@ -111,7 +111,8 @@ const RiderLocationTracker = () => {
   return null;
 };
 
-const InstantRiderPresence = () => {
+// Mounted OUTSIDE routes, directly inside AuthProvider
+const RiderPresenceGlobal = () => {
   useRiderPresenceTracking();
   return null;
 };
@@ -215,7 +216,7 @@ const AppRoutes = () => {
       </Suspense>
       <RiderLocationTracker />
       <PresenceTracker />
-      <InstantRiderPresence />
+      
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
@@ -315,7 +316,8 @@ const App = () => {
     <QueryClientProvider client={queryClient}>
       <LanguageProvider>
         <AuthProvider>
-          <TooltipProvider>
+      <TooltipProvider>
+            <RiderPresenceGlobal />
             <GlobalRideOfferGuard />
             <Toaster />
             <Sonner />
