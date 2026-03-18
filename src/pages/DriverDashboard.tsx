@@ -1200,6 +1200,7 @@ const DriverDashboard = () => {
       }
 
       setIsOnline(newStatus);
+      manuallyToggledOffRef.current = !newStatus;
       await refreshDriverProfile();
 
       toast({
