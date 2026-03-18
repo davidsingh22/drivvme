@@ -393,34 +393,31 @@ serve(async (req) => {
       });
     }
 
-    // Cross-reference with driver_presence: only dispatch to drivers
-    // who are 'available' with a heartbeat within the last 60 seconds (MSN-visible)
+    // driver_presence is used as a real-time GPS enhancement only.
+    // Do NOT hard-filter eligibility on it because the current driver app's
+    // online source of truth is driver_profiles.is_online, which is what MSN also shows.
     const presenceCutoff = new Date(Date.now() - 60_000).toISOString();
     const { data: activePresence } = await supabase
       .from("driver_presence")
-      .select("driver_id, lat, lng")
-      .eq("status", "available")
+      .select("driver_id, status, lat, lng")
       .gte("last_seen", presenceCutoff);
 
-    const activePresenceIds = new Set((activePresence || []).map((p: any) => p.driver_id));
     const presenceGps = new Map<string, { lat: number; lng: number }>();
     (activePresence || []).forEach((p: any) => {
-      if (p.lat && p.lng) presenceGps.set(p.driver_id, { lat: p.lat, lng: p.lng });
+      if (typeof p.lat === "number" && typeof p.lng === "number") {
+        presenceGps.set(p.driver_id, { lat: p.lat, lng: p.lng });
+      }
     });
 
-    // Only keep drivers who are visible in MSN (have active presence heartbeat)
-    const eligibleDrivers = (onlineDrivers || []).filter(d => activePresenceIds.has(d.user_id));
+    console.log(`[Tier ${tier}] Found ${onlineDrivers?.length || 0} online drivers, ${activePresence?.length || 0} fresh presence rows`);
 
-    console.log(`[Tier ${tier}] Found ${onlineDrivers?.length || 0} online drivers, ${eligibleDrivers.length} with active presence (MSN-visible)`);
-
-    if (eligibleDrivers.length === 0) {
+    if (!onlineDrivers || onlineDrivers.length === 0) {
       return new Response(JSON.stringify({ 
-        message: "No online drivers found with active presence", 
+        message: "No online drivers found", 
         sent: 0,
         tier,
         nearbyDrivers: 0,
-        totalOnline: onlineDrivers?.length || 0,
-        totalWithPresence: 0,
+        totalOnline: 0 
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -430,7 +427,7 @@ serve(async (req) => {
     const { data: busyRides } = await supabase
       .from("rides")
       .select("driver_id, dropoff_lat, dropoff_lng")
-      .in("driver_id", eligibleDrivers.map(d => d.user_id))
+      .in("driver_id", onlineDrivers.map(d => d.user_id))
       .in("status", ["driver_assigned", "driver_en_route", "arrived", "in_progress"]);
 
     const busyDriverDropoffs = new Map<string, { lat: number; lng: number }>();
@@ -441,8 +438,8 @@ serve(async (req) => {
     });
 
     // Filter and sort drivers by distance
-    // Use GPS from driver_presence when available (more real-time)
-    const driversWithDistance: DriverWithDistance[] = eligibleDrivers
+    // Prefer driver_presence GPS when it's fresh, otherwise fall back to driver_profiles.
+    const driversWithDistance: DriverWithDistance[] = onlineDrivers
       .filter(driver => !mergedExcludedDriverIds.includes(driver.user_id))
       .map(driver => {
         const dropoffLocation = busyDriverDropoffs.get(driver.user_id);
