@@ -131,11 +131,10 @@ export default function LiveMonitor() {
   const [activeOffers, setActiveOffers] = useState<ActiveRideOffer[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Rider presence state
+  // Rider presence from unified `presence` table
   interface RiderPresenceRow {
     user_id: string;
     display_name: string | null;
-    status: string;
     current_screen: string;
     last_seen: string;
   }
@@ -170,25 +169,33 @@ export default function LiveMonitor() {
     if (!authLoading && !isAdmin) navigate('/login', { replace: true });
   }, [authLoading, isAdmin, navigate]);
 
-  // ── Rider Presence: fetch + realtime ──
+  // ── Rider Presence: read from unified `presence` table where role='RIDER' ──
   const loadRiderPresence = useCallback(async () => {
     const cutoff = new Date(Date.now() - 60_000).toISOString();
     const { data } = await supabase
-      .from('rider_presence' as any)
-      .select('user_id, display_name, status, current_screen, last_seen')
-      .eq('status', 'online')
-      .gte('last_seen', cutoff);
-    if (data) setRiderPresence(data as any);
+      .from('presence')
+      .select('user_id, display_name, source, last_seen_at')
+      .eq('role', 'RIDER')
+      .gte('last_seen_at', cutoff);
+    if (data) {
+      setRiderPresence(data.map((r) => ({
+        user_id: r.user_id,
+        display_name: r.display_name,
+        current_screen: r.source || 'home',
+        last_seen: r.last_seen_at,
+      })));
+    }
   }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
     loadRiderPresence();
-    const interval = setInterval(loadRiderPresence, 15_000);
+    const interval = setInterval(loadRiderPresence, 10_000);
     const channel = supabase
       .channel('rider-presence-monitor')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rider_presence' }, () => {
-        loadRiderPresence();
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'presence' }, (payload: any) => {
+        const row = payload.new as { role?: string } | undefined;
+        if (row?.role === 'RIDER') loadRiderPresence();
       })
       .subscribe();
     return () => {
