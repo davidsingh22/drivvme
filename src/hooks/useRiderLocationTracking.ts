@@ -399,9 +399,8 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
 
       stopMedianBackgroundLocationIfRunning();
 
-      void syncPresenceHeartbeat(new Date().toISOString());
     };
-  }, [shouldTrack, source, ensureValidSession, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, syncPresenceHeartbeat, writeLocationCoords]);
+  }, [shouldTrack, source, ensureValidSession, markOnlineWithoutLocation, startMedianBackgroundLocationIfAvailable, stopMedianBackgroundLocationIfRunning, writeLocationCoords]);
 
   useEffect(() => {
     if (!user?.id) return;
