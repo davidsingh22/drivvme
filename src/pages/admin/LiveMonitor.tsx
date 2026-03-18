@@ -463,8 +463,30 @@ export default function LiveMonitor() {
       const riderName = ride.rider_id ? getCachedName(ride.rider_id) : 'Unknown';
       const status = String(ride.status || '').toLowerCase();
       const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
+      const route = `${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+      const driverId = (ride as any).driver_id as string | null;
+      const driverName = driverId ? getCachedName(driverId) : null;
 
-      const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived'].includes(status) ? 'both' : 'rider';
+      let message: string;
+      if (status === 'driver_assigned' && driverName) {
+        message = `${driverName} accepted ${riderName}'s ride — ${route}`;
+      } else if (status === 'driver_en_route' && driverName) {
+        message = `${driverName} is on the way to pick up ${riderName} — ${route}`;
+      } else if (status === 'arrived' && driverName) {
+        message = `${driverName} has arrived at pickup for ${riderName}`;
+      } else if (status === 'in_progress' && driverName) {
+        message = `${driverName} started the ride with ${riderName} — ${route}`;
+      } else if (status === 'completed' && driverName) {
+        message = `${driverName} completed the ride with ${riderName} — ${route}`;
+      } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
+        message = `${riderName}: Booking Successful`;
+      } else if (status === 'searching') {
+        message = `${riderName} is booking a ride — ${route} ($${Number(ride.estimated_fare || 0).toFixed(2)})`;
+      } else {
+        message = `${riderName}: ${statusInfo.label} — ${route}`;
+      }
+
+      const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'in_progress', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
 
       items.push({
         id: `ride-${ride.id}-${status}`,
