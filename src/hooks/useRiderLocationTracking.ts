@@ -118,41 +118,7 @@ export const useRiderLocationTracking = (enabled: boolean = true) => {
     return false;
   }, []);
 
-  const syncPresenceHeartbeat = useCallback(async (lastSeenAt: string) => {
-    const uid = userIdRef.current;
-    if (!uid) return;
-
-    const sessionReady = await ensureValidSession();
-    if (!sessionReady) {
-      console.error('[RiderLocation] Presence heartbeat skipped: no valid session');
-      return;
-    }
-
-    const fullName = [user?.user_metadata?.first_name, user?.user_metadata?.last_name]
-      .filter(Boolean)
-      .join(' ')
-      .trim();
-
-    const displayName = fullName || user?.email || uid;
-
-    const { error } = await supabase
-      .from('presence')
-      .upsert(
-        {
-          user_id: uid,
-          role: 'RIDER',
-          display_name: displayName,
-          source: detectSource(),
-          last_seen_at: lastSeenAt,
-          updated_at: lastSeenAt,
-        },
-        { onConflict: 'user_id' }
-      );
-
-    if (error) {
-      console.error('[RiderLocation] presence upsert failed:', error.code, error.message);
-    }
-  }, [ensureValidSession, user?.email, user?.user_metadata?.first_name, user?.user_metadata?.last_name]);
+  // Presence is handled globally by useRiderPresenceTracking — no presence writes here.
 
   const writeLocationCoords = useCallback(async (coords: { lat: number; lng: number; accuracy?: number | null }) => {
     const uid = userIdRef.current;
