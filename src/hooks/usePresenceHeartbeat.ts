@@ -50,7 +50,6 @@ export function usePresenceHeartbeat() {
           return;
         }
 
-        const now = new Date().toISOString();
         const source = isDriver ? detectPlatformSource() : detectRiderScreen();
         const { error } = await supabase.from('presence').upsert(
           {
@@ -58,8 +57,6 @@ export function usePresenceHeartbeat() {
             role,
             display_name: displayName,
             source,
-            last_seen_at: now,
-            updated_at: now,
           },
           { onConflict: 'user_id' }
         );

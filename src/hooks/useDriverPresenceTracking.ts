@@ -154,7 +154,7 @@ export function useDriverPresenceTracking() {
         { onConflict: 'driver_id' }
       ),
       supabase.from('presence').upsert(
-        { user_id: user.id, role: 'DRIVER', display_name: displayName, source: 'web', last_seen_at: now, updated_at: now },
+        { user_id: user.id, role: 'DRIVER', display_name: displayName, source: 'web' },
         { onConflict: 'user_id' }
       ),
       supabase.from('driver_locations').upsert(

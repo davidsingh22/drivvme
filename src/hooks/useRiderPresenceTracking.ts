@@ -30,7 +30,6 @@ function isDriverOrAdminRoute(): boolean {
 async function firePresence(userId: string, displayName?: string) {
   if (isDriverOrAdminRoute()) return;
 
-  const now = new Date().toISOString();
   const screen = detectScreen();
   const name = displayName || userId.slice(0, 8);
 
@@ -42,8 +41,6 @@ async function firePresence(userId: string, displayName?: string) {
       role: 'RIDER',
       display_name: name,
       source: screen,
-      last_seen_at: now,
-      updated_at: now,
     },
     { onConflict: 'user_id' }
   );
