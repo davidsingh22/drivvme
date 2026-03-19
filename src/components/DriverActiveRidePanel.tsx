@@ -291,12 +291,29 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     }
   };
 
+  // Background retry for DB writes
+  const retryDbWrite = useCallback(async (rideId: string, updates: Record<string, any>, attempt = 0) => {
+    const MAX = 5;
+    if (attempt >= MAX) { console.error('[DriverActiveRidePanel] retryDbWrite gave up'); return; }
+    try {
+      const { data: check } = await supabase.from('rides').select('status').eq('id', rideId).maybeSingle();
+      if (check?.status === updates.status) { console.log('[DriverActiveRidePanel] retryDbWrite: already done'); return; }
+      const { error } = await supabase.from('rides').update(updates).eq('id', rideId);
+      if (!error) { console.log('[DriverActiveRidePanel] retryDbWrite: success attempt', attempt + 1); return; }
+    } catch {}
+    await new Promise(r => setTimeout(r, 3000));
+    return retryDbWrite(rideId, updates, attempt + 1);
+  }, []);
+
   // End Ride action (transition to completed)
   const endRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
     
     setBusyAction('complete');
     const driverEarningsCalc = activeRide.estimated_fare - PLATFORM_FEE;
+    const rideId = activeRide.id;
+    const riderId = activeRide.rider_id;
+    const prevStatus = activeRide.status;
     
     setActiveRide(null);
     setRiderInfo(null);
@@ -310,30 +327,35 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     });
 
     // Fire instant push (non-blocking)
-    fireInstantPush(activeRide.id, 'completed', activeRide.status, activeRide.rider_id, driverId);
+    fireInstantPush(rideId, 'completed', prevStatus, riderId, driverId);
+
+    const updates = {
+      status: 'completed' as const,
+      dropoff_at: new Date().toISOString(),
+      actual_fare: activeRide.estimated_fare,
+      driver_earnings: driverEarningsCalc,
+    };
 
     try {
       const { error } = await withTimeout(
         supabase
           .from('rides')
-          .update({
-            status: 'completed',
-            dropoff_at: new Date().toISOString(),
-            actual_fare: activeRide.estimated_fare,
-            driver_earnings: driverEarningsCalc,
-          })
-          .eq('id', activeRide.id)
+          .update(updates)
+          .eq('id', rideId)
           .eq('driver_id', driverId)
           .then(r => r),
         7000, 'Complete ride'
       );
 
       if (error) {
-        setActiveRide(activeRide);
-        toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        // Don't revert — start background retry
+        console.warn('[DriverActiveRidePanel] endRide DB error, retrying in background:', error.message);
+        void retryDbWrite(rideId, updates);
       }
     } catch (err) {
-      console.warn('[DriverActiveRidePanel] endRide slow/timeout (optimistic kept):', err);
+      // Timeout — retry in background
+      console.warn('[DriverActiveRidePanel] endRide timeout, retrying in background:', err);
+      void retryDbWrite(rideId, updates);
     } finally {
       setBusyAction(null);
     }
