@@ -13,7 +13,6 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
-import { useSessionWatchdog } from "@/hooks/useSessionWatchdog";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
@@ -113,12 +112,6 @@ const RiderLocationTracker = () => {
 // Global presence heartbeat for all authenticated users
 const PresenceTracker = () => {
   usePresenceHeartbeat();
-  return null;
-};
-
-// Global session watchdog — proactively refreshes auth every 2 min
-const SessionWatchdogRunner = () => {
-  useSessionWatchdog();
   return null;
 };
 
@@ -226,7 +219,6 @@ const AppRoutes = () => {
       </Suspense>
       <RiderLocationTracker />
       <PresenceTracker />
-      <SessionWatchdogRunner />
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />

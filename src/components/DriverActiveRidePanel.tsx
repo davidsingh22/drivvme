@@ -27,7 +27,6 @@ import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import { withTimeout } from '@/lib/withTimeout';
 import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
-import { resilientCall, ensureFreshSession } from '@/lib/resilientRequest';
 import { persistRideStatus } from '@/lib/persistRideStatus';
 import DriverRideActionBar from '@/components/DriverRideActionBar';
 /** Fire push notification to rider immediately (don't wait for DB trigger) */
@@ -257,15 +256,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const startRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
     
-    // Ensure fresh auth before starting ride
-    try {
-      await ensureFreshSession();
-    } catch (authErr: any) {
-      console.error('[DriverActiveRidePanel] startRide auth refresh failed:', authErr);
-      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
-      return;
-    }
-
     setBusyAction('start');
     const pickupAt = new Date().toISOString();
     setActiveRide({ ...activeRide, status: 'in_progress', pickup_at: pickupAt });
@@ -400,15 +390,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const cancelRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
     
-    // Ensure fresh auth before cancelling
-    try {
-      await ensureFreshSession();
-    } catch (authErr: any) {
-      console.error('[DriverActiveRidePanel] cancelRide auth refresh failed:', authErr);
-      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
-      return;
-    }
-
     setBusyAction('cancel');
     const previousRide = { ...activeRide };
     const riderIdForNotif = activeRide.rider_id;
@@ -474,15 +455,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const markArrived = async () => {
     if (!activeRide || !driverId || busyAction) return;
     
-    // Ensure fresh auth before marking arrived
-    try {
-      await ensureFreshSession();
-    } catch (authErr: any) {
-      console.error('[DriverActiveRidePanel] markArrived auth refresh failed:', authErr);
-      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
-      return;
-    }
-
     setBusyAction('arrived');
     setActiveRide({ ...activeRide, status: 'arrived' });
     onRideUpdated?.({ ...activeRide, status: 'arrived' });

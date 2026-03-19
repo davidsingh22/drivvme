@@ -133,7 +133,7 @@ interface Stats {
 }
 
 const AdminDashboard = () => {
-  const { user, isLoading: authLoading, profileLoading, roles } = useAuth();
+  const { user, isLoading: authLoading, roles } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   
@@ -205,13 +205,9 @@ const AdminDashboard = () => {
   const isAdmin = roles.includes('admin' as any);
 
   useEffect(() => {
-    // Don't redirect while auth or roles are still loading — prevents
-    // false "Access Denied" during background token refreshes.
-    if (authLoading || profileLoading) return;
-    if (!user) {
+    if (!authLoading && !user) {
       navigate('/login');
-    } else if (roles.length > 0 && !isAdmin) {
-      // Only redirect when roles have actually loaded (length > 0)
+    } else if (!authLoading && !isAdmin) {
       navigate('/');
       toast({
         title: 'Access Denied',
@@ -219,7 +215,7 @@ const AdminDashboard = () => {
         variant: 'destructive',
       });
     }
-  }, [user, authLoading, profileLoading, isAdmin, roles.length, navigate, toast]);
+  }, [user, authLoading, isAdmin, navigate, toast]);
 
   useEffect(() => {
     if (user && isAdmin) {

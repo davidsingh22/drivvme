@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { ensureFreshSession } from '@/lib/resilientRequest';
 
 export interface GPSPosition {
   lat: number;
@@ -132,22 +131,34 @@ export function useDriverGPSStreaming({
     setState(prev => ({ ...prev, isDbSyncing: true }));
 
     try {
-      // Ensure fresh auth token before every GPS DB write
-      try {
-        await ensureFreshSession();
-      } catch (authErr: any) {
-        if (authErr?.message === 'NO_SESSION' || authErr?.message === 'SESSION_EXPIRED') {
-          setState(prev => ({
-            ...prev,
-            isDbSyncing: false,
-            authStatus: 'signed_out',
-            lastDbWriteError: 'Signed out – cannot send GPS',
-            dbWriteRetryCount: retryAttempt + 1,
-          }));
-          return false;
+      // Ensure we have a valid session before writing
+      const { data: sessionData } = await supabase.auth.getSession();
+      let session = sessionData.session;
+
+      if (!session) {
+        // Try to refresh
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        session = refreshData.session;
+      }
+
+      if (!session) {
+        setState(prev => ({
+          ...prev,
+          isDbSyncing: false,
+          authStatus: 'signed_out',
+          lastDbWriteError: 'Signed out – cannot send GPS',
+          dbWriteRetryCount: retryAttempt + 1,
+        }));
+        return false;
+      }
+
+      // Refresh session if it's about to expire
+      const expiresAt = session.expires_at; // seconds
+      if (typeof expiresAt === 'number') {
+        const secondsLeft = expiresAt - Math.floor(Date.now() / 1000);
+        if (secondsLeft < 60) {
+          await supabase.auth.refreshSession();
         }
-        // Non-fatal: try to proceed anyway
-        console.warn('[GPS] ensureFreshSession failed (non-fatal):', authErr?.message);
       }
 
       // Always set updated_at = now() to force a change

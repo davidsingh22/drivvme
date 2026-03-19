@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { ensureFreshSession } from '@/lib/resilientRequest';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 
 const HEARTBEAT_INTERVAL_MS = 20_000; // 20 seconds
 
@@ -34,14 +34,12 @@ export function usePresenceHeartbeat() {
 
     const upsertPresence = async () => {
       try {
-        // Ensure fresh auth before every heartbeat write
-        await ensureFreshSession();
-      } catch {
-        console.warn('[Presence] Session refresh failed, skipping heartbeat');
-        return;
-      }
+        const token = await getValidAccessToken().catch(() => null);
+        if (!token) {
+          console.warn('[Presence] No valid session token for heartbeat');
+          return;
+        }
 
-      try {
         const { error } = await supabase.from('presence').upsert(
           {
             user_id: user.id,
@@ -86,9 +84,8 @@ export function usePresenceHeartbeat() {
     // Visibility change: recover session + send heartbeat on return
     const handleVisibility = async () => {
       if (document.visibilityState === 'visible') {
-        try {
-          await ensureFreshSession();
-        } catch {
+        const token = await getValidAccessToken().catch(() => null);
+        if (!token) {
           console.warn('[Presence] Session recovery failed on visibility resume');
           return;
         }
