@@ -88,6 +88,15 @@ export function useActiveRide(userId: string | undefined) {
     };
 
     loadActiveRide();
+
+    // Re-check on app resume so completed rides don't linger
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadActiveRide();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [userId, persistRide]);
 
   // Update ride and persist
