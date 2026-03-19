@@ -1628,8 +1628,9 @@ const DriverDashboard = () => {
           return;
         }
 
-        setCurrentRide(prev);
-        toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        // Don't revert or show error — start background retry instead
+        console.warn('[DriverDashboard] updateRideStatus error, starting background retry:', error.message);
+        void retryDbUpdate(prev.id, updates);
         return;
       }
 
@@ -1637,8 +1638,20 @@ const DriverDashboard = () => {
         void refreshDriverProfile();
       }
     } catch (error) {
-      // Don't revert optimistic update or show toast — the DB write likely went through
-      console.warn('[DriverDashboard] updateRideStatus slow/timeout (optimistic kept):', error);
+      // Timeout — start background retry to ensure DB is updated
+      console.warn('[DriverDashboard] updateRideStatus timeout, starting background retry:', error);
+      const updates: any = { status };
+      if (status === 'in_progress') {
+        updates.pickup_at = new Date().toISOString();
+      } else if (status === 'completed') {
+        updates.dropoff_at = new Date().toISOString();
+        const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
+        const fee = calculatePlatformFee(fareForFee);
+        updates.actual_fare = prev.estimated_fare;
+        updates.platform_fee = fee;
+        updates.driver_earnings = fareForFee - fee;
+      }
+      void retryDbUpdate(prev.id, updates);
     } finally {
       setBusyAction(null);
     }
