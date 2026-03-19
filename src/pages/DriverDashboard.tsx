@@ -482,7 +482,7 @@ const DriverDashboard = () => {
         .maybeSingle();
 
       if (!data || data.status === 'completed' || data.status === 'cancelled') {
-        clearRide('poll: ' + (data?.status || 'not found'));
+        clearRide('poll: ' + (data?.status || 'not found'), data?.status);
       }
     };
 
