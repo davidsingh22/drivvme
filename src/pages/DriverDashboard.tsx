@@ -31,6 +31,7 @@ import RideMessagesPanel from '@/components/RideMessagesPanel';
 
 import { calculatePlatformFee } from '@/lib/platformFees';
 import { withTimeout } from '@/lib/withTimeout';
+import { persistRideStatus } from '@/lib/persistRideStatus';
 import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
@@ -125,31 +126,20 @@ const DriverDashboard = () => {
   };
 
   /** Background retry: keeps attempting a DB update until it succeeds (max 5 retries). */
-  const retryDbUpdate = useCallback(async (rideId: string, updates: Record<string, any>, attempt = 0) => {
-    const MAX_RETRIES = 5;
-    const DELAY = 3000;
-    if (attempt >= MAX_RETRIES) {
-      console.error('[DriverDashboard] retryDbUpdate: gave up after', MAX_RETRIES, 'attempts for ride', rideId);
-      return;
+  const retryDbUpdate = useCallback(async (rideId: string, updates: Record<string, any>, expectedStatus?: string) => {
+    const ok = await persistRideStatus({
+      rideId,
+      updates,
+      expectedStatus: expectedStatus ?? String(updates.status ?? ''),
+      label: `Retry status to ${expectedStatus ?? String(updates.status ?? '')}`,
+      maxAttempts: 5,
+      baseDelayMs: 1000,
+      timeoutMs: 12000,
+    });
+
+    if (!ok) {
+      console.error('[DriverDashboard] retryDbUpdate: failed to persist ride status', { rideId, expectedStatus, updates });
     }
-    try {
-      // First check if already in desired status
-      const { data: check } = await supabase.from('rides').select('status').eq('id', rideId).maybeSingle();
-      if (check?.status === updates.status) {
-        console.log('[DriverDashboard] retryDbUpdate: ride already in', updates.status);
-        return;
-      }
-      const { error } = await supabase.from('rides').update(updates).eq('id', rideId);
-      if (!error) {
-        console.log('[DriverDashboard] retryDbUpdate: success on attempt', attempt + 1);
-        return;
-      }
-      console.warn('[DriverDashboard] retryDbUpdate: attempt', attempt + 1, 'failed:', error.message);
-    } catch (e) {
-      console.warn('[DriverDashboard] retryDbUpdate: attempt', attempt + 1, 'exception:', e);
-    }
-    await new Promise(r => setTimeout(r, DELAY));
-    return retryDbUpdate(rideId, updates, attempt + 1);
   }, []);
 
   // Keep refs in sync with state
@@ -1566,9 +1556,9 @@ const DriverDashboard = () => {
 
     setBusyAction(status);
 
-    // Optimistic update — instant UI feedback
     const prev = { ...currentRide };
     rememberRideAction(prev.id, status);
+
     if (status === 'completed') {
       const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
       const fee = calculatePlatformFee(fareForFee);
@@ -1580,7 +1570,7 @@ const DriverDashboard = () => {
       setRiderInfo(null);
       setShowGPSNavigation(false);
     } else {
-      setCurrentRide((r) => r ? { ...r, status } : null);
+      setCurrentRide((r) => (r ? { ...r, status } : null));
       if (status === 'arrived') {
         toast({ title: language === 'fr' ? 'Arrivé!' : 'Arrived!' });
       } else if (status === 'in_progress') {
@@ -1588,49 +1578,33 @@ const DriverDashboard = () => {
       }
     }
 
+    const updates: Record<string, any> = { status };
+    if (status === 'in_progress') {
+      updates.pickup_at = new Date().toISOString();
+    } else if (status === 'completed') {
+      updates.dropoff_at = new Date().toISOString();
+      const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
+      const fee = calculatePlatformFee(fareForFee);
+      updates.actual_fare = prev.estimated_fare;
+      updates.platform_fee = fee;
+      updates.driver_earnings = fareForFee - fee;
+    }
+
     try {
-      const updates: any = { status };
-      if (status === 'in_progress') {
-        updates.pickup_at = new Date().toISOString();
-      } else if (status === 'completed') {
-        updates.dropoff_at = new Date().toISOString();
-        const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
-        const fee = calculatePlatformFee(fareForFee);
-        updates.actual_fare = prev.estimated_fare;
-        updates.platform_fee = fee;
-        updates.driver_earnings = fareForFee - fee;
-      }
+      const saved = await persistRideStatus({
+        rideId: prev.id,
+        expectedStatus: status,
+        updates,
+        driverId: user.id,
+        label: `Update status to ${status}`,
+        maxAttempts: 3,
+        baseDelayMs: 400,
+        timeoutMs: 6000,
+      });
 
-      const { error } = await withTimeout(
-        supabase.from('rides').update(updates).eq('id', prev.id).then(r => r),
-        15000,
-        `Update status to ${status}`
-      );
-
-      if (error) {
-        let confirmedStatus = false;
-        try {
-          const { data: latestRide } = await supabase
-            .from('rides')
-            .select('status')
-            .eq('id', prev.id)
-            .maybeSingle();
-          confirmedStatus = latestRide?.status === status;
-        } catch (verificationError) {
-          console.warn('[DriverDashboard] verifyRideStatus failed:', verificationError);
-        }
-
-        if (confirmedStatus) {
-          console.warn('[DriverDashboard] updateRideStatus returned an error after the ride was already saved:', error);
-          if (status === 'completed') {
-            void refreshDriverProfile();
-          }
-          return;
-        }
-
-        // Don't revert or show error — start background retry instead
-        console.warn('[DriverDashboard] updateRideStatus error, starting background retry:', error.message);
-        void retryDbUpdate(prev.id, updates);
+      if (!saved) {
+        console.warn('[DriverDashboard] updateRideStatus did not persist immediately, starting background retry');
+        void retryDbUpdate(prev.id, updates, status);
         return;
       }
 
@@ -1638,20 +1612,8 @@ const DriverDashboard = () => {
         void refreshDriverProfile();
       }
     } catch (error) {
-      // Timeout — start background retry to ensure DB is updated
-      console.warn('[DriverDashboard] updateRideStatus timeout, starting background retry:', error);
-      const updates: any = { status };
-      if (status === 'in_progress') {
-        updates.pickup_at = new Date().toISOString();
-      } else if (status === 'completed') {
-        updates.dropoff_at = new Date().toISOString();
-        const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
-        const fee = calculatePlatformFee(fareForFee);
-        updates.actual_fare = prev.estimated_fare;
-        updates.platform_fee = fee;
-        updates.driver_earnings = fareForFee - fee;
-      }
-      void retryDbUpdate(prev.id, updates);
+      console.warn('[DriverDashboard] updateRideStatus failed, starting background retry:', error);
+      void retryDbUpdate(prev.id, updates, status);
     } finally {
       setBusyAction(null);
     }

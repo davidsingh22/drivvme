@@ -26,8 +26,8 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import { withTimeout } from '@/lib/withTimeout';
+import { persistRideStatus } from '@/lib/persistRideStatus';
 import DriverRideActionBar from '@/components/DriverRideActionBar';
-
 /** Fire push notification to rider immediately (don't wait for DB trigger) */
 const fireInstantPush = async (
   rideId: string,
@@ -256,54 +256,58 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     if (!activeRide || !driverId || busyAction) return;
     
     setBusyAction('start');
-    const previousRide = { ...activeRide };
-    setActiveRide({ ...activeRide, status: 'in_progress', pickup_at: new Date().toISOString() });
-    onRideUpdated?.({ ...activeRide, status: 'in_progress', pickup_at: new Date().toISOString() });
+    const pickupAt = new Date().toISOString();
+    setActiveRide({ ...activeRide, status: 'in_progress', pickup_at: pickupAt });
+    onRideUpdated?.({ ...activeRide, status: 'in_progress', pickup_at: pickupAt });
     
     toast({
       title: language === 'fr' ? 'Course démarrée!' : 'Ride started!',
       description: language === 'fr' ? 'En route vers la destination.' : 'Heading to the destination.',
     });
 
-    // Fire instant push (non-blocking)
     fireInstantPush(activeRide.id, 'in_progress', activeRide.status, activeRide.rider_id, driverId);
 
-    try {
-      const { error } = await withTimeout(
-        supabase
-          .from('rides')
-          .update({ status: 'in_progress', pickup_at: new Date().toISOString() })
-          .eq('id', activeRide.id)
-          .eq('driver_id', driverId)
-          .then(r => r),
-        7000, 'Start ride'
-      );
+    const updates = { status: 'in_progress', pickup_at: pickupAt };
 
-      if (error) {
-        console.warn('[DriverActiveRidePanel] startRide error, retrying:', error.message);
-        void retryDbWrite(activeRide.id, { status: 'in_progress', pickup_at: new Date().toISOString() });
+    try {
+      const saved = await persistRideStatus({
+        rideId: activeRide.id,
+        expectedStatus: 'in_progress',
+        updates,
+        driverId,
+        label: 'Start ride',
+        maxAttempts: 3,
+        baseDelayMs: 400,
+        timeoutMs: 6000,
+      });
+
+      if (!saved) {
+        console.warn('[DriverActiveRidePanel] startRide did not persist immediately, retrying');
+        void retryDbWrite(activeRide.id, updates, 'in_progress');
       }
     } catch (err) {
-      console.warn('[DriverActiveRidePanel] startRide timeout, retrying:', err);
-      void retryDbWrite(activeRide.id, { status: 'in_progress', pickup_at: new Date().toISOString() });
+      console.warn('[DriverActiveRidePanel] startRide failed, retrying:', err);
+      void retryDbWrite(activeRide.id, updates, 'in_progress');
     } finally {
       setBusyAction(null);
     }
   };
 
   // Background retry for DB writes
-  const retryDbWrite = useCallback(async (rideId: string, updates: Record<string, any>, attempt = 0) => {
-    const MAX = 5;
-    if (attempt >= MAX) { console.error('[DriverActiveRidePanel] retryDbWrite gave up'); return; }
-    try {
-      const { data: check } = await supabase.from('rides').select('status').eq('id', rideId).maybeSingle();
-      if (check?.status === updates.status) { console.log('[DriverActiveRidePanel] retryDbWrite: already done'); return; }
-      const { error } = await supabase.from('rides').update(updates).eq('id', rideId);
-      if (!error) { console.log('[DriverActiveRidePanel] retryDbWrite: success attempt', attempt + 1); return; }
-    } catch {}
-    await new Promise(r => setTimeout(r, 3000));
-    return retryDbWrite(rideId, updates, attempt + 1);
-  }, []);
+  const retryDbWrite = useCallback(async (rideId: string, updates: Record<string, any>, expectedStatus?: string) => {
+    const ok = await persistRideStatus({
+      rideId,
+      updates,
+      expectedStatus: expectedStatus ?? String(updates.status ?? ''),
+      driverId,
+      label: `Retry status to ${expectedStatus ?? String(updates.status ?? '')}`,
+      maxAttempts: 5,
+      baseDelayMs: 1000,
+      timeoutMs: 12000,
+    });
+
+    if (!ok) console.error('[DriverActiveRidePanel] retryDbWrite gave up', { rideId, expectedStatus, updates });
+  }, [driverId]);
 
   // End Ride action (transition to completed)
   const endRide = async () => {
@@ -326,7 +330,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         : `You earned ${formatCurrency(driverEarningsCalc, language)}`,
     });
 
-    // Fire instant push (non-blocking)
     fireInstantPush(rideId, 'completed', prevStatus, riderId, driverId);
 
     const updates = {
@@ -337,25 +340,24 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     };
 
     try {
-      const { error } = await withTimeout(
-        supabase
-          .from('rides')
-          .update(updates)
-          .eq('id', rideId)
-          .eq('driver_id', driverId)
-          .then(r => r),
-        7000, 'Complete ride'
-      );
+      const saved = await persistRideStatus({
+        rideId,
+        expectedStatus: 'completed',
+        updates,
+        driverId,
+        label: 'Complete ride',
+        maxAttempts: 3,
+        baseDelayMs: 400,
+        timeoutMs: 6000,
+      });
 
-      if (error) {
-        // Don't revert — start background retry
-        console.warn('[DriverActiveRidePanel] endRide DB error, retrying in background:', error.message);
-        void retryDbWrite(rideId, updates);
+      if (!saved) {
+        console.warn('[DriverActiveRidePanel] endRide did not persist immediately, retrying in background');
+        void retryDbWrite(rideId, updates, 'completed');
       }
     } catch (err) {
-      // Timeout — retry in background
-      console.warn('[DriverActiveRidePanel] endRide timeout, retrying in background:', err);
-      void retryDbWrite(rideId, updates);
+      console.warn('[DriverActiveRidePanel] endRide failed, retrying in background:', err);
+      void retryDbWrite(rideId, updates, 'completed');
     } finally {
       setBusyAction(null);
     }
@@ -431,7 +433,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     if (!activeRide || !driverId || busyAction) return;
     
     setBusyAction('arrived');
-    const previousRide = { ...activeRide };
     setActiveRide({ ...activeRide, status: 'arrived' });
     onRideUpdated?.({ ...activeRide, status: 'arrived' });
     setShowNavigation(false);
@@ -443,27 +444,29 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         : 'The rider has been notified of your arrival.',
     });
 
-    // Fire instant push (non-blocking, don't await)
     fireInstantPush(activeRide.id, 'arrived', activeRide.status, activeRide.rider_id, driverId);
 
-    try {
-      const { error } = await withTimeout(
-        supabase
-          .from('rides')
-          .update({ status: 'arrived' })
-          .eq('id', activeRide.id)
-          .eq('driver_id', driverId)
-          .then(r => r),
-        7000, 'Mark arrived'
-      );
+    const updates = { status: 'arrived' };
 
-      if (error) {
-        console.warn('[DriverActiveRidePanel] markArrived error, retrying:', error.message);
-        void retryDbWrite(activeRide.id, { status: 'arrived' });
+    try {
+      const saved = await persistRideStatus({
+        rideId: activeRide.id,
+        expectedStatus: 'arrived',
+        updates,
+        driverId,
+        label: 'Mark arrived',
+        maxAttempts: 3,
+        baseDelayMs: 400,
+        timeoutMs: 6000,
+      });
+
+      if (!saved) {
+        console.warn('[DriverActiveRidePanel] markArrived did not persist immediately, retrying');
+        void retryDbWrite(activeRide.id, updates, 'arrived');
       }
     } catch (err) {
-      console.warn('[DriverActiveRidePanel] markArrived timeout, retrying:', err);
-      void retryDbWrite(activeRide.id, { status: 'arrived' });
+      console.warn('[DriverActiveRidePanel] markArrived failed, retrying:', err);
+      void retryDbWrite(activeRide.id, updates, 'arrived');
     } finally {
       setBusyAction(null);
     }
