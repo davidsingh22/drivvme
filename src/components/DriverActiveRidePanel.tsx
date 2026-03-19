@@ -257,6 +257,15 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const startRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
     
+    // Ensure fresh auth before starting ride
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[DriverActiveRidePanel] startRide auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
+
     setBusyAction('start');
     const pickupAt = new Date().toISOString();
     setActiveRide({ ...activeRide, status: 'in_progress', pickup_at: pickupAt });
