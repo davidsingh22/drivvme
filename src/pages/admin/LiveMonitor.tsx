@@ -323,6 +323,7 @@ export default function LiveMonitor() {
       supabase
         .from('driver_locations')
         .select('user_id, updated_at')
+        .eq('is_online', true)
         .gte('updated_at', cutoff),
       supabase
         .from('user_roles')
@@ -719,6 +720,14 @@ export default function LiveMonitor() {
       })
       .subscribe();
 
+    // Listen for driver_profiles is_online changes (instant offline detection)
+    const driverProfileCh = supabase
+      .channel('admin-driver-profiles')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'driver_profiles' }, () => {
+        void loadOnlineUsers();
+      })
+      .subscribe();
+
     const poll = setInterval(loadOnlineUsers, 15_000);
 
     // Polling fallback: catch ride status changes that realtime may silently miss
@@ -733,49 +742,28 @@ export default function LiveMonitor() {
           .gte('updated_at', since)
           .order('updated_at', { ascending: false })
           .limit(20);
+        if (recentRides && recentRides.length > 0) {
+          for (const ride of recentRides) {
+            const statusMeta = RIDE_STATUS_LABELS[ride.status];
+            if (!statusMeta) continue;
+            const riderName = getCachedName(ride.rider_id || '');
+            const driverName = ride.driver_id ? getCachedName(ride.driver_id) : '';
+            const label = statusMeta.label;
+            const icon = statusMeta.icon;
 
-        if (!recentRides?.length) return;
+            pushFeedItem({
+              id: `ride-poll-${ride.id}-${ride.status}`,
+              icon,
+              message: `${label}${riderName ? ` – ${riderName}` : ''}${driverName ? ` → ${driverName}` : ''}: ${ride.pickup_address?.slice(0, 25) || '?'}→${ride.dropoff_address?.slice(0, 25) || '?'}`,
+              source: 'ride',
+              created_at: ride.updated_at || new Date().toISOString(),
+              feedRole: 'rider',
+            });
 
-        for (const ride of recentRides) {
-          const status = String(ride.status || '').toLowerCase();
-          const feedId = `ride-${ride.id}-${status}`;
-
-          // Skip if we already have this exact status update in the feed
-          if (feedIdsRef.current.has(feedId)) continue;
-
-          const riderId = ride.rider_id as string | null;
-          const driverId = ride.driver_id as string | null;
-          if (riderId) await upsertProfileNames([riderId]);
-          if (driverId) await upsertProfileNames([driverId]);
-
-          const riderName = riderId ? getCachedName(riderId) : 'Unknown';
-          const statusInfo = RIDE_STATUS_LABELS[status] || { icon: '📌', label: status || 'Updated' };
-
-          let message: string;
-          if (status === 'driver_assigned' && driverId) {
-            const driverName = getCachedName(driverId);
-            message = `${driverName} accepted ${riderName}'s ride — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
-          } else if (BOOKING_SUCCESS_STATUSES.has(status)) {
-            message = `${riderName}: Booking Successful`;
-          } else {
-            message = `${riderName}: ${statusInfo.label} — ${ride.pickup_address || '?'} → ${ride.dropoff_address || '?'}`;
+            if (['completed', 'cancelled'].includes(ride.status) && ride.id) {
+              removeOffersForRide(ride.id);
+            }
           }
-
-          const feedRole: FeedItem['feedRole'] = ['driver_assigned', 'driver_en_route', 'arrived', 'completed', 'cancelled'].includes(status) ? 'both' : 'rider';
-
-          // Remove active offers for cancelled/completed/assigned rides
-          if (['driver_assigned', 'cancelled', 'completed'].includes(status)) {
-            removeOffersForRide(ride.id);
-          }
-
-          pushFeedItem({
-            id: feedId,
-            icon: statusInfo.icon,
-            message,
-            source: 'rides',
-            created_at: ride.updated_at || new Date().toISOString(),
-            feedRole,
-          });
         }
       } catch (err) {
         console.error('LiveMonitor: ride poll fallback error', err);
@@ -789,6 +777,7 @@ export default function LiveMonitor() {
       supabase.removeChannel(notifCh);
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
+      supabase.removeChannel(driverProfileCh);
     };
   }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
 
