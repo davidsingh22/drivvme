@@ -352,8 +352,10 @@ const DriverDashboard = () => {
     return () => clearTimeout(timer);
   }, [session?.user?.id]);
 
-  // Track whether driver manually went offline this session
-  const manuallyToggledOffRef = useRef(false);
+  // Track whether driver manually went offline — persisted across page loads
+  const manuallyToggledOffRef = useRef(() => {
+    try { return localStorage.getItem('driver_manually_offline') === 'true'; } catch { return false; }
+  });
 
   // Auto-online: set driver online on mount and on app resume (unless manually toggled off)
   useEffect(() => {
