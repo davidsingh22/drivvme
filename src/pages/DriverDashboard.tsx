@@ -485,7 +485,7 @@ const DriverDashboard = () => {
       setCurrentRide(null);
       setRiderInfo(null);
       setShowGPSNavigation(false);
-      if (status === 'cancelled' && !wasRideJustCompleted(rideId)) {
+      if (status === 'cancelled' && !wasRecentDriverAction(rideId)) {
         toast({
           title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
           description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
