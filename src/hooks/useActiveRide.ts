@@ -89,14 +89,23 @@ export function useActiveRide(userId: string | undefined) {
 
     loadActiveRide();
 
-    // Re-check on app resume so completed rides don't linger
+    // Re-check on app resume/focus so completed rides don't linger on reopen.
+    const refreshActiveRide = () => {
+      void loadActiveRide();
+    };
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        loadActiveRide();
+        refreshActiveRide();
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pageshow', refreshActiveRide);
+    window.addEventListener('focus', refreshActiveRide);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pageshow', refreshActiveRide);
+      window.removeEventListener('focus', refreshActiveRide);
+    };
   }, [userId, persistRide]);
 
   // Update ride and persist
