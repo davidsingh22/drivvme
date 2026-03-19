@@ -1143,7 +1143,7 @@ const DriverDashboard = () => {
             setCurrentRide(null);
             setRiderInfo(null);
             setShowGPSNavigation(false);
-            if (updatedRide.status === 'cancelled') {
+            if (updatedRide.status === 'cancelled' && !wasRideJustCompleted(updatedRide.id)) {
               toast({
                 title: 'Ride cancelled',
                 description: 'The rider cancelled this ride',
