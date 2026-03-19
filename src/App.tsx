@@ -220,6 +220,7 @@ const AppRoutes = () => {
       </Suspense>
       <RiderLocationTracker />
       <PresenceTracker />
+      <SessionWatchdogRunner />
       <Suspense fallback={<LazyFallback />}>
       <Routes>
         <Route path="/" element={<Landing />} />
