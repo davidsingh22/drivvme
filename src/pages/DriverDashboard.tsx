@@ -561,13 +561,6 @@ const DriverDashboard = () => {
         console.log('[Recovery] Ride not in searching status for', rideId);
         return false;
       }
-
-      // Only show ride if current_driver_id matches this driver
-      const effectiveDriverId = session?.user?.id || user?.id;
-      if (ride.current_driver_id && effectiveDriverId && ride.current_driver_id !== effectiveDriverId) {
-        console.log('[Recovery] 🚫 Ride not targeted at this driver (current_driver_id:', ride.current_driver_id, ')');
-        return false;
-      }
       if (cancelled || currentRideRef.current || wasAlreadyHandled(ride.id) || isCurrentlyDisplayed(ride.id)) return false;
 
       // Only reject if ride is truly expired (>90s). Visual countdown always starts fresh at 25s.

@@ -487,14 +487,13 @@ serve(async (req) => {
 
     const driverUserIds = nearbyDrivers.map(d => d.user_id);
 
-    // Update ride with notified drivers + set current_driver_id for sequential dispatch
+    // Update ride with notified drivers
     await supabase
       .from("rides")
       .update({ 
         notification_tier: tier,
         last_notification_at: new Date().toISOString(),
         notified_driver_ids: [...new Set([...mergedExcludedDriverIds, ...driverUserIds])],
-        current_driver_id: driverUserIds[0] ?? null,
       })
       .eq("id", rideId);
 

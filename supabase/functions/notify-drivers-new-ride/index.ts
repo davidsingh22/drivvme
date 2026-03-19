@@ -515,14 +515,12 @@ serve(async (req) => {
     console.log("Found driver subscriptions:", subscriptions?.length || 0);
 
     // Update ride with the notified driver so escalation hook excludes them
-    // Set current_driver_id to the single closest driver for sequential dispatch
     await supabase
       .from("rides")
       .update({ 
         notification_tier: 1,
         last_notification_at: new Date().toISOString(),
         notified_driver_ids: driverUserIds,
-        current_driver_id: driverUserIds[0] ?? null,
       })
       .eq("id", rideId);
 
