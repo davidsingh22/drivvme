@@ -280,9 +280,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       );
 
       if (error) {
-        setActiveRide(previousRide);
-        onRideUpdated?.(previousRide);
-        toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        console.warn('[DriverActiveRidePanel] startRide error, retrying:', error.message);
+        void retryDbWrite(activeRide.id, { status: 'in_progress', pickup_at: new Date().toISOString() });
       }
     } catch (err) {
       console.warn('[DriverActiveRidePanel] startRide slow/timeout (optimistic kept):', err);
