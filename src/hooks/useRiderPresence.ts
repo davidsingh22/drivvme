@@ -104,9 +104,10 @@ export function useRiderPresence(currentScreen: ScreenName) {
       if (intervalRef.current) clearInterval(intervalRef.current);
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
       document.removeEventListener('visibilitychange', handleVisibility);
-      // Mark offline on unmount — uses THIS generation so it won't be blocked
-      // But if a new generation has already started, the stale check will skip it
-      upsertPresence('offline', undefined, gen);
+      // Do not mark offline on unmount.
+      // On mobile app reopen / route swaps, a stale page instance can unmount after a
+      // fresh page instance already marked the rider online, which incorrectly flips
+      // rider_presence back to offline.
     };
   }, [user?.id, isRider, upsertPresence]);
 

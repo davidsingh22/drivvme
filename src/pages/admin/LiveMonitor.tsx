@@ -81,6 +81,7 @@ interface RiderLocationRow {
   user_id: string;
   last_seen_at: string;
   updated_at: string;
+  is_online?: boolean;
 }
 
 interface DriverLocationRow {
@@ -176,13 +177,62 @@ export default function LiveMonitor() {
 
   // ── Rider Presence: fetch + realtime ──
   const loadRiderPresence = useCallback(async () => {
-    const cutoff = new Date(Date.now() - 60_000).toISOString();
-    const { data } = await supabase
-      .from('rider_presence' as any)
-      .select('user_id, display_name, status, current_screen, last_seen')
-      .eq('status', 'online')
-      .gte('last_seen', cutoff);
-    if (data) setRiderPresence(data as any);
+    const presenceCutoff = new Date(Date.now() - 60_000).toISOString();
+    const locationCutoff = new Date(Date.now() - ONLINE_THRESHOLD_MS).toISOString();
+
+    const [presenceRes, riderLocRes, rolesRes] = await Promise.all([
+      supabase
+        .from('rider_presence' as any)
+        .select('user_id, display_name, status, current_screen, last_seen')
+        .eq('status', 'online')
+        .gte('last_seen', presenceCutoff),
+      supabase
+        .from('rider_locations')
+        .select('user_id, last_seen_at, updated_at, is_online')
+        .eq('is_online', true)
+        .or(`last_seen_at.gte.${locationCutoff},updated_at.gte.${locationCutoff}`),
+      supabase
+        .from('user_roles')
+        .select('user_id, role'),
+    ]);
+
+    if (presenceRes.error || riderLocRes.error || rolesRes.error) {
+      console.error('LiveMonitor: failed loading rider presence', {
+        presenceError: presenceRes.error,
+        riderLocationError: riderLocRes.error,
+        rolesError: rolesRes.error,
+      });
+    }
+
+    const merged = new Map<string, RiderPresenceRow>();
+
+    ((presenceRes.data || []) as RiderPresenceRow[]).forEach((row) => {
+      merged.set(row.user_id, row);
+    });
+
+    const riderRoleSet = new Set(
+      ((rolesRes.data || []) as Array<{ user_id: string; role: string }>)
+        .filter((row) => row.role === 'rider')
+        .map((row) => row.user_id)
+    );
+
+    ((riderLocRes.data || []) as RiderLocationRow[]).forEach((row) => {
+      if (!riderRoleSet.has(row.user_id)) return;
+      if (merged.has(row.user_id)) return;
+
+      const lastSeen = row.last_seen_at || row.updated_at;
+      if (!lastSeen) return;
+
+      merged.set(row.user_id, {
+        user_id: row.user_id,
+        display_name: profileNameRef.current.get(row.user_id) || null,
+        status: 'online',
+        current_screen: 'home',
+        last_seen: lastSeen,
+      });
+    });
+
+    setRiderPresence([...merged.values()]);
   }, []);
 
   useEffect(() => {
