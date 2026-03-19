@@ -988,7 +988,7 @@ const DriverDashboard = () => {
                 setRiderInfo(null);
                 setShowGPSNavigation(false);
               }
-              if ((isRelevantAlertRide || isRelevantActiveRide) && !wasRideJustCompleted(notif.ride_id)) {
+              if ((isRelevantAlertRide || isRelevantActiveRide) && !wasRecentDriverAction(notif.ride_id)) {
                 toast({
                   title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
                   description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
