@@ -31,6 +31,7 @@ import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
 import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
+import { resilientCall, ensureFreshSession } from '@/lib/resilientRequest';
 import welcomeBg from '@/assets/drivveme-galaxy-bg-new.png';
 import rideBg from '@/assets/drivveme-ride-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
