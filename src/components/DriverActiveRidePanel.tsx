@@ -446,10 +446,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
     } catch (err) {
-      setActiveRide(previousRide);
-      onRideUpdated?.(previousRide);
-      console.error('[DriverActiveRidePanel] markArrived error:', err);
-      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+      // Don't revert optimistic update or show toast — DB write likely went through
+      console.warn('[DriverActiveRidePanel] markArrived slow/timeout (optimistic kept):', err);
     } finally {
       setBusyAction(null);
     }
