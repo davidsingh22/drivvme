@@ -839,6 +839,39 @@ const RideBooking = () => {
     };
   }, [currentRide?.id, t, toast]);
 
+  // Periodic DB poll: every 15s during active ride phases, check if ride ended
+  // This catches missed realtime events (e.g. after app was killed and reopened)
+  useEffect(() => {
+    if (!currentRide?.id) return;
+    const activePhases: RideStep[] = ['searching', 'matched', 'arriving', 'arrived', 'inProgress'];
+    if (!activePhases.includes(step)) return;
+
+    const poll = async () => {
+      try {
+        const { data: freshRide } = await supabase
+          .from('rides')
+          .select('status')
+          .eq('id', currentRide.id)
+          .maybeSingle();
+        if (freshRide && ['completed', 'cancelled'].includes(freshRide.status)) {
+          console.log('[RideBooking] Poll detected ride ended:', freshRide.status);
+          clearRide();
+          navigate('/rider-home', { replace: true });
+        }
+      } catch { /* ignore */ }
+    };
+
+    // Initial check after 3s (catches race on restore)
+    const initialTimer = setTimeout(poll, 3000);
+    // Then every 15s
+    const interval = setInterval(poll, 15000);
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+    };
+  }, [currentRide?.id, step, clearRide, navigate]);
+
   // Listen for ride_cancelled notifications from the driver (backup channel)
   useEffect(() => {
     if (!currentRide?.id || !user?.id) return;
