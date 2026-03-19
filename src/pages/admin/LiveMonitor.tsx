@@ -121,7 +121,7 @@ function timeAgo(ts: string): string {
 }
 
 export default function LiveMonitor() {
-  const { isAdmin, authLoading } = useAuth();
+  const { isAdmin, authLoading, profileLoading, roles } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -169,11 +169,11 @@ export default function LiveMonitor() {
   // Only redirect once on initial load — never kick out mid-session
   const adminCheckedRef = useRef(false);
   useEffect(() => {
-    if (authLoading) return;
-    if (adminCheckedRef.current) return; // already passed the gate
+    if (authLoading || profileLoading) return;
+    if (adminCheckedRef.current) return;
     adminCheckedRef.current = true;
-    if (!isAdmin) navigate('/login', { replace: true });
-  }, [authLoading, isAdmin, navigate]);
+    if (roles.length > 0 && !isAdmin) navigate('/login', { replace: true });
+  }, [authLoading, profileLoading, isAdmin, roles.length, navigate]);
 
   // ── Rider Presence: fetch + realtime ──
   const loadRiderPresence = useCallback(async () => {
@@ -800,7 +800,7 @@ export default function LiveMonitor() {
     };
   }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
 
-  if (authLoading || !isAdmin) {
+  if (authLoading || profileLoading || (!isAdmin && roles.length === 0)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading…</div>
