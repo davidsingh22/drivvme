@@ -729,8 +729,9 @@ const DriverDashboard = () => {
         }
         // NOTE: Do NOT mark is_read here if shown — only mark read on accept/decline/timeout
 
-        // STEP 4: Direct rides table poll — catches rides even if notification INSERT was missed
-        if (!pending?.ride_id && effectiveUserId) {
+        // STEP 4: Direct rides table poll — ALWAYS runs as fallback safety net
+        // Catches rides even if notification INSERT was missed or was marked read by a race condition
+        if (effectiveUserId && !cancelled) {
           console.log(`🟡 DRIVER POLL RUN — attempt=${attempt}, driverUserId=${effectiveUserId}`);
           try {
             const { data: searchingRides, error: pollError } = await supabase
