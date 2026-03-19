@@ -496,7 +496,7 @@ const RideBooking = () => {
   // Visibility listener: warm GPS on app resume (session refresh moved to payment handler)
   useEffect(() => {
     let lastHidden = 0;
-    const IDLE_THRESHOLD_MS = 2 * 60 * 1000;
+    const IDLE_THRESHOLD_MS = 5_000; // 5s — always re-check DB on resume
 
     const handleVisibility = async () => {
       if (document.visibilityState === 'hidden') {
@@ -505,14 +505,8 @@ const RideBooking = () => {
       }
 
       const idleMs = lastHidden ? Date.now() - lastHidden : 0;
-      if (idleMs < IDLE_THRESHOLD_MS) return;
 
-      console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's');
-
-      // Proactively refresh token so payment/ride creation don't hit expired JWT
-      getValidAccessToken().catch(() => {});
-
-      // If we're in an active ride phase, verify ride is still active in DB
+      // Always check ride status on resume when in an active ride phase
       if (currentRide?.id && ['searching', 'matched', 'arriving', 'arrived', 'inProgress', 'completed'].includes(step)) {
         try {
           const { data: freshRide } = await supabase
@@ -521,14 +515,22 @@ const RideBooking = () => {
             .eq('id', currentRide.id)
             .maybeSingle();
           if (freshRide && ['completed', 'cancelled'].includes(freshRide.status) && step !== 'completed') {
-            console.log('[RideBooking] Ride ended while app was backgrounded, redirecting home');
+            console.log('[RideBooking] Ride ended while backgrounded, redirecting home');
             clearRide();
             navigate('/rider-home', { replace: true });
             return;
           }
-        } catch { /* ignore, continue normally */ }
+        } catch { /* ignore */ }
       }
 
+      if (idleMs < IDLE_THRESHOLD_MS) return;
+
+      console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's');
+
+      // Proactively refresh token so payment/ride creation don't hit expired JWT
+      getValidAccessToken().catch(() => {});
+
+      // Ride status already checked above (before idle threshold)
       // Warm GPS so next action has a fresh position
       if ('geolocation' in navigator && (step === 'input' || step === 'estimate')) {
         navigator.geolocation.getCurrentPosition(
