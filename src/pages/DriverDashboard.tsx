@@ -436,14 +436,21 @@ const DriverDashboard = () => {
     const rideId = currentRide.id;
     let cleared = false;
 
-    const clearRide = (source: string, _status?: string) => {
+    const clearRide = (source: string, status?: string) => {
       if (cleared) return;
       cleared = true;
       console.log(`[DriverDashboard] 🚫 Ride cleared (${source}):`, rideId);
       setCurrentRide(null);
       setRiderInfo(null);
       setShowGPSNavigation(false);
-      // Toasts are already handled by DriverActiveRidePanel for both complete & cancel actions
+      // Only show "cancelled" toast when the ride was actually cancelled, not completed
+      if (status === 'cancelled') {
+        toast({
+          title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+          description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+          variant: 'destructive',
+        });
+      }
     };
 
     // Layer 1: Direct realtime subscription on the ride row itself
