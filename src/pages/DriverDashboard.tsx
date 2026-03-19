@@ -1556,9 +1556,9 @@ const DriverDashboard = () => {
 
     setBusyAction(status);
 
-    // Optimistic update — instant UI feedback
     const prev = { ...currentRide };
     rememberRideAction(prev.id, status);
+
     if (status === 'completed') {
       const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
       const fee = calculatePlatformFee(fareForFee);
@@ -1570,7 +1570,7 @@ const DriverDashboard = () => {
       setRiderInfo(null);
       setShowGPSNavigation(false);
     } else {
-      setCurrentRide((r) => r ? { ...r, status } : null);
+      setCurrentRide((r) => (r ? { ...r, status } : null));
       if (status === 'arrived') {
         toast({ title: language === 'fr' ? 'Arrivé!' : 'Arrived!' });
       } else if (status === 'in_progress') {
@@ -1578,49 +1578,33 @@ const DriverDashboard = () => {
       }
     }
 
+    const updates: Record<string, any> = { status };
+    if (status === 'in_progress') {
+      updates.pickup_at = new Date().toISOString();
+    } else if (status === 'completed') {
+      updates.dropoff_at = new Date().toISOString();
+      const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
+      const fee = calculatePlatformFee(fareForFee);
+      updates.actual_fare = prev.estimated_fare;
+      updates.platform_fee = fee;
+      updates.driver_earnings = fareForFee - fee;
+    }
+
     try {
-      const updates: any = { status };
-      if (status === 'in_progress') {
-        updates.pickup_at = new Date().toISOString();
-      } else if (status === 'completed') {
-        updates.dropoff_at = new Date().toISOString();
-        const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
-        const fee = calculatePlatformFee(fareForFee);
-        updates.actual_fare = prev.estimated_fare;
-        updates.platform_fee = fee;
-        updates.driver_earnings = fareForFee - fee;
-      }
+      const saved = await persistRideStatus({
+        rideId: prev.id,
+        expectedStatus: status,
+        updates,
+        driverId: user.id,
+        label: `Update status to ${status}`,
+        maxAttempts: 3,
+        baseDelayMs: 400,
+        timeoutMs: 6000,
+      });
 
-      const { error } = await withTimeout(
-        supabase.from('rides').update(updates).eq('id', prev.id).then(r => r),
-        15000,
-        `Update status to ${status}`
-      );
-
-      if (error) {
-        let confirmedStatus = false;
-        try {
-          const { data: latestRide } = await supabase
-            .from('rides')
-            .select('status')
-            .eq('id', prev.id)
-            .maybeSingle();
-          confirmedStatus = latestRide?.status === status;
-        } catch (verificationError) {
-          console.warn('[DriverDashboard] verifyRideStatus failed:', verificationError);
-        }
-
-        if (confirmedStatus) {
-          console.warn('[DriverDashboard] updateRideStatus returned an error after the ride was already saved:', error);
-          if (status === 'completed') {
-            void refreshDriverProfile();
-          }
-          return;
-        }
-
-        // Don't revert or show error — start background retry instead
-        console.warn('[DriverDashboard] updateRideStatus error, starting background retry:', error.message);
-        void retryDbUpdate(prev.id, updates);
+      if (!saved) {
+        console.warn('[DriverDashboard] updateRideStatus did not persist immediately, starting background retry');
+        void retryDbUpdate(prev.id, updates, status);
         return;
       }
 
@@ -1628,20 +1612,8 @@ const DriverDashboard = () => {
         void refreshDriverProfile();
       }
     } catch (error) {
-      // Timeout — start background retry to ensure DB is updated
-      console.warn('[DriverDashboard] updateRideStatus timeout, starting background retry:', error);
-      const updates: any = { status };
-      if (status === 'in_progress') {
-        updates.pickup_at = new Date().toISOString();
-      } else if (status === 'completed') {
-        updates.dropoff_at = new Date().toISOString();
-        const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
-        const fee = calculatePlatformFee(fareForFee);
-        updates.actual_fare = prev.estimated_fare;
-        updates.platform_fee = fee;
-        updates.driver_earnings = fareForFee - fee;
-      }
-      void retryDbUpdate(prev.id, updates);
+      console.warn('[DriverDashboard] updateRideStatus failed, starting background retry:', error);
+      void retryDbUpdate(prev.id, updates, status);
     } finally {
       setBusyAction(null);
     }

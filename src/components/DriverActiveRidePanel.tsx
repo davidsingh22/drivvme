@@ -433,7 +433,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     if (!activeRide || !driverId || busyAction) return;
     
     setBusyAction('arrived');
-    const previousRide = { ...activeRide };
     setActiveRide({ ...activeRide, status: 'arrived' });
     onRideUpdated?.({ ...activeRide, status: 'arrived' });
     setShowNavigation(false);
@@ -445,27 +444,29 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         : 'The rider has been notified of your arrival.',
     });
 
-    // Fire instant push (non-blocking, don't await)
     fireInstantPush(activeRide.id, 'arrived', activeRide.status, activeRide.rider_id, driverId);
 
-    try {
-      const { error } = await withTimeout(
-        supabase
-          .from('rides')
-          .update({ status: 'arrived' })
-          .eq('id', activeRide.id)
-          .eq('driver_id', driverId)
-          .then(r => r),
-        7000, 'Mark arrived'
-      );
+    const updates = { status: 'arrived' };
 
-      if (error) {
-        console.warn('[DriverActiveRidePanel] markArrived error, retrying:', error.message);
-        void retryDbWrite(activeRide.id, { status: 'arrived' });
+    try {
+      const saved = await persistRideStatus({
+        rideId: activeRide.id,
+        expectedStatus: 'arrived',
+        updates,
+        driverId,
+        label: 'Mark arrived',
+        maxAttempts: 3,
+        baseDelayMs: 400,
+        timeoutMs: 6000,
+      });
+
+      if (!saved) {
+        console.warn('[DriverActiveRidePanel] markArrived did not persist immediately, retrying');
+        void retryDbWrite(activeRide.id, updates, 'arrived');
       }
     } catch (err) {
-      console.warn('[DriverActiveRidePanel] markArrived timeout, retrying:', err);
-      void retryDbWrite(activeRide.id, { status: 'arrived' });
+      console.warn('[DriverActiveRidePanel] markArrived failed, retrying:', err);
+      void retryDbWrite(activeRide.id, updates, 'arrived');
     } finally {
       setBusyAction(null);
     }
