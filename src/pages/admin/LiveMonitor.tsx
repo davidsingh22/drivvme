@@ -183,9 +183,7 @@ export default function LiveMonitor() {
     const [presenceRes, riderLocRes, rolesRes] = await Promise.all([
       supabase
         .from('rider_presence' as any)
-        .select('user_id, display_name, status, current_screen, last_seen')
-        .eq('status', 'online')
-        .gte('last_seen', presenceCutoff),
+        .select('user_id, display_name, status, current_screen, last_seen'),
       supabase
         .from('rider_locations')
         .select('user_id, last_seen_at, updated_at, is_online')
@@ -205,9 +203,18 @@ export default function LiveMonitor() {
     }
 
     const merged = new Map<string, RiderPresenceRow>();
+    const recentOnlinePresence = ((presenceRes.data || []) as Array<any>).filter((row) => (
+      row?.status === 'online' && row?.last_seen && new Date(row.last_seen).getTime() >= Date.now() - 60_000
+    ));
 
-    ((presenceRes.data || []) as RiderPresenceRow[]).forEach((row) => {
-      merged.set(row.user_id, row);
+    recentOnlinePresence.forEach((row) => {
+      merged.set(row.user_id, {
+        user_id: row.user_id,
+        display_name: row.display_name ?? null,
+        status: row.status,
+        current_screen: row.current_screen,
+        last_seen: row.last_seen,
+      });
     });
 
     const riderRoleSet = new Set(
