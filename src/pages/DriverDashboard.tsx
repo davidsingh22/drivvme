@@ -115,12 +115,42 @@ const DriverDashboard = () => {
     recentRideActionRef.current = { rideId, status, at: Date.now() };
   };
 
-  const wasRideJustCompleted = (rideId?: string | null) => {
+  /** Returns true if the driver just performed ANY action on this ride (within 30s).
+   *  Used to suppress false "Ride cancelled" toasts from realtime/polling. */
+  const wasRecentDriverAction = (rideId?: string | null) => {
     const recent = recentRideActionRef.current;
-    if (!recent || recent.status !== 'completed') return false;
-    if (Date.now() - recent.at > 20000) return false;
+    if (!recent) return false;
+    if (Date.now() - recent.at > 30000) return false;
     return !rideId || recent.rideId === rideId;
   };
+
+  /** Background retry: keeps attempting a DB update until it succeeds (max 5 retries). */
+  const retryDbUpdate = useCallback(async (rideId: string, updates: Record<string, any>, attempt = 0) => {
+    const MAX_RETRIES = 5;
+    const DELAY = 3000;
+    if (attempt >= MAX_RETRIES) {
+      console.error('[DriverDashboard] retryDbUpdate: gave up after', MAX_RETRIES, 'attempts for ride', rideId);
+      return;
+    }
+    try {
+      // First check if already in desired status
+      const { data: check } = await supabase.from('rides').select('status').eq('id', rideId).maybeSingle();
+      if (check?.status === updates.status) {
+        console.log('[DriverDashboard] retryDbUpdate: ride already in', updates.status);
+        return;
+      }
+      const { error } = await supabase.from('rides').update(updates).eq('id', rideId);
+      if (!error) {
+        console.log('[DriverDashboard] retryDbUpdate: success on attempt', attempt + 1);
+        return;
+      }
+      console.warn('[DriverDashboard] retryDbUpdate: attempt', attempt + 1, 'failed:', error.message);
+    } catch (e) {
+      console.warn('[DriverDashboard] retryDbUpdate: attempt', attempt + 1, 'exception:', e);
+    }
+    await new Promise(r => setTimeout(r, DELAY));
+    return retryDbUpdate(rideId, updates, attempt + 1);
+  }, []);
 
   // Keep refs in sync with state
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
@@ -455,7 +485,7 @@ const DriverDashboard = () => {
       setCurrentRide(null);
       setRiderInfo(null);
       setShowGPSNavigation(false);
-      if (status === 'cancelled' && !wasRideJustCompleted(rideId)) {
+      if (status === 'cancelled' && !wasRecentDriverAction(rideId)) {
         toast({
           title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
           description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
@@ -958,7 +988,7 @@ const DriverDashboard = () => {
                 setRiderInfo(null);
                 setShowGPSNavigation(false);
               }
-              if ((isRelevantAlertRide || isRelevantActiveRide) && !wasRideJustCompleted(notif.ride_id)) {
+              if ((isRelevantAlertRide || isRelevantActiveRide) && !wasRecentDriverAction(notif.ride_id)) {
                 toast({
                   title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
                   description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
@@ -1076,7 +1106,7 @@ const DriverDashboard = () => {
           const updated = payload.new as any;
           if (updated.status === 'cancelled' || (updated.driver_id && updated.driver_id !== user?.id)) {
             dismissAlert('realtime: ' + updated.status);
-            if (updated.status === 'cancelled' && !wasRideJustCompleted(updated.id)) {
+            if (updated.status === 'cancelled' && !wasRecentDriverAction(updated.id)) {
               toast({
                 title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
                 description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
@@ -1102,7 +1132,7 @@ const DriverDashboard = () => {
         // If ride is no longer visible or status changed
         if (error || !data || data.status !== 'searching' || (data.driver_id && data.driver_id !== user?.id)) {
           dismissAlert('poll: ' + (data?.status || 'not visible'));
-          if (data?.status === 'cancelled' && !wasRideJustCompleted(rideId)) {
+          if (data?.status === 'cancelled' && !wasRecentDriverAction(rideId)) {
             toast({
               title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
               description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
@@ -1143,7 +1173,7 @@ const DriverDashboard = () => {
             setCurrentRide(null);
             setRiderInfo(null);
             setShowGPSNavigation(false);
-            if (updatedRide.status === 'cancelled' && !wasRideJustCompleted(updatedRide.id)) {
+            if (updatedRide.status === 'cancelled' && !wasRecentDriverAction(updatedRide.id)) {
               toast({
                 title: 'Ride cancelled',
                 description: 'The rider cancelled this ride',
@@ -1598,8 +1628,9 @@ const DriverDashboard = () => {
           return;
         }
 
-        setCurrentRide(prev);
-        toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        // Don't revert or show error — start background retry instead
+        console.warn('[DriverDashboard] updateRideStatus error, starting background retry:', error.message);
+        void retryDbUpdate(prev.id, updates);
         return;
       }
 
@@ -1607,8 +1638,20 @@ const DriverDashboard = () => {
         void refreshDriverProfile();
       }
     } catch (error) {
-      // Don't revert optimistic update or show toast — the DB write likely went through
-      console.warn('[DriverDashboard] updateRideStatus slow/timeout (optimistic kept):', error);
+      // Timeout — start background retry to ensure DB is updated
+      console.warn('[DriverDashboard] updateRideStatus timeout, starting background retry:', error);
+      const updates: any = { status };
+      if (status === 'in_progress') {
+        updates.pickup_at = new Date().toISOString();
+      } else if (status === 'completed') {
+        updates.dropoff_at = new Date().toISOString();
+        const fareForFee = prev.subtotal_before_tax ?? prev.estimated_fare;
+        const fee = calculatePlatformFee(fareForFee);
+        updates.actual_fare = prev.estimated_fare;
+        updates.platform_fee = fee;
+        updates.driver_earnings = fareForFee - fee;
+      }
+      void retryDbUpdate(prev.id, updates);
     } finally {
       setBusyAction(null);
     }
