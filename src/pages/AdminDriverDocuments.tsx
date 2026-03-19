@@ -45,7 +45,7 @@ interface DriverDocument {
 }
 
 const AdminDriverDocuments = () => {
-  const { user, isLoading: authLoading, roles } = useAuth();
+  const { user, isLoading: authLoading, profileLoading, roles } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   
@@ -58,9 +58,10 @@ const AdminDriverDocuments = () => {
   const isAdmin = roles.includes('admin' as any);
 
   useEffect(() => {
-    if (!authLoading && !user) {
+    if (authLoading || profileLoading) return;
+    if (!user) {
       navigate('/login');
-    } else if (!authLoading && !isAdmin) {
+    } else if (roles.length > 0 && !isAdmin) {
       navigate('/');
       toast({
         title: 'Access Denied',
@@ -68,7 +69,7 @@ const AdminDriverDocuments = () => {
         variant: 'destructive',
       });
     }
-  }, [user, authLoading, isAdmin, navigate, toast]);
+  }, [user, authLoading, profileLoading, isAdmin, roles.length, navigate, toast]);
 
   useEffect(() => {
     if (user && isAdmin) {
