@@ -1719,109 +1719,142 @@ const RideBooking = () => {
     setIsCancelling(true);
     toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
 
-    // Ensure fresh auth token BEFORE any cancel attempt (mobile sessions often expire)
-    let freshToken: string | null = null;
     try {
-      freshToken = await getValidAccessToken();
-    } catch {
-      console.warn('[Cancel] Could not refresh token, proceeding with existing session');
-    }
+      let cancelConfirmed = false;
+      let confirmedDriverId: string | null = targetDriverId;
+      let lastError: unknown = null;
 
-    let confirmedDriverId: string | null = targetDriverId;
-    const rideStatus = currentRide.status;
-
-    const cancelBody = JSON.stringify({
-      status: 'cancelled',
-      cancelled_at: new Date().toISOString(),
-      cancelled_by: userId,
-      cancel_reason: 'Cancelled by rider',
-      cancellation_reason: 'Cancelled by rider',
-    });
-
-    // Fire RPC + REST in parallel for speed
-    const rpcPromise = withTimeout(
-      supabase
-        .rpc('cancel_ride', { p_ride_id: rideId, p_reason: 'Cancelled by rider' })
-        .then((r) => r),
-      4000,
-      'Cancel ride (RPC)'
-    ).then(({ data: rpcRide, error: rpcError }) => {
-      if (!rpcError && rpcRide?.status === 'cancelled') {
-        confirmedDriverId = rpcRide.driver_id ?? confirmedDriverId;
-        return true;
-      }
-      if (rpcError) console.warn('[Cancel] RPC failed:', rpcError);
-      return false;
-    }).catch((err) => {
-      console.warn('[Cancel] RPC timeout/error:', err);
-      return false;
-    });
-
-    const restPromise = (async () => {
+      // ATTEMPT 1: RPC (fastest path — atomic server-side cancel)
       try {
-        const token = freshToken || (await getValidAccessToken().catch(() => null));
-        if (!token) return false;
-        const controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), 4000);
-        try {
-          const res = await fetch(
-            `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${userId}&select=id,status,driver_id`,
-            {
-              method: 'PATCH',
-              headers: {
-                'Content-Type': 'application/json',
-                apikey: ANON_KEY,
-                Authorization: `Bearer ${token}`,
-                Prefer: 'return=representation',
-              },
-              body: cancelBody,
-              signal: controller.signal,
-              keepalive: true,
-            }
-          );
-          if (res.ok) {
-            const rows = (await res.json().catch(() => [])) as Array<{ status?: string; driver_id?: string | null }>;
-            const row = Array.isArray(rows) ? rows[0] : null;
-            confirmedDriverId = row?.driver_id ?? confirmedDriverId;
-            return row?.status === 'cancelled';
-          }
-        } finally {
-          window.clearTimeout(timeout);
+        const { data: rpcRide, error: rpcError } = await withTimeout(
+          supabase
+            .rpc('cancel_ride', {
+              p_ride_id: rideId,
+              p_reason: 'Cancelled by rider',
+            })
+            .then((r) => r),
+          6000,
+          'Cancel ride (RPC)'
+        );
+
+        if (!rpcError && rpcRide?.status === 'cancelled') {
+          cancelConfirmed = true;
+          confirmedDriverId = rpcRide.driver_id ?? confirmedDriverId;
+        } else if (rpcError) {
+          lastError = rpcError;
+          console.warn('[Cancel] RPC failed:', rpcError);
         }
-      } catch (err) {
-        console.warn('[Cancel] REST fallback failed:', err);
+      } catch (rpcErr) {
+        lastError = rpcErr;
+        console.warn('[Cancel] RPC timeout/error:', rpcErr);
       }
-      return false;
-    })();
 
-    // Wait for either to succeed, but hard-cap at 5s then redirect anyway
-    await Promise.race([
-      Promise.all([rpcPromise, restPromise]).then(([a, b]) => a || b),
-      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000)),
-    ]);
+      // ATTEMPT 2: REST PATCH fallback (only if RPC didn't confirm)
+      if (!cancelConfirmed) {
+        try {
+          const token = await getValidAccessToken();
+          const controller = new AbortController();
+          const timeout = window.setTimeout(() => controller.abort(), 6000);
 
-    // Best-effort notifications (fire and forget)
-    const driverIdForNotify = confirmedDriverId || targetDriverId || null;
-    if (driverIdForNotify) {
-      void supabase.functions.invoke('ride-status-push', {
-        body: {
-          ride_id: rideId,
-          rider_id: userId,
-          driver_id: driverIdForNotify,
-          new_status: 'cancelled',
-          old_status: rideStatus,
-        },
+          try {
+            const res = await fetch(
+              `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&rider_id=eq.${userId}&select=id,status,driver_id`,
+              {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  apikey: ANON_KEY,
+                  Authorization: `Bearer ${token}`,
+                  Prefer: 'return=representation',
+                },
+                body: JSON.stringify({
+                  status: 'cancelled',
+                  cancelled_at: new Date().toISOString(),
+                  cancelled_by: userId,
+                  cancel_reason: 'Cancelled by rider',
+                  cancellation_reason: 'Cancelled by rider',
+                }),
+                signal: controller.signal,
+                keepalive: true,
+              }
+            );
+
+            if (res.ok) {
+              const rows = (await res.json().catch(() => [])) as Array<{
+                status?: string;
+                driver_id?: string | null;
+              }>;
+              const row = Array.isArray(rows) ? rows[0] : null;
+              confirmedDriverId = row?.driver_id ?? confirmedDriverId;
+              if (row?.status === 'cancelled') {
+                cancelConfirmed = true;
+              }
+            }
+          } finally {
+            window.clearTimeout(timeout);
+          }
+        } catch (fallbackErr) {
+          lastError = fallbackErr;
+          console.warn('[Cancel] REST fallback failed:', fallbackErr);
+        }
+      }
+
+      // ATTEMPT 3: Quick single verification (only if neither method confirmed)
+      if (!cancelConfirmed) {
+        const verification = await verifyCancellation(rideId, userId, 2);
+        confirmedDriverId = verification.driverId ?? confirmedDriverId;
+        if (verification.confirmed) {
+          cancelConfirmed = true;
+        }
+        lastError = verification.lastError ?? lastError;
+      }
+
+      if (!cancelConfirmed) {
+        throw new Error(
+          lastError instanceof Error
+            ? lastError.message
+            : language === 'fr'
+              ? 'Annulation non confirmée, veuillez réessayer.'
+              : 'Cancellation was not confirmed, please try again.'
+        );
+      }
+
+      // Best-effort notifications after cancellation is confirmed
+      const driverIdForNotify = confirmedDriverId || targetDriverId || null;
+      if (driverIdForNotify) {
+        void supabase.functions.invoke('ride-status-push', {
+          body: {
+            ride_id: rideId,
+            rider_id: userId,
+            driver_id: driverIdForNotify,
+            new_status: 'cancelled',
+            old_status: currentRide.status,
+          },
+        });
+
+        localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+      }
+
+      // Cleanup stale offer notifications (best-effort)
+      void supabase
+        .from('notifications')
+        .delete()
+        .eq('ride_id', rideId)
+        .eq('type', 'new_ride');
+
+      resetBooking();
+      window.location.href = '/rider-home';
+    } catch (err: any) {
+      console.error('[RideBooking] Cancel ride failed:', err);
+      toast({
+        title: language === 'fr' ? 'Échec de l’annulation' : 'Cancel failed',
+        description: err?.message || (language === 'fr' ? 'Veuillez réessayer.' : 'Please try again.'),
+        variant: 'destructive',
       });
-      localStorage.removeItem(`drivvme_last_accepted_driver_${rideId}`);
+    } finally {
+      cancelInFlightRef.current = false;
+      setIsCancelling(false);
     }
-
-    void supabase.from('notifications').delete().eq('ride_id', rideId).eq('type', 'new_ride');
-
-    // ALWAYS redirect — never leave user stuck
-    cancelInFlightRef.current = false;
-    setIsCancelling(false);
-    resetBooking();
-    window.location.href = '/rider-home';
   };
   const resetBooking = () => {
     setStep('input');
