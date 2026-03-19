@@ -34,12 +34,14 @@ export function usePresenceHeartbeat() {
 
     const upsertPresence = async () => {
       try {
-        const token = await getValidAccessToken().catch(() => null);
-        if (!token) {
-          console.warn('[Presence] No valid session token for heartbeat');
-          return;
-        }
+        // Ensure fresh auth before every heartbeat write
+        await ensureFreshSession();
+      } catch {
+        console.warn('[Presence] Session refresh failed, skipping heartbeat');
+        return;
+      }
 
+      try {
         const { error } = await supabase.from('presence').upsert(
           {
             user_id: user.id,
