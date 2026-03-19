@@ -89,7 +89,10 @@ const DriverDashboard = () => {
   } = usePushNotifications();
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
-  const [isOnline, setIsOnline] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => {
+    // Default to online UNLESS driver manually went offline
+    try { return localStorage.getItem('driver_manually_offline') !== 'true'; } catch { return true; }
+  });
   // availableRides removed — push-only dispatch, no feed
   const [currentRide, setCurrentRide] = useState<RideRequest | null>(null);
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
