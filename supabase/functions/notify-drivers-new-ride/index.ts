@@ -427,12 +427,31 @@ serve(async (req) => {
       return { enabled: true, escalatedTiers };
     };
 
-    // Get all online drivers with their current location
-    const { data: onlineDrivers, error: driverError } = await supabase
-      .from("driver_profiles")
-      .select("user_id, current_lat, current_lng")
-      .eq("is_online", true)
-      .eq("is_verified", true);
+    // Get all online drivers from driver_locations (single source of truth for online status)
+    // Then join with driver_profiles for verification and coordinates
+    const { data: onlineLocationRows, error: locError } = await supabase
+      .from("driver_locations")
+      .select("driver_id, lat, lng")
+      .eq("is_online", true);
+
+    if (locError) {
+      console.error("Error fetching online driver locations:", locError);
+      return new Response(JSON.stringify({ error: "Failed to fetch drivers" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const onlineDriverIds = (onlineLocationRows || []).map(r => r.driver_id);
+
+    // Only consider verified drivers that are in the online locations list
+    const { data: onlineDrivers, error: driverError } = onlineDriverIds.length > 0
+      ? await supabase
+          .from("driver_profiles")
+          .select("user_id, current_lat, current_lng")
+          .in("user_id", onlineDriverIds)
+          .eq("is_verified", true)
+      : { data: [] as any[], error: null };
 
     if (driverError) {
       console.error("Error fetching online drivers:", driverError);
