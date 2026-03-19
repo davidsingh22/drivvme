@@ -772,12 +772,12 @@ const DriverDashboard = () => {
     // ALWAYS run the ladder — even without userId (auth-free path uses ride_id directly)
     const initialTimers = runLadder();
 
-    // Poll every 3 seconds as safety net — start immediately if authenticated,
-    // otherwise the onAuthStateChange SIGNED_IN handler will start it.
-    let intervalId = userId ? window.setInterval(() => checkPendingOffers(99), 3000) : 0;
+    // Poll every 3 seconds as safety net — ALWAYS start, never conditional
+    let intervalId = window.setInterval(() => checkPendingOffers(99), 3000);
     const ensurePolling = () => {
+      // Polling is always running — this is a no-op safety net
       if (!intervalId) {
-        console.log('[Recovery] ▶️ Starting 3s polling interval (auth just arrived)');
+        console.log('[Recovery] ▶️ Re-starting 3s polling interval');
         intervalId = window.setInterval(() => checkPendingOffers(99), 3000);
       }
     };
