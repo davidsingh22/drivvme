@@ -1787,6 +1787,19 @@ const RideBooking = () => {
       return;
     }
 
+    // Ensure fresh auth before cancelling
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[RideBooking] handleCancelRide auth refresh failed:', authErr);
+      toast({
+        title: language === 'fr' ? 'Session expirée' : 'Session expired',
+        description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     cancelInFlightRef.current = true;
     setIsCancelling(true);
     toast({ title: language === 'fr' ? 'Annulation…' : 'Cancelling ride…' });
