@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { upsertDriverLocation, setDriverOffline } from '@/lib/driverLocation';
+import { ensureFreshSession } from '@/lib/resilientRequest';
 
 interface UseDriverLocationTrackingOptions {
   userId: string | undefined;
