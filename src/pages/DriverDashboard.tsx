@@ -767,6 +767,7 @@ const DriverDashboard = () => {
 
                 console.log(`🟢 RIDE FOUND FOR DRIVER — ride=${sr.id}, age=${Math.round(srAge)}s`);
                 const directShown = await showOfferForRide(sr.id);
+                if (cancelled) break;
                 console.log(`🟢 SHOWING RIDE MODAL — ride=${sr.id}, shown=${directShown}`);
                 if (directShown) break;
               }
