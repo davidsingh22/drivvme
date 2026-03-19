@@ -323,6 +323,7 @@ export default function LiveMonitor() {
       supabase
         .from('driver_locations')
         .select('user_id, updated_at')
+        .eq('is_online', true)
         .gte('updated_at', cutoff),
       supabase
         .from('user_roles')
