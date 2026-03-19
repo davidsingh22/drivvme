@@ -493,6 +493,18 @@ const RideBooking = () => {
     }
   }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
+  const exitEndedRide = useCallback(() => {
+    console.log('[RideBooking] Clearing ended ride state and returning rider home');
+    setCurrentRide(null);
+    setDriverInfo(null);
+    driverInfoRef.current = null;
+    driverInfoFetchedForId.current = null;
+    setDriverLocation(null);
+    setStep('input');
+    clearRide();
+    navigate('/rider-home', { replace: true });
+  }, [clearRide, navigate]);
+
   // Visibility listener: warm GPS on app resume (session refresh moved to payment handler)
   useEffect(() => {
     let lastHidden = 0;
@@ -514,13 +526,15 @@ const RideBooking = () => {
             .select('status')
             .eq('id', currentRide.id)
             .maybeSingle();
-          if (freshRide && ['completed', 'cancelled'].includes(freshRide.status) && step !== 'completed') {
-            console.log('[RideBooking] Ride ended while backgrounded, redirecting home');
-            clearRide();
-            navigate('/rider-home', { replace: true });
+
+          if (freshRide && ['completed', 'cancelled'].includes(freshRide.status)) {
+            console.log('[RideBooking] Ride ended while backgrounded, returning rider home');
+            exitEndedRide();
             return;
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
 
       if (idleMs < IDLE_THRESHOLD_MS) return;
@@ -552,9 +566,18 @@ const RideBooking = () => {
       }
     };
 
+    const handlePageShow = () => {
+      void handleVisibility();
+    };
+
     document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [step, mapboxToken, reverseGeocode, currentRide?.id, clearRide, navigate]);
+    window.addEventListener('pageshow', handlePageShow);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pageshow', handlePageShow);
+    };
+  }, [step, mapboxToken, reverseGeocode, currentRide?.id, exitEndedRide]);
 
   // Phase 3: If arriving from /search with a destination, auto-fill and jump to estimate
   const hasAppliedSearchState = useRef(false);
@@ -641,7 +664,9 @@ const RideBooking = () => {
             setPickup({ address: pickupAddr, lat: data.lat, lng: data.lng });
             resolved = true;
           }
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
 
       // Last resort: Montreal defaults
@@ -661,7 +686,6 @@ const RideBooking = () => {
     // Clear the state so refreshing doesn't re-trigger
     window.history.replaceState({}, document.title);
   }, [routeLocation.state, user?.id]);
-
 
   // Detect ?new=1 parameter to force a fresh booking flow
   useEffect(() => {
@@ -685,7 +709,7 @@ const RideBooking = () => {
     // If the ride is already completed or cancelled, don't restore — go to clean state
     if (['completed', 'cancelled'].includes(activeRide.status)) {
       console.log('[RideBooking] Ride already finished, clearing stale state');
-      clearRide();
+      exitEndedRide();
       return;
     }
 
@@ -756,7 +780,13 @@ const RideBooking = () => {
       });
     };
     checkPaymentAndRestore();
-  }, [activeRide, activeRideLoading, toast]);
+  }, [activeRide, activeRideLoading, toast, exitEndedRide]);
+
+  useEffect(() => {
+    if (activeRideLoading || activeRide || !currentRide?.id || step !== 'completed') return;
+    console.log('[RideBooking] Completed ride no longer active after sync, returning rider home');
+    exitEndedRide();
+  }, [activeRideLoading, activeRide, currentRide?.id, step, exitEndedRide]);
 
   // Subscribe to ride updates via realtime
   useEffect(() => {
