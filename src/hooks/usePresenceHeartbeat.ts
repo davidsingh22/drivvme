@@ -86,8 +86,9 @@ export function usePresenceHeartbeat() {
     // Visibility change: recover session + send heartbeat on return
     const handleVisibility = async () => {
       if (document.visibilityState === 'visible') {
-        const token = await getValidAccessToken().catch(() => null);
-        if (!token) {
+        try {
+          await ensureFreshSession();
+        } catch {
           console.warn('[Presence] Session recovery failed on visibility resume');
           return;
         }

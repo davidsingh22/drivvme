@@ -45,6 +45,9 @@ export function useDriverLocationTracking({
       return;
     }
 
+    // Ensure fresh auth before every location write
+    try { await ensureFreshSession(); } catch { /* proceed anyway */ }
+
     console.log('[DriverLocationTracking] Getting position...', { userId, driverId, online });
 
     navigator.geolocation.getCurrentPosition(
