@@ -493,8 +493,8 @@ const RideBooking = () => {
     }
   }, [pickup, pickupAddress, mapboxToken, reverseGeocode]);
 
-  const exitEndedRide = useCallback(() => {
-    console.log('[RideBooking] Clearing ended ride state and returning rider home');
+  const exitEndedRide = useCallback((reason = 'ended ride sync') => {
+    console.log('[RideBooking] Clearing ended ride state and returning rider home:', reason);
     setCurrentRide(null);
     setDriverInfo(null);
     driverInfoRef.current = null;
@@ -504,6 +504,84 @@ const RideBooking = () => {
     clearRide();
     navigate('/rider-home', { replace: true });
   }, [clearRide, navigate]);
+
+  const syncCurrentRideState = useCallback((updatedRide: any, source: 'realtime' | 'poll' | 'resume' | 'active-ride-sync' = 'realtime') => {
+    if (!updatedRide) return;
+
+    const previousStatus = currentRide?.status ?? null;
+    const nextStatus = updatedRide.status;
+
+    if (nextStatus === 'completed') {
+      console.log('[RideBooking] Clearing completed ride immediately from', source);
+      exitEndedRide(`ride completed via ${source}`);
+      return;
+    }
+
+    if (nextStatus === 'cancelled') {
+      console.log('[RideBooking] Clearing cancelled ride immediately from', source);
+      if (previousStatus !== 'cancelled') {
+        toast({
+          title: t('booking.cancelled'),
+          variant: 'destructive'
+        });
+      }
+      exitEndedRide(`ride cancelled via ${source}`);
+      return;
+    }
+
+    setCurrentRide(updatedRide);
+    updateRide(updatedRide);
+
+    const statusToStep: Partial<Record<string, RideStep>> = {
+      pending_payment: 'payment',
+      searching: 'searching',
+      driver_assigned: 'matched',
+      driver_en_route: 'arriving',
+      arrived: 'arrived',
+      in_progress: 'inProgress',
+    };
+
+    const nextStep = statusToStep[nextStatus];
+    if (nextStep) {
+      setStep(nextStep);
+    }
+
+    if (updatedRide.driver_id) {
+      localStorage.setItem(`drivvme_last_accepted_driver_${updatedRide.id}`, updatedRide.driver_id);
+      if (!driverInfoRef.current) {
+        void fetchDriverInfo(updatedRide.driver_id);
+      }
+    }
+
+    if (previousStatus === nextStatus) return;
+
+    switch (nextStatus) {
+      case 'driver_assigned':
+        toast({
+          title: t('booking.found'),
+          description: 'Your driver is on the way!'
+        });
+        break;
+      case 'driver_en_route':
+        toast({
+          title: 'Driver on the way',
+          description: 'Your driver is heading to your pickup location.'
+        });
+        break;
+      case 'arrived':
+        toast({
+          title: 'Driver has arrived!',
+          description: 'Your driver is waiting at the pickup location.'
+        });
+        break;
+      case 'in_progress':
+        toast({
+          title: 'Ride started',
+          description: 'Enjoy your trip!'
+        });
+        break;
+    }
+  }, [clearRide, currentRide?.status, exitEndedRide, t, toast, updateRide]);
 
   // Visibility listener: warm GPS on app resume (session refresh moved to payment handler)
   useEffect(() => {
@@ -792,85 +870,30 @@ const RideBooking = () => {
   useEffect(() => {
     if (!currentRide?.id) return;
     console.log('[RideBooking] Subscribing to realtime for ride:', currentRide.id);
-    const channel = supabase.channel(`ride-${currentRide.id}`).on('postgres_changes', {
-      event: 'UPDATE',
-      schema: 'public',
-      table: 'rides',
-      filter: `id=eq.${currentRide.id}`
-    }, payload => {
-      console.log('[RideBooking] Realtime UPDATE received:', payload.new);
-      const updatedRide = payload.new as any;
-      setCurrentRide(updatedRide);
-      updateRide(updatedRide); // Persist to localStorage
 
-      // Update step based on status
-      switch (updatedRide.status) {
-        case 'driver_assigned':
-          setStep('matched');
-          fetchDriverInfo(updatedRide.driver_id);
-          // Store driver ID as backup for cancellation reliability
-          if (updatedRide.driver_id) {
-            localStorage.setItem(`drivvme_last_accepted_driver_${updatedRide.id}`, updatedRide.driver_id);
-          }
-          // Notify rider that driver has been found
-          toast({
-            title: t('booking.found'),
-            description: 'Your driver is on the way!'
-          });
-          break;
-        case 'driver_en_route':
-          setStep('arriving');
-          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
-          toast({
-            title: 'Driver on the way',
-            description: 'Your driver is heading to your pickup location.'
-          });
-          break;
-        case 'arrived':
-          setStep('arrived');
-          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
-          toast({
-            title: 'Driver has arrived!',
-            description: 'Your driver is waiting at the pickup location.'
-          });
-          break;
-        case 'in_progress':
-          setStep('inProgress');
-          if (!driverInfoRef.current && updatedRide.driver_id) fetchDriverInfo(updatedRide.driver_id);
-          toast({
-            title: 'Ride started',
-            description: 'Enjoy your trip!'
-          });
-          break;
-        case 'completed':
-          setStep('completed');
-          clearRide(); // Clear from localStorage
-          // Save the dropoff destination for future suggestions
-          if (dropoff && user?.id) {
-            saveDropoffDestination(dropoff);
-          }
-          break;
-        case 'cancelled':
-          toast({
-            title: t('booking.cancelled'),
-            variant: 'destructive'
-          });
-          clearRide(); // Clear from localStorage
-          resetBooking();
-          navigate('/rider-home');
-          break;
-      }
-    }).subscribe(status => {
-      console.log('[RideBooking] Realtime subscription status:', status);
-    });
+    const channel = supabase
+      .channel(`ride-${currentRide.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'rides',
+        filter: `id=eq.${currentRide.id}`
+      }, payload => {
+        console.log('[RideBooking] Realtime UPDATE received:', payload.new);
+        syncCurrentRideState(payload.new as any, 'realtime');
+      })
+      .subscribe(status => {
+        console.log('[RideBooking] Realtime subscription status:', status);
+      });
+
     return () => {
       console.log('[RideBooking] Unsubscribing from realtime');
       supabase.removeChannel(channel);
     };
-  }, [currentRide?.id, t, toast]);
+  }, [currentRide?.id, syncCurrentRideState]);
 
-  // Periodic DB poll: every 2s during active ride phases, check if ride ended
-  // This catches missed realtime events quickly after completion or app restore.
+  // Unified fallback polling: every 2s during active ride phases.
+  // This catches missed realtime events and clears terminal rides immediately.
   useEffect(() => {
     if (!currentRide?.id) return;
     const activePhases: RideStep[] = ['searching', 'matched', 'arriving', 'arrived', 'inProgress'];
@@ -882,15 +905,15 @@ const RideBooking = () => {
       try {
         const { data: freshRide } = await supabase
           .from('rides')
-          .select('status')
+          .select('*')
           .eq('id', currentRide.id)
           .maybeSingle();
 
-        if (cancelled) return;
+        if (cancelled || !freshRide) return;
 
-        if (freshRide && ['completed', 'cancelled'].includes(freshRide.status)) {
-          console.log('[RideBooking] Poll detected ride ended:', freshRide.status);
-          exitEndedRide();
+        if (freshRide.status !== currentRide.status || freshRide.driver_id !== currentRide.driver_id) {
+          console.log('[RideBooking] Poll detected ride status change:', currentRide.status, '->', freshRide.status);
+          syncCurrentRideState(freshRide, 'poll');
         }
       } catch {
         /* ignore */
@@ -906,7 +929,7 @@ const RideBooking = () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [currentRide?.id, step, exitEndedRide]);
+  }, [currentRide?.driver_id, currentRide?.id, currentRide?.status, step, syncCurrentRideState]);
 
   // Listen for ride_cancelled notifications from the driver (backup channel)
   useEffect(() => {
@@ -1174,52 +1197,40 @@ const RideBooking = () => {
     return () => clearInterval(interval);
   }, [isActiveRidePhase, currentRide?.driver_id, fetchDriverInfo]);
 
-  // Fallback polling: poll every 5 seconds for ALL active phases
+  // If the active-ride hook no longer sees any live ride, verify and clear stale rider UI immediately.
   useEffect(() => {
-    if (!currentRide?.id) return;
-    const activeStatuses = ['searching', 'driver_assigned', 'driver_en_route', 'arrived', 'in_progress'];
-    if (!activeStatuses.includes(currentRide.status)) return;
-    const pollInterval = setInterval(async () => {
-      const { data, error } = await supabase.from('rides').select('*').eq('id', currentRide.id).single();
-      if (error) {
-        console.error('[RideBooking] Poll error:', error);
-        return;
-      }
-      if (data && data.status !== currentRide.status) {
-        console.log('[RideBooking] Poll detected status change:', data.status);
-        setCurrentRide(data);
-        updateRide(data);
-        const statusToStep: Record<string, RideStep> = {
-          searching: 'searching',
-          driver_assigned: 'matched',
-          driver_en_route: 'arriving',
-          arrived: 'arrived',
-          in_progress: 'inProgress',
-          completed: 'completed',
-        };
-        const newStep = statusToStep[data.status];
-        if (newStep) setStep(newStep);
-        if (data.driver_id && !driverInfoRef.current) {
-          fetchDriverInfo(data.driver_id);
+    if (activeRideLoading || activeRide || !currentRide?.id) return;
+
+    const syncSensitiveSteps: RideStep[] = ['searching', 'matched', 'arriving', 'arrived', 'inProgress', 'completed'];
+    if (!syncSensitiveSteps.includes(step)) return;
+
+    let cancelled = false;
+
+    const verifyCurrentRide = async () => {
+      try {
+        const { data: freshRide } = await supabase
+          .from('rides')
+          .select('status')
+          .eq('id', currentRide.id)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        if (!freshRide || ['completed', 'cancelled'].includes(freshRide.status)) {
+          console.log('[RideBooking] Active ride hook no longer sees a live ride, clearing stale currentRide');
+          exitEndedRide('active ride hook reported no live ride');
         }
-        if (data.status === 'completed') {
-          clearRide();
-          if (dropoff && user?.id) saveDropoffDestination(dropoff);
-        }
-        if (data.status === 'cancelled') {
-          toast({ title: t('booking.cancelled'), variant: 'destructive' });
-          clearRide();
-          resetBooking();
-          navigate('/rider-home');
-        }
+      } catch {
+        /* ignore */
       }
-      // Even if status hasn't changed, check if driverInfo is missing
-      if (data?.driver_id && !driverInfoRef.current) {
-        fetchDriverInfo(data.driver_id);
-      }
-    }, 5000);
-    return () => clearInterval(pollInterval);
-  }, [currentRide?.id, currentRide?.status, t, toast, fetchDriverInfo]);
+    };
+
+    void verifyCurrentRide();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRide, activeRideLoading, currentRide?.id, exitEndedRide, step]);
 
   const saveDropoffDestination = async (destination: Location) => {
     if (!user?.id) return;
