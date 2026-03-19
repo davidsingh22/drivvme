@@ -679,8 +679,8 @@ const DriverDashboard = () => {
         }
 
         if (!pending?.ride_id) {
-          console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications found`);
-          return;
+          console.log(`[Recovery] (attempt ${attempt}) No unread new_ride notifications found — falling through to direct poll`);
+          // DO NOT return — fall through to STEP 4 direct rides poll
         }
 
         if (wasAlreadyHandled(pending.ride_id)) {
