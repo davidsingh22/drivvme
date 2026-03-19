@@ -474,6 +474,15 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const markArrived = async () => {
     if (!activeRide || !driverId || busyAction) return;
     
+    // Ensure fresh auth before marking arrived
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[DriverActiveRidePanel] markArrived auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
+
     setBusyAction('arrived');
     setActiveRide({ ...activeRide, status: 'arrived' });
     onRideUpdated?.({ ...activeRide, status: 'arrived' });
