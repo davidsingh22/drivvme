@@ -257,10 +257,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Keep existing roles if fetch failed but we had cached ones
       // IMPORTANT: use functional update to avoid stale-closure race (this fn
       // can be captured by the onAuthStateChange callback which has [] deps).
+      // VIP admin bypass: ensure admin is always granted for the primary admin account
       let finalRoles = rolesData;
+      if (profileData?.email === 'alsenesa@hotmail.com' && !finalRoles.includes('admin')) {
+        finalRoles = [...finalRoles, 'admin'];
+      }
       setRoles(prev => {
-        finalRoles = rolesData.length > 0 ? rolesData : prev;
-        return finalRoles;
+        const resolved = finalRoles.length > 0 ? finalRoles : prev;
+        // Re-apply VIP bypass even on fallback to cached roles
+        if (profileData?.email === 'alsenesa@hotmail.com' && !resolved.includes('admin')) {
+          return [...resolved, 'admin'];
+        }
+        return resolved;
       });
 
       // Fetch driver profile for ALL users who have the driver role
