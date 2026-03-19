@@ -458,9 +458,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       );
 
       if (error) {
-        setActiveRide(previousRide);
-        onRideUpdated?.(previousRide);
-        toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        console.warn('[DriverActiveRidePanel] markArrived error, retrying:', error.message);
+        void retryDbWrite(activeRide.id, { status: 'arrived' });
       }
     } catch (err) {
       // Don't revert optimistic update or show toast — DB write likely went through
