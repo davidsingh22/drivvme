@@ -659,6 +659,7 @@ const DriverDashboard = () => {
           } else {
             console.log(`[Recovery] (attempt ${attempt}) 🌐 Found global pending ride:`, globalRideId);
             const shown = await showOfferForRide(globalRideId);
+            if (cancelled) return;
             if (shown) return;
           }
         }
