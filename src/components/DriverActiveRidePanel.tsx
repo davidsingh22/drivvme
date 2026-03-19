@@ -752,6 +752,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
           destinationType={activeRide.status === 'in_progress' ? 'dropoff' : 'pickup'}
           rideStatus={activeRide.status}
           hideDestination={activeRide.status !== 'in_progress'}
+          isUpdating={!!busyAction}
           onClose={() => setShowNavigation(false)}
           onArrived={markArrived}
           onStartRide={startRide}
