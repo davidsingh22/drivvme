@@ -1590,21 +1590,52 @@ const DriverDashboard = () => {
       updates.driver_earnings = fareForFee - fee;
     }
 
-    // For completed rides the UI is already cleared — persist in background, don't block.
+    // For completed rides, fire a fast direct REST update first so rider restore sees the new status immediately.
     if (status === 'completed') {
       setBusyAction(null);
-      persistRideStatus({
-        rideId: prev.id,
-        expectedStatus: status,
-        updates,
-        driverId: user.id,
-        label: `Update status to ${status}`,
-        maxAttempts: 5,
-        baseDelayMs: 600,
-        timeoutMs: 8000,
-      }).then((saved) => {
-        if (saved) void refreshDriverProfile();
-        else void retryDbUpdate(prev.id, updates, status);
+      getValidAccessToken().then(async (token) => {
+        try {
+          const response = await fetch(
+            `${SUPABASE_URL}/rest/v1/rides?id=eq.${prev.id}&driver_id=eq.${user.id}&select=id,status`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: ANON_KEY,
+                Authorization: `Bearer ${token}`,
+                Prefer: 'return=representation',
+              },
+              body: JSON.stringify(updates),
+              keepalive: true,
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`complete ride patch failed: ${response.status}`);
+          }
+
+          const rows = (await response.json().catch(() => [])) as Array<{ status?: string }>;
+          if (rows[0]?.status === 'completed') {
+            void refreshDriverProfile();
+            return;
+          }
+
+          void retryDbUpdate(prev.id, updates, status);
+        } catch {
+          const saved = await persistRideStatus({
+            rideId: prev.id,
+            expectedStatus: status,
+            updates,
+            driverId: user.id,
+            label: `Update status to ${status}`,
+            maxAttempts: 4,
+            baseDelayMs: 500,
+            timeoutMs: 7000,
+          });
+
+          if (saved) void refreshDriverProfile();
+          else void retryDbUpdate(prev.id, updates, status);
+        }
       }).catch(() => {
         void retryDbUpdate(prev.id, updates, status);
       });
