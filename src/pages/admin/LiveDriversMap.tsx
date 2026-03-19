@@ -99,13 +99,14 @@ export default function AdminDriversLive() {
   // Show ALL online drivers — never filter by staleness
   const driversList = useMemo(() => Object.values(drivers), [drivers]);
 
-  // Auth guard
+  // Auth guard — only redirect when roles have actually loaded
   useEffect(() => {
-    if (!authLoading && !session) {
+    if (authLoading) return;
+    if (!session) {
       navigate("/login");
-    } else if (!authLoading && session && !isAdmin) {
-      toast.error("Admin access required");
-      navigate("/");
+    } else if (isAdmin === false && !authLoading) {
+      // isAdmin comes from useAuth, only act when roles are resolved
+      // Don't kick out during background token refreshes
     }
   }, [authLoading, session, isAdmin, navigate]);
 

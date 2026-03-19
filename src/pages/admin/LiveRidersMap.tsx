@@ -66,9 +66,10 @@ const LiveRidersMap = () => {
   const isAdmin = roles.includes('admin' as any);
 
   useEffect(() => {
-    if (!authLoading && !user) {
+    if (authLoading) return;
+    if (!user) {
       navigate('/login');
-    } else if (!authLoading && !isAdmin) {
+    } else if (roles.length > 0 && !isAdmin) {
       navigate('/');
       toast({
         title: 'Access Denied',
@@ -76,7 +77,7 @@ const LiveRidersMap = () => {
         variant: 'destructive',
       });
     }
-  }, [user, authLoading, isAdmin, navigate, toast]);
+  }, [user, authLoading, isAdmin, roles.length, navigate, toast]);
 
   // Initialize map
   useEffect(() => {
