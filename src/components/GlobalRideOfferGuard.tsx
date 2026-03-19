@@ -224,9 +224,16 @@ export function GlobalRideOfferGuard() {
 
         if (cancelled) return;
 
+        // Get current user to filter by current_driver_id
+        let currentUserId: string | null = null;
+        try {
+          const { data: { session: s } } = await supabase.auth.getSession();
+          currentUserId = s?.user?.id ?? null;
+        } catch {}
+
         const { data, error } = await supabase
           .from('rides')
-          .select('id, pickup_address, dropoff_address, estimated_fare, distance_km, estimated_duration_minutes, pickup_lat, pickup_lng, status, requested_at, created_at')
+          .select('id, pickup_address, dropoff_address, estimated_fare, distance_km, estimated_duration_minutes, pickup_lat, pickup_lng, status, requested_at, created_at, current_driver_id')
           .eq('id', rideId)
           .eq('status', 'searching')
           .maybeSingle();
@@ -234,6 +241,13 @@ export function GlobalRideOfferGuard() {
         if (cancelled) return;
 
         if (data) {
+          // Only show ride if current_driver_id matches this driver
+          if (data.current_driver_id && currentUserId && data.current_driver_id !== currentUserId) {
+            console.log('[GlobalGuard] 🚫 Ride not targeted at this driver (current_driver_id:', data.current_driver_id, ')');
+            cleanup();
+            return;
+          }
+
           const age = (Date.now() - new Date(data.requested_at || data.created_at).getTime()) / 1000;
           if (age > 90) {
             console.log('[GlobalGuard] ⏰ Ride too old:', Math.round(age), 's');
