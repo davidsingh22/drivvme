@@ -1106,7 +1106,7 @@ const DriverDashboard = () => {
           const updated = payload.new as any;
           if (updated.status === 'cancelled' || (updated.driver_id && updated.driver_id !== user?.id)) {
             dismissAlert('realtime: ' + updated.status);
-            if (updated.status === 'cancelled' && !wasRideJustCompleted(updated.id)) {
+            if (updated.status === 'cancelled' && !wasRecentDriverAction(updated.id)) {
               toast({
                 title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
                 description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
