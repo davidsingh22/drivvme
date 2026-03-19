@@ -116,6 +116,12 @@ const PresenceTracker = () => {
   return null;
 };
 
+// Global session watchdog — proactively refreshes auth every 2 min
+const SessionWatchdogRunner = () => {
+  useSessionWatchdog();
+  return null;
+};
+
 // /driver is a driver screen. Riders should always be redirected to /ride.
 const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
