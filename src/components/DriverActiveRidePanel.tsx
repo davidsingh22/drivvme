@@ -339,28 +339,22 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       driver_earnings: driverEarningsCalc,
     };
 
-    try {
-      const saved = await persistRideStatus({
-        rideId,
-        expectedStatus: 'completed',
-        updates,
-        driverId,
-        label: 'Complete ride',
-        maxAttempts: 3,
-        baseDelayMs: 400,
-        timeoutMs: 6000,
-      });
-
-      if (!saved) {
-        console.warn('[DriverActiveRidePanel] endRide did not persist immediately, retrying in background');
-        void retryDbWrite(rideId, updates, 'completed');
-      }
-    } catch (err) {
-      console.warn('[DriverActiveRidePanel] endRide failed, retrying in background:', err);
+    // UI is already cleared — persist in background, don't block the driver.
+    setBusyAction(null);
+    persistRideStatus({
+      rideId,
+      expectedStatus: 'completed',
+      updates,
+      driverId,
+      label: 'Complete ride',
+      maxAttempts: 5,
+      baseDelayMs: 600,
+      timeoutMs: 8000,
+    }).then((saved) => {
+      if (!saved) void retryDbWrite(rideId, updates, 'completed');
+    }).catch(() => {
       void retryDbWrite(rideId, updates, 'completed');
-    } finally {
-      setBusyAction(null);
-    }
+    });
   };
 
   // Cancel Ride action
