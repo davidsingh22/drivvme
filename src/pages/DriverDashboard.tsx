@@ -401,6 +401,8 @@ const DriverDashboard = () => {
 
     const goOnline = async () => {
       if (manuallyToggledOffRef.current) return;
+      // Ensure fresh auth before writing online status
+      try { await ensureFreshSession(); } catch {}
       const { error } = await supabase
         .from('driver_profiles')
         .update({ is_online: true })
@@ -410,7 +412,10 @@ const DriverDashboard = () => {
       }
     };
 
-    // Go online immediately on mount
+    // Force online immediately on mount (ignore DB state)
+    if (!manuallyToggledOffRef.current) {
+      setIsOnline(true);
+    }
     goOnline();
 
     // Go online on visibility resume (app foregrounded)
