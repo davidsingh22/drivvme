@@ -436,18 +436,20 @@ const DriverDashboard = () => {
     const rideId = currentRide.id;
     let cleared = false;
 
-    const clearRide = (source: string) => {
+    const clearRide = (source: string, status?: string) => {
       if (cleared) return;
       cleared = true;
       console.log(`[DriverDashboard] 🚫 Ride cleared (${source}):`, rideId);
       setCurrentRide(null);
       setRiderInfo(null);
       setShowGPSNavigation(false);
-      toast({
-        title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-        description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
-        variant: 'destructive',
-      });
+      if (status === 'cancelled') {
+        toast({
+          title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+          description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+          variant: 'destructive',
+        });
+      }
     };
 
     // Layer 1: Direct realtime subscription on the ride row itself
