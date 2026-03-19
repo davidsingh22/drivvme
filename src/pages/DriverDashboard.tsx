@@ -1371,29 +1371,37 @@ const DriverDashboard = () => {
 
       console.log('[AcceptRide] Update result:', JSON.stringify({ data: updatedRows, error }));
 
-      // If direct update failed (error or 0 rows due to RLS), use RPC fallback
+      // Atomic check: if 0 rows returned, another driver already claimed this ride
       const directSuccess = !error && updatedRows && updatedRows.length > 0;
       
       if (!directSuccess) {
-        console.log('[AcceptRide] Direct update did not succeed, trying RPC fallback...',
-          JSON.stringify({ error, rowCount: updatedRows?.length }));
-        
-        const { data: rpcResult, error: rpcError } = await withTimeout(
-          supabase.rpc('accept_ride', {
-            p_ride_id: ride.id,
-            p_driver_id: user.id,
-            p_acceptance_time_seconds: acceptanceTimeSeconds,
-          }),
-          7000,
-          'Accept ride RPC'
-        );
-        
-        console.log('[AcceptRide] RPC result:', JSON.stringify({ rpcResult, rpcError }));
-        
-        if (rpcError || !rpcResult) {
+        // Try RPC fallback only if it was a network/RLS error, not a race-loss
+        let rpcSaved = false;
+        if (error) {
+          console.log('[AcceptRide] Direct update error, trying RPC fallback...', JSON.stringify({ error }));
+          const { data: rpcResult, error: rpcError } = await withTimeout(
+            supabase.rpc('accept_ride', {
+              p_ride_id: ride.id,
+              p_driver_id: user.id,
+              p_acceptance_time_seconds: acceptanceTimeSeconds,
+            }),
+            7000,
+            'Accept ride RPC'
+          );
+          console.log('[AcceptRide] RPC result:', JSON.stringify({ rpcResult, rpcError }));
+          rpcSaved = !rpcError && !!rpcResult;
+        }
+
+        if (!rpcSaved) {
+          // Another driver already accepted — close modal immediately
+          console.log('[AcceptRide] Ride already taken by another driver');
+          setNewRideAlertOpen(false);
+          setCachedAlertRide(null);
+          setNewRideAlertRideId(null);
+          setCurrentRide(null);
           toast({
-            title: 'Error',
-            description: 'This ride is no longer available',
+            title: language === 'fr' ? 'Course déjà prise' : 'Ride already taken',
+            description: language === 'fr' ? 'Un autre chauffeur a accepté cette course.' : 'Another driver accepted this ride.',
             variant: 'destructive',
           });
           return;
