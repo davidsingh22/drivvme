@@ -32,6 +32,7 @@ import RideMessagesPanel from '@/components/RideMessagesPanel';
 import { calculatePlatformFee } from '@/lib/platformFees';
 import { withTimeout } from '@/lib/withTimeout';
 import { persistRideStatus } from '@/lib/persistRideStatus';
+import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
