@@ -800,7 +800,7 @@ export default function LiveMonitor() {
     };
   }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
 
-  if (authLoading || !isAdmin) {
+  if (authLoading || profileLoading || (!isAdmin && roles.length === 0)) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading…</div>
