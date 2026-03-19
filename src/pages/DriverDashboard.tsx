@@ -436,21 +436,18 @@ const DriverDashboard = () => {
     const rideId = currentRide.id;
     let cleared = false;
 
-    const clearRide = (source: string, status?: string) => {
+    const clearRide = (source: string) => {
       if (cleared) return;
       cleared = true;
       console.log(`[DriverDashboard] 🚫 Ride cleared (${source}):`, rideId);
       setCurrentRide(null);
       setRiderInfo(null);
       setShowGPSNavigation(false);
-      // Only show "cancelled" toast when the ride was actually cancelled, not completed
-      if (status === 'cancelled') {
-        toast({
-          title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-          description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+        description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+        variant: 'destructive',
+      });
     };
 
     // Layer 1: Direct realtime subscription on the ride row itself
@@ -467,7 +464,7 @@ const DriverDashboard = () => {
         (payload) => {
           const updated = payload.new as any;
           if (updated.status === 'cancelled' || updated.status === 'completed') {
-            clearRide('realtime-ride-update: ' + updated.status, updated.status);
+            clearRide('realtime-ride-update: ' + updated.status);
           }
         }
       )
@@ -483,7 +480,7 @@ const DriverDashboard = () => {
         .maybeSingle();
 
       if (!data || data.status === 'completed' || data.status === 'cancelled') {
-        clearRide('poll: ' + (data?.status || 'not found'), data?.status || 'cancelled');
+        clearRide('poll: ' + (data?.status || 'not found'));
       }
     };
 
