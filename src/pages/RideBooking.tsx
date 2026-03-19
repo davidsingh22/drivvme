@@ -530,23 +530,7 @@ const RideBooking = () => {
       // Proactively refresh token so payment/ride creation don't hit expired JWT
       getValidAccessToken().catch(() => {});
 
-      // If we're in an active ride phase, verify ride is still active in DB
-      if (currentRide?.id && ['searching', 'matched', 'arriving', 'arrived', 'inProgress', 'completed'].includes(step)) {
-        try {
-          const { data: freshRide } = await supabase
-            .from('rides')
-            .select('status')
-            .eq('id', currentRide.id)
-            .maybeSingle();
-          if (freshRide && ['completed', 'cancelled'].includes(freshRide.status) && step !== 'completed') {
-            console.log('[RideBooking] Ride ended while app was backgrounded, redirecting home');
-            clearRide();
-            navigate('/rider-home', { replace: true });
-            return;
-          }
-        } catch { /* ignore, continue normally */ }
-      }
-
+      // Ride status already checked above (before idle threshold)
       // Warm GPS so next action has a fresh position
       if ('geolocation' in navigator && (step === 'input' || step === 'estimate')) {
         navigator.geolocation.getCurrentPosition(
