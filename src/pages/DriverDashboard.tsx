@@ -1226,6 +1226,11 @@ const DriverDashboard = () => {
           toast({ title: 'Error', description: error.message, variant: 'destructive' });
           return;
         }
+        // Sync driver_locations and driver_presence so MSN dispatch reflects offline immediately
+        if (!newStatus) {
+          supabase.from('driver_locations').update({ is_online: false, updated_at: new Date().toISOString() }).eq('driver_id', recoveredUser.id).then(() => {});
+          supabase.from('driver_presence').update({ status: 'offline', last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('driver_id', recoveredUser.id).then(() => {});
+        }
         setIsOnline(newStatus);
         manuallyToggledOffRef.current = !newStatus;
         await refreshDriverProfile();
@@ -1255,6 +1260,12 @@ const DriverDashboard = () => {
           variant: 'destructive',
         });
         return;
+      }
+
+      // Sync driver_locations and driver_presence so MSN dispatch reflects offline immediately
+      if (!newStatus) {
+        supabase.from('driver_locations').update({ is_online: false, updated_at: new Date().toISOString() }).eq('driver_id', user.id).then(() => {});
+        supabase.from('driver_presence').update({ status: 'offline', last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('driver_id', user.id).then(() => {});
       }
 
       setIsOnline(newStatus);
