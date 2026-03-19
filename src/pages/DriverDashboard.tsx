@@ -1132,7 +1132,7 @@ const DriverDashboard = () => {
         // If ride is no longer visible or status changed
         if (error || !data || data.status !== 'searching' || (data.driver_id && data.driver_id !== user?.id)) {
           dismissAlert('poll: ' + (data?.status || 'not visible'));
-          if (data?.status === 'cancelled' && !wasRideJustCompleted(rideId)) {
+          if (data?.status === 'cancelled' && !wasRecentDriverAction(rideId)) {
             toast({
               title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
               description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
