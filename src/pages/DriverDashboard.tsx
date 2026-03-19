@@ -109,6 +109,18 @@ const DriverDashboard = () => {
   const newRideAlertOpenRef = useRef(false);
   const newRideAlertRideIdRef = useRef<string | null>(null);
   const lastHandledOfferIdRef = useRef<string | null>(null);
+  const recentRideActionRef = useRef<{ rideId: string; status: string; at: number } | null>(null);
+
+  const rememberRideAction = (rideId: string, status: string) => {
+    recentRideActionRef.current = { rideId, status, at: Date.now() };
+  };
+
+  const wasRideJustCompleted = (rideId?: string | null) => {
+    const recent = recentRideActionRef.current;
+    if (!recent || recent.status !== 'completed') return false;
+    if (Date.now() - recent.at > 20000) return false;
+    return !rideId || recent.rideId === rideId;
+  };
 
   // Keep refs in sync with state
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
