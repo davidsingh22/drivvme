@@ -371,6 +371,7 @@ const DriverNavigationMap = ({
           onStartRide={onStartRide}
           onCompleteRide={onCompleteRide}
           onCancelRide={onCancelRide}
+          isUpdating={isUpdating}
           compact
         />
       )}
