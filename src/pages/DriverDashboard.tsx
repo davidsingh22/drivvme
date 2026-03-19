@@ -109,6 +109,18 @@ const DriverDashboard = () => {
   const newRideAlertOpenRef = useRef(false);
   const newRideAlertRideIdRef = useRef<string | null>(null);
   const lastHandledOfferIdRef = useRef<string | null>(null);
+  const recentRideActionRef = useRef<{ rideId: string; status: string; at: number } | null>(null);
+
+  const rememberRideAction = (rideId: string, status: string) => {
+    recentRideActionRef.current = { rideId, status, at: Date.now() };
+  };
+
+  const wasRideJustCompleted = (rideId?: string | null) => {
+    const recent = recentRideActionRef.current;
+    if (!recent || recent.status !== 'completed') return false;
+    if (Date.now() - recent.at > 20000) return false;
+    return !rideId || recent.rideId === rideId;
+  };
 
   // Keep refs in sync with state
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
@@ -443,7 +455,7 @@ const DriverDashboard = () => {
       setCurrentRide(null);
       setRiderInfo(null);
       setShowGPSNavigation(false);
-      if (status === 'cancelled') {
+      if (status === 'cancelled' && !wasRideJustCompleted(rideId)) {
         toast({
           title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
           description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
@@ -932,22 +944,27 @@ const DriverDashboard = () => {
             // Handle ride_cancelled notifications — dismiss offer modal or clear active ride
             if (notif.type === 'ride_cancelled' && notif.ride_id) {
               console.log('[Realtime] 🚫 ride_cancelled for:', notif.ride_id);
-              if (newRideAlertRideIdRef.current === notif.ride_id) {
+              const isRelevantAlertRide = newRideAlertRideIdRef.current === notif.ride_id;
+              const isRelevantActiveRide = currentRideRef.current?.id === notif.ride_id;
+
+              if (isRelevantAlertRide) {
                 setNewRideAlertOpen(false);
                 setCachedAlertRide(null);
                 setNewRideAlertRideId(null);
                 alertStartTimeRef.current = null;
               }
-              if (currentRideRef.current?.id === notif.ride_id) {
+              if (isRelevantActiveRide) {
                 setCurrentRide(null);
                 setRiderInfo(null);
                 setShowGPSNavigation(false);
               }
-              toast({
-                title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-                description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
-                variant: 'destructive',
-              });
+              if ((isRelevantAlertRide || isRelevantActiveRide) && !wasRideJustCompleted(notif.ride_id)) {
+                toast({
+                  title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+                  description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+                  variant: 'destructive',
+                });
+              }
               return;
             }
 
@@ -1059,7 +1076,7 @@ const DriverDashboard = () => {
           const updated = payload.new as any;
           if (updated.status === 'cancelled' || (updated.driver_id && updated.driver_id !== user?.id)) {
             dismissAlert('realtime: ' + updated.status);
-            if (updated.status === 'cancelled') {
+            if (updated.status === 'cancelled' && !wasRideJustCompleted(updated.id)) {
               toast({
                 title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
                 description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
@@ -1082,10 +1099,10 @@ const DriverDashboard = () => {
           .eq('id', rideId)
           .maybeSingle();
 
-        // If ride is no longer visible (RLS blocks cancelled rows) or status changed
+        // If ride is no longer visible or status changed
         if (error || !data || data.status !== 'searching' || (data.driver_id && data.driver_id !== user?.id)) {
           dismissAlert('poll: ' + (data?.status || 'not visible'));
-          if (!data || data.status === 'cancelled' || (!data && !error)) {
+          if (data?.status === 'cancelled' && !wasRideJustCompleted(rideId)) {
             toast({
               title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
               description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
@@ -1126,7 +1143,7 @@ const DriverDashboard = () => {
             setCurrentRide(null);
             setRiderInfo(null);
             setShowGPSNavigation(false);
-            if (updatedRide.status === 'cancelled') {
+            if (updatedRide.status === 'cancelled' && !wasRideJustCompleted(updatedRide.id)) {
               toast({
                 title: 'Ride cancelled',
                 description: 'The rider cancelled this ride',
@@ -1521,6 +1538,7 @@ const DriverDashboard = () => {
 
     // Optimistic update — instant UI feedback
     const prev = { ...currentRide };
+    rememberRideAction(prev.id, status);
     if (status === 'completed') {
       const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
       const fee = calculatePlatformFee(fareForFee);
@@ -1560,6 +1578,26 @@ const DriverDashboard = () => {
       );
 
       if (error) {
+        let confirmedStatus = false;
+        try {
+          const { data: latestRide } = await supabase
+            .from('rides')
+            .select('status')
+            .eq('id', prev.id)
+            .maybeSingle();
+          confirmedStatus = latestRide?.status === status;
+        } catch (verificationError) {
+          console.warn('[DriverDashboard] verifyRideStatus failed:', verificationError);
+        }
+
+        if (confirmedStatus) {
+          console.warn('[DriverDashboard] updateRideStatus returned an error after the ride was already saved:', error);
+          if (status === 'completed') {
+            void refreshDriverProfile();
+          }
+          return;
+        }
+
         setCurrentRide(prev);
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
         return;
