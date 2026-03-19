@@ -1245,9 +1245,17 @@ const DriverDashboard = () => {
   }, [user, currentRide]);
 
   const toggleOnlineStatus = async () => {
+    // Always ensure fresh auth before toggling
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[DriverDashboard] toggleOnlineStatus auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
+
     if (!user) {
       console.warn('[DriverDashboard] toggleOnlineStatus: user not loaded yet, refreshing session...');
-      // Try to recover the session
       try {
         const { data } = await supabase.auth.getSession();
         if (!data.session) {
@@ -1256,13 +1264,11 @@ const DriverDashboard = () => {
       } catch (e) {
         console.error('[DriverDashboard] session recovery failed:', e);
       }
-      // Re-check after recovery attempt
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session?.user) {
         toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
         return;
       }
-      // Use the recovered user for this toggle
       const recoveredUser = sessionData.session.user;
       try {
         const newStatus = !isOnline;
@@ -1274,7 +1280,6 @@ const DriverDashboard = () => {
           toast({ title: 'Error', description: error.message, variant: 'destructive' });
           return;
         }
-        // Sync driver_locations and driver_presence so MSN dispatch reflects offline immediately
         if (!newStatus) {
           supabase.from('driver_locations').update({ is_online: false, updated_at: new Date().toISOString() }).eq('driver_id', recoveredUser.id).then(() => {});
           supabase.from('driver_presence').update({ status: 'offline', last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('driver_id', recoveredUser.id).then(() => {});
@@ -1311,7 +1316,6 @@ const DriverDashboard = () => {
         return;
       }
 
-      // Sync driver_locations and driver_presence so MSN dispatch reflects offline immediately
       if (!newStatus) {
         supabase.from('driver_locations').update({ is_online: false, updated_at: new Date().toISOString() }).eq('driver_id', user.id).then(() => {});
         supabase.from('driver_presence').update({ status: 'offline', last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('driver_id', user.id).then(() => {});
