@@ -466,7 +466,7 @@ const DriverDashboard = () => {
         (payload) => {
           const updated = payload.new as any;
           if (updated.status === 'cancelled' || updated.status === 'completed') {
-            clearRide('realtime-ride-update: ' + updated.status);
+            clearRide('realtime-ride-update: ' + updated.status, updated.status);
           }
         }
       )
