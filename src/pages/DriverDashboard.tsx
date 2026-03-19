@@ -683,51 +683,46 @@ const DriverDashboard = () => {
           // DO NOT return — fall through to STEP 4 direct rides poll
         }
 
-        if (wasAlreadyHandled(pending.ride_id)) {
-          console.log(`[Recovery] (attempt ${attempt}) ♻️ Skipping handled notification ride:`, pending.ride_id);
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
-            .eq('user_id', effectiveUserId)
-            .eq('type', 'new_ride');
-          return;
-        }
+        if (pending?.ride_id) {
+          if (wasAlreadyHandled(pending.ride_id)) {
+            console.log(`[Recovery] (attempt ${attempt}) ♻️ Skipping handled notification ride:`, pending.ride_id);
+            await supabase
+              .from('notifications')
+              .update({ is_read: true })
+              .eq('ride_id', pending.ride_id)
+              .eq('user_id', effectiveUserId)
+              .eq('type', 'new_ride');
+          } else if (isCurrentlyDisplayed(pending.ride_id)) {
+            console.log(`[Recovery] (attempt ${attempt}) ⏭️ Ride already displayed:`, pending.ride_id);
+          } else {
+            const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
+            console.log(`[Recovery] (attempt ${attempt}) 📋 Found notification — ride:`, pending.ride_id, 'age:', Math.round(notifAge), 's');
 
-        if (isCurrentlyDisplayed(pending.ride_id)) {
-          console.log(`[Recovery] (attempt ${attempt}) ⏭️ Ride already displayed:`, pending.ride_id);
-          return;
+            if (notifAge > MAX_OFFER_AGE_SECONDS) {
+              console.log(`[Recovery] ⏰ Expired (age: ${Math.round(notifAge)}s > ${MAX_OFFER_AGE_SECONDS}s) — marking read`);
+              await supabase
+                .from('notifications')
+                .update({ is_read: true })
+                .eq('ride_id', pending.ride_id)
+                .eq('user_id', effectiveUserId)
+                .eq('type', 'new_ride');
+            } else {
+              const shown = await showOfferForRide(pending.ride_id);
+              if (shown) return; // Successfully showed from notification
+              // Ride no longer searching — mark notification read
+              console.log('[Recovery] Ride not available — marking notification read');
+              await supabase
+                .from('notifications')
+                .update({ is_read: true })
+                .eq('ride_id', pending.ride_id)
+                .eq('user_id', effectiveUserId)
+                .eq('type', 'new_ride');
+            }
+          }
         }
-
-        const notifAge = (Date.now() - new Date(pending.created_at).getTime()) / 1000;
-        console.log(`[Recovery] (attempt ${attempt}) 📋 Found notification — ride:`, pending.ride_id, 'age:', Math.round(notifAge), 's');
-
-        if (notifAge > MAX_OFFER_AGE_SECONDS) {
-          console.log(`[Recovery] ⏰ Expired (age: ${Math.round(notifAge)}s > ${MAX_OFFER_AGE_SECONDS}s) — marking read`);
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
-            .eq('user_id', effectiveUserId)
-            .eq('type', 'new_ride');
-          return;
-        }
-
-        const shown = await showOfferForRide(pending.ride_id);
-        if (!shown) {
-          // Ride no longer searching — mark notification read to avoid re-querying
-          console.log('[Recovery] Ride not available — marking notification read');
-          await supabase
-            .from('notifications')
-            .update({ is_read: true })
-            .eq('ride_id', pending.ride_id)
-            .eq('user_id', effectiveUserId)
-            .eq('type', 'new_ride');
-        }
-        // NOTE: Do NOT mark is_read here if shown — only mark read on accept/decline/timeout
 
         // STEP 4: Direct rides table poll — catches rides even if notification INSERT was missed
-        if (!pending?.ride_id && effectiveUserId) {
+        if (effectiveUserId) {
           console.log(`🟡 DRIVER POLL RUN — attempt=${attempt}, driverUserId=${effectiveUserId}`);
           try {
             const { data: searchingRides, error: pollError } = await supabase
@@ -740,28 +735,17 @@ const DriverDashboard = () => {
 
             console.log(`🟡 DRIVER POLL RESULT — ridesReturned=${searchingRides?.length ?? 0}, error=${pollError?.message ?? 'none'}`);
             if (searchingRides && searchingRides.length > 0) {
-              searchingRides.forEach((sr, idx) => {
-                console.log(`🟡 DRIVER POLL ride[${idx}]:`, JSON.stringify({ id: sr.id, notified_driver_ids: sr.notified_driver_ids, requested_at: sr.requested_at }));
-              });
               for (const sr of searchingRides) {
-                // Check if this driver was notified for this ride
                 const notifiedIds = sr.notified_driver_ids || [];
                 const driverIsNotified = notifiedIds.includes(effectiveUserId);
-                const alreadyHandled = wasAlreadyHandled(sr.id);
-                const currentlyDisplayed = isCurrentlyDisplayed(sr.id);
-                console.log(`🟡 DRIVER POLL check ride=${sr.id} — driverInNotified=${driverIsNotified}, alreadyHandled=${alreadyHandled}, currentlyDisplayed=${currentlyDisplayed}`);
                 if (!driverIsNotified) continue;
-                if (alreadyHandled || currentlyDisplayed) continue;
+                if (wasAlreadyHandled(sr.id) || isCurrentlyDisplayed(sr.id)) continue;
 
                 const srAge = (Date.now() - new Date(sr.requested_at || sr.created_at).getTime()) / 1000;
-                if (srAge > MAX_OFFER_AGE_SECONDS) {
-                  console.log(`🟡 DRIVER POLL ride=${sr.id} too old — age=${Math.round(srAge)}s > ${MAX_OFFER_AGE_SECONDS}s`);
-                  continue;
-                }
+                if (srAge > MAX_OFFER_AGE_SECONDS) continue;
 
                 console.log(`🟢 RIDE FOUND FOR DRIVER — ride=${sr.id}, age=${Math.round(srAge)}s`);
                 const directShown = await showOfferForRide(sr.id);
-                console.log(`🟢 SHOWING RIDE MODAL — ride=${sr.id}, shown=${directShown}`);
                 if (directShown) break;
               }
             }
