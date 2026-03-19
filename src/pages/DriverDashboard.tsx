@@ -1590,6 +1590,27 @@ const DriverDashboard = () => {
       updates.driver_earnings = fareForFee - fee;
     }
 
+    // For completed rides the UI is already cleared — persist in background, don't block.
+    if (status === 'completed') {
+      setBusyAction(null);
+      persistRideStatus({
+        rideId: prev.id,
+        expectedStatus: status,
+        updates,
+        driverId: user.id,
+        label: `Update status to ${status}`,
+        maxAttempts: 5,
+        baseDelayMs: 600,
+        timeoutMs: 8000,
+      }).then((saved) => {
+        if (saved) void refreshDriverProfile();
+        else void retryDbUpdate(prev.id, updates, status);
+      }).catch(() => {
+        void retryDbUpdate(prev.id, updates, status);
+      });
+      return;
+    }
+
     try {
       const saved = await persistRideStatus({
         rideId: prev.id,
@@ -1605,11 +1626,6 @@ const DriverDashboard = () => {
       if (!saved) {
         console.warn('[DriverDashboard] updateRideStatus did not persist immediately, starting background retry');
         void retryDbUpdate(prev.id, updates, status);
-        return;
-      }
-
-      if (status === 'completed') {
-        void refreshDriverProfile();
       }
     } catch (error) {
       console.warn('[DriverDashboard] updateRideStatus failed, starting background retry:', error);
