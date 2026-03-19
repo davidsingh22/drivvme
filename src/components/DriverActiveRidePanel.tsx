@@ -26,6 +26,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import { withTimeout } from '@/lib/withTimeout';
+import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 import { persistRideStatus } from '@/lib/persistRideStatus';
 import DriverRideActionBar from '@/components/DriverRideActionBar';
 /** Fire push notification to rider immediately (don't wait for DB trigger) */
@@ -339,19 +340,47 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       driver_earnings: driverEarningsCalc,
     };
 
-    // UI is already cleared — persist in background, don't block the driver.
+    // First try a fast direct REST update so the rider sees completion immediately on reopen.
     setBusyAction(null);
-    persistRideStatus({
-      rideId,
-      expectedStatus: 'completed',
-      updates,
-      driverId,
-      label: 'Complete ride',
-      maxAttempts: 5,
-      baseDelayMs: 600,
-      timeoutMs: 8000,
-    }).then((saved) => {
-      if (!saved) void retryDbWrite(rideId, updates, 'completed');
+    getValidAccessToken().then(async (token) => {
+      try {
+        const response = await fetch(
+          `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&driver_id=eq.${driverId}&select=id,status`,
+          {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              apikey: ANON_KEY,
+              Authorization: `Bearer ${token}`,
+              Prefer: 'return=representation',
+            },
+            body: JSON.stringify(updates),
+            keepalive: true,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`complete ride patch failed: ${response.status}`);
+        }
+
+        const rows = (await response.json().catch(() => [])) as Array<{ status?: string }>;
+        if (rows[0]?.status === 'completed') return;
+
+        void retryDbWrite(rideId, updates, 'completed');
+      } catch {
+        const saved = await persistRideStatus({
+          rideId,
+          expectedStatus: 'completed',
+          updates,
+          driverId,
+          label: 'Complete ride',
+          maxAttempts: 4,
+          baseDelayMs: 500,
+          timeoutMs: 7000,
+        });
+
+        if (!saved) void retryDbWrite(rideId, updates, 'completed');
+      }
     }).catch(() => {
       void retryDbWrite(rideId, updates, 'completed');
     });
