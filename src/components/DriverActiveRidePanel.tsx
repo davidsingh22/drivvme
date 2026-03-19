@@ -462,8 +462,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         void retryDbWrite(activeRide.id, { status: 'arrived' });
       }
     } catch (err) {
-      // Don't revert optimistic update or show toast — DB write likely went through
-      console.warn('[DriverActiveRidePanel] markArrived slow/timeout (optimistic kept):', err);
+      console.warn('[DriverActiveRidePanel] markArrived timeout, retrying:', err);
+      void retryDbWrite(activeRide.id, { status: 'arrived' });
     } finally {
       setBusyAction(null);
     }
