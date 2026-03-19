@@ -1354,6 +1354,15 @@ const DriverDashboard = () => {
   const acceptRide = async (ride: RideRequest) => {
     if (!user || busyAction) return;
 
+    // Ensure fresh auth before accepting
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[AcceptRide] Auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
+
     console.log('[AcceptRide] START — ride.id:', ride.id, 'user.id:', user.id);
 
     // Pre-check: verify ride is still available before committing UI changes
