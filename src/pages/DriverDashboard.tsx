@@ -617,6 +617,7 @@ const DriverDashboard = () => {
             } else if (!isCurrentlyDisplayed(lsRideId)) {
               console.log(`[Recovery] (attempt ${attempt}) 📱 Found local signal:`, lsRideId);
               const shown = await showOfferForRide(lsRideId);
+              if (cancelled) return;
               if (shown) return;
             }
           }
