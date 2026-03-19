@@ -1235,6 +1235,7 @@ const DriverDashboard = () => {
         }
         setIsOnline(newStatus);
         manuallyToggledOffRef.current = !newStatus;
+        try { localStorage.setItem('driver_manually_offline', (!newStatus).toString()); } catch {}
         await refreshDriverProfile();
         toast({
           title: newStatus ? 'You are now online' : 'You are now offline',
