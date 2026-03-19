@@ -241,6 +241,13 @@ export function GlobalRideOfferGuard() {
         if (cancelled) return;
 
         if (data) {
+          // Only show ride if current_driver_id matches this driver
+          if (data.current_driver_id && currentUserId && data.current_driver_id !== currentUserId) {
+            console.log('[GlobalGuard] 🚫 Ride not targeted at this driver (current_driver_id:', data.current_driver_id, ')');
+            cleanup();
+            return;
+          }
+
           const age = (Date.now() - new Date(data.requested_at || data.created_at).getTime()) / 1000;
           if (age > 90) {
             console.log('[GlobalGuard] ⏰ Ride too old:', Math.round(age), 's');
