@@ -33,6 +33,7 @@ import { calculatePlatformFee } from '@/lib/platformFees';
 import { withTimeout } from '@/lib/withTimeout';
 import { persistRideStatus } from '@/lib/persistRideStatus';
 import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
+import { resilientCall, ensureFreshSession } from '@/lib/resilientRequest';
 import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
@@ -1244,9 +1245,17 @@ const DriverDashboard = () => {
   }, [user, currentRide]);
 
   const toggleOnlineStatus = async () => {
+    // Always ensure fresh auth before toggling
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[DriverDashboard] toggleOnlineStatus auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
+
     if (!user) {
       console.warn('[DriverDashboard] toggleOnlineStatus: user not loaded yet, refreshing session...');
-      // Try to recover the session
       try {
         const { data } = await supabase.auth.getSession();
         if (!data.session) {
@@ -1255,13 +1264,11 @@ const DriverDashboard = () => {
       } catch (e) {
         console.error('[DriverDashboard] session recovery failed:', e);
       }
-      // Re-check after recovery attempt
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session?.user) {
         toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
         return;
       }
-      // Use the recovered user for this toggle
       const recoveredUser = sessionData.session.user;
       try {
         const newStatus = !isOnline;
@@ -1273,7 +1280,6 @@ const DriverDashboard = () => {
           toast({ title: 'Error', description: error.message, variant: 'destructive' });
           return;
         }
-        // Sync driver_locations and driver_presence so MSN dispatch reflects offline immediately
         if (!newStatus) {
           supabase.from('driver_locations').update({ is_online: false, updated_at: new Date().toISOString() }).eq('driver_id', recoveredUser.id).then(() => {});
           supabase.from('driver_presence').update({ status: 'offline', last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('driver_id', recoveredUser.id).then(() => {});
@@ -1310,7 +1316,6 @@ const DriverDashboard = () => {
         return;
       }
 
-      // Sync driver_locations and driver_presence so MSN dispatch reflects offline immediately
       if (!newStatus) {
         supabase.from('driver_locations').update({ is_online: false, updated_at: new Date().toISOString() }).eq('driver_id', user.id).then(() => {});
         supabase.from('driver_presence').update({ status: 'offline', last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('driver_id', user.id).then(() => {});
@@ -1348,6 +1353,15 @@ const DriverDashboard = () => {
 
   const acceptRide = async (ride: RideRequest) => {
     if (!user || busyAction) return;
+
+    // Ensure fresh auth before accepting
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[AcceptRide] Auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
 
     console.log('[AcceptRide] START — ride.id:', ride.id, 'user.id:', user.id);
 
@@ -1555,6 +1569,15 @@ const DriverDashboard = () => {
   const updateRideStatus = async (status: string) => {
     if (!currentRide || !user || busyAction) return;
 
+    // Ensure fresh auth before status update
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[DriverDashboard] updateRideStatus auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
+
     setBusyAction(status);
 
     const prev = { ...currentRide };
@@ -1669,6 +1692,15 @@ const DriverDashboard = () => {
 
   const cancelRide = async () => {
     if (!currentRide || !user || busyAction) return;
+
+    // Ensure fresh auth before cancelling
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[DriverDashboard] cancelRide auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
 
     // Beep stops automatically when newRideAlertOpen is cleared
     setBusyAction('cancel');

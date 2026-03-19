@@ -31,6 +31,7 @@ import { GreetingHeader } from '@/components/booking/GreetingHeader';
 import { RecentDestinations } from '@/components/booking/RecentDestinations';
 import { QuickDestinations } from '@/components/booking/QuickDestinations';
 import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
+import { resilientCall, ensureFreshSession } from '@/lib/resilientRequest';
 import welcomeBg from '@/assets/drivveme-galaxy-bg-new.png';
 import rideBg from '@/assets/drivveme-ride-bg.png';
 import drivvemeCarIcon from '@/assets/drivveme-car-icon.png';
@@ -1778,6 +1779,19 @@ const RideBooking = () => {
       currentRide.driver_id || localStorage.getItem(`drivvme_last_accepted_driver_${rideId}`) || null;
 
     if (!userId) {
+      toast({
+        title: language === 'fr' ? 'Session expirée' : 'Session expired',
+        description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Ensure fresh auth before cancelling
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[RideBooking] handleCancelRide auth refresh failed:', authErr);
       toast({
         title: language === 'fr' ? 'Session expirée' : 'Session expired',
         description: language === 'fr' ? 'Veuillez vous reconnecter.' : 'Please sign in again.',
