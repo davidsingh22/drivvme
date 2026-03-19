@@ -921,7 +921,6 @@ export type Database = {
           cancelled_at: string | null
           cancelled_by: string | null
           created_at: string
-          current_driver_id: string | null
           distance_km: number | null
           driver_earnings: number | null
           driver_id: string | null
@@ -960,7 +959,6 @@ export type Database = {
           cancelled_at?: string | null
           cancelled_by?: string | null
           created_at?: string
-          current_driver_id?: string | null
           distance_km?: number | null
           driver_earnings?: number | null
           driver_id?: string | null
@@ -999,7 +997,6 @@ export type Database = {
           cancelled_at?: string | null
           cancelled_by?: string | null
           created_at?: string
-          current_driver_id?: string | null
           distance_km?: number | null
           driver_earnings?: number | null
           driver_id?: string | null
@@ -1239,7 +1236,6 @@ export type Database = {
           cancelled_at: string | null
           cancelled_by: string | null
           created_at: string
-          current_driver_id: string | null
           distance_km: number | null
           driver_earnings: number | null
           driver_id: string | null
