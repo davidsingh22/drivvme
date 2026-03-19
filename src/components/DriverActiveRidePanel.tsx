@@ -285,10 +285,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
     } catch (err) {
-      setActiveRide(previousRide);
-      onRideUpdated?.(previousRide);
-      console.error('[DriverActiveRidePanel] startRide error:', err);
-      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+      console.warn('[DriverActiveRidePanel] startRide slow/timeout (optimistic kept):', err);
     } finally {
       setBusyAction(null);
     }
