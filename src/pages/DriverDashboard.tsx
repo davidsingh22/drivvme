@@ -944,22 +944,27 @@ const DriverDashboard = () => {
             // Handle ride_cancelled notifications — dismiss offer modal or clear active ride
             if (notif.type === 'ride_cancelled' && notif.ride_id) {
               console.log('[Realtime] 🚫 ride_cancelled for:', notif.ride_id);
-              if (newRideAlertRideIdRef.current === notif.ride_id) {
+              const isRelevantAlertRide = newRideAlertRideIdRef.current === notif.ride_id;
+              const isRelevantActiveRide = currentRideRef.current?.id === notif.ride_id;
+
+              if (isRelevantAlertRide) {
                 setNewRideAlertOpen(false);
                 setCachedAlertRide(null);
                 setNewRideAlertRideId(null);
                 alertStartTimeRef.current = null;
               }
-              if (currentRideRef.current?.id === notif.ride_id) {
+              if (isRelevantActiveRide) {
                 setCurrentRide(null);
                 setRiderInfo(null);
                 setShowGPSNavigation(false);
               }
-              toast({
-                title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
-                description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
-                variant: 'destructive',
-              });
+              if ((isRelevantAlertRide || isRelevantActiveRide) && !wasRideJustCompleted(notif.ride_id)) {
+                toast({
+                  title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
+                  description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
+                  variant: 'destructive',
+                });
+              }
               return;
             }
 
