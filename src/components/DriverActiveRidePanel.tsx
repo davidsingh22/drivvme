@@ -285,10 +285,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
     } catch (err) {
-      setActiveRide(previousRide);
-      onRideUpdated?.(previousRide);
-      console.error('[DriverActiveRidePanel] startRide error:', err);
-      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+      console.warn('[DriverActiveRidePanel] startRide slow/timeout (optimistic kept):', err);
     } finally {
       setBusyAction(null);
     }
@@ -336,9 +333,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
     } catch (err) {
-      setActiveRide(activeRide);
-      console.error('[DriverActiveRidePanel] endRide error:', err);
-      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+      console.warn('[DriverActiveRidePanel] endRide slow/timeout (optimistic kept):', err);
     } finally {
       setBusyAction(null);
     }
@@ -446,10 +441,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
     } catch (err) {
-      setActiveRide(previousRide);
-      onRideUpdated?.(previousRide);
-      console.error('[DriverActiveRidePanel] markArrived error:', err);
-      toast({ title: 'Error', description: 'Network slow — try again.', variant: 'destructive' });
+      // Don't revert optimistic update or show toast — DB write likely went through
+      console.warn('[DriverActiveRidePanel] markArrived slow/timeout (optimistic kept):', err);
     } finally {
       setBusyAction(null);
     }
