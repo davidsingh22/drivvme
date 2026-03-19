@@ -13,6 +13,7 @@ import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 import { useRiderLocationTracking } from "@/hooks/useRiderLocationTracking";
 import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
+import { useSessionWatchdog } from "@/hooks/useSessionWatchdog";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
