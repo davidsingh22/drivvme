@@ -562,6 +562,7 @@ export default function LiveMonitor() {
   }, []);
 
   useEffect(() => {
+    if (authLoading) return;
     if (!isAdmin) return;
 
     feedIdsRef.current.clear();
