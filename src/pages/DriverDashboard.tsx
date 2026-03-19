@@ -617,6 +617,7 @@ const DriverDashboard = () => {
             } else if (!isCurrentlyDisplayed(lsRideId)) {
               console.log(`[Recovery] (attempt ${attempt}) 📱 Found local signal:`, lsRideId);
               const shown = await showOfferForRide(lsRideId);
+              if (cancelled) return;
               if (shown) return;
             }
           }
@@ -658,6 +659,7 @@ const DriverDashboard = () => {
           } else {
             console.log(`[Recovery] (attempt ${attempt}) 🌐 Found global pending ride:`, globalRideId);
             const shown = await showOfferForRide(globalRideId);
+            if (cancelled) return;
             if (shown) return;
           }
         }
@@ -716,6 +718,7 @@ const DriverDashboard = () => {
         }
 
         const shown = await showOfferForRide(pending.ride_id);
+        if (cancelled) return; // Guard: effect was re-mounted during async fetch
         if (!shown) {
           // Ride no longer searching — mark notification read to avoid re-querying
           console.log('[Recovery] Ride not available — marking notification read');
@@ -728,8 +731,9 @@ const DriverDashboard = () => {
         }
         // NOTE: Do NOT mark is_read here if shown — only mark read on accept/decline/timeout
 
-        // STEP 4: Direct rides table poll — catches rides even if notification INSERT was missed
-        if (!pending?.ride_id && effectiveUserId) {
+        // STEP 4: Direct rides table poll — ALWAYS runs as fallback safety net
+        // Catches rides even if notification INSERT was missed or was marked read by a race condition
+        if (effectiveUserId && !cancelled) {
           console.log(`🟡 DRIVER POLL RUN — attempt=${attempt}, driverUserId=${effectiveUserId}`);
           try {
             const { data: searchingRides, error: pollError } = await supabase
@@ -763,6 +767,7 @@ const DriverDashboard = () => {
 
                 console.log(`🟢 RIDE FOUND FOR DRIVER — ride=${sr.id}, age=${Math.round(srAge)}s`);
                 const directShown = await showOfferForRide(sr.id);
+                if (cancelled) break;
                 console.log(`🟢 SHOWING RIDE MODAL — ride=${sr.id}, shown=${directShown}`);
                 if (directShown) break;
               }
