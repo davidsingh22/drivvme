@@ -115,12 +115,42 @@ const DriverDashboard = () => {
     recentRideActionRef.current = { rideId, status, at: Date.now() };
   };
 
-  const wasRideJustCompleted = (rideId?: string | null) => {
+  /** Returns true if the driver just performed ANY action on this ride (within 30s).
+   *  Used to suppress false "Ride cancelled" toasts from realtime/polling. */
+  const wasRecentDriverAction = (rideId?: string | null) => {
     const recent = recentRideActionRef.current;
-    if (!recent || recent.status !== 'completed') return false;
-    if (Date.now() - recent.at > 20000) return false;
+    if (!recent) return false;
+    if (Date.now() - recent.at > 30000) return false;
     return !rideId || recent.rideId === rideId;
   };
+
+  /** Background retry: keeps attempting a DB update until it succeeds (max 5 retries). */
+  const retryDbUpdate = useCallback(async (rideId: string, updates: Record<string, any>, attempt = 0) => {
+    const MAX_RETRIES = 5;
+    const DELAY = 3000;
+    if (attempt >= MAX_RETRIES) {
+      console.error('[DriverDashboard] retryDbUpdate: gave up after', MAX_RETRIES, 'attempts for ride', rideId);
+      return;
+    }
+    try {
+      // First check if already in desired status
+      const { data: check } = await supabase.from('rides').select('status').eq('id', rideId).maybeSingle();
+      if (check?.status === updates.status) {
+        console.log('[DriverDashboard] retryDbUpdate: ride already in', updates.status);
+        return;
+      }
+      const { error } = await supabase.from('rides').update(updates).eq('id', rideId);
+      if (!error) {
+        console.log('[DriverDashboard] retryDbUpdate: success on attempt', attempt + 1);
+        return;
+      }
+      console.warn('[DriverDashboard] retryDbUpdate: attempt', attempt + 1, 'failed:', error.message);
+    } catch (e) {
+      console.warn('[DriverDashboard] retryDbUpdate: attempt', attempt + 1, 'exception:', e);
+    }
+    await new Promise(r => setTimeout(r, DELAY));
+    return retryDbUpdate(rideId, updates, attempt + 1);
+  }, []);
 
   // Keep refs in sync with state
   useEffect(() => { currentRideRef.current = currentRide; }, [currentRide]);
