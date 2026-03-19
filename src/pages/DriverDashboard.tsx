@@ -89,7 +89,10 @@ const DriverDashboard = () => {
   } = usePushNotifications();
   const [notificationHelpOpen, setNotificationHelpOpen] = useState(false);
 
-  const [isOnline, setIsOnline] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => {
+    // Default to online UNLESS driver manually went offline
+    try { return localStorage.getItem('driver_manually_offline') !== 'true'; } catch { return true; }
+  });
   // availableRides removed — push-only dispatch, no feed
   const [currentRide, setCurrentRide] = useState<RideRequest | null>(null);
   const [riderInfo, setRiderInfo] = useState<RiderInfo | null>(null);
@@ -398,6 +401,8 @@ const DriverDashboard = () => {
 
     const goOnline = async () => {
       if (manuallyToggledOffRef.current) return;
+      // Ensure fresh auth before writing online status
+      try { await ensureFreshSession(); } catch {}
       const { error } = await supabase
         .from('driver_profiles')
         .update({ is_online: true })
@@ -407,7 +412,10 @@ const DriverDashboard = () => {
       }
     };
 
-    // Go online immediately on mount
+    // Force online immediately on mount (ignore DB state)
+    if (!manuallyToggledOffRef.current) {
+      setIsOnline(true);
+    }
     goOnline();
 
     // Go online on visibility resume (app foregrounded)
