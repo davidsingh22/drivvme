@@ -74,16 +74,31 @@ const TripCompletionScreen = ({
   const [showFeedback, setShowFeedback] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
   const autoRedirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedAtRef = useRef(Date.now());
 
-  // Auto-redirect after 30 seconds if no action taken
+  // Auto-redirect after 60 seconds if no action taken
   useEffect(() => {
     autoRedirectRef.current = setTimeout(() => {
-      console.log('[TripCompletion] 30s auto-redirect — no action taken');
+      console.log('[TripCompletion] 60s auto-redirect — no action taken');
       onComplete();
-    }, 30000);
+    }, 60000);
+
+    // When app resumes from background, check if 60s have passed
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - mountedAtRef.current;
+        if (elapsed >= 60000) {
+          console.log('[TripCompletion] App resumed after 60s — auto-redirect');
+          if (autoRedirectRef.current) clearTimeout(autoRedirectRef.current);
+          onComplete();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       if (autoRedirectRef.current) clearTimeout(autoRedirectRef.current);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [onComplete]);
 
