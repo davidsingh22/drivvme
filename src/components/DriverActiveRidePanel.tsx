@@ -284,7 +284,8 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         void retryDbWrite(activeRide.id, { status: 'in_progress', pickup_at: new Date().toISOString() });
       }
     } catch (err) {
-      console.warn('[DriverActiveRidePanel] startRide slow/timeout (optimistic kept):', err);
+      console.warn('[DriverActiveRidePanel] startRide timeout, retrying:', err);
+      void retryDbWrite(activeRide.id, { status: 'in_progress', pickup_at: new Date().toISOString() });
     } finally {
       setBusyAction(null);
     }
