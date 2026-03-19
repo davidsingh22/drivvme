@@ -121,7 +121,7 @@ function timeAgo(ts: string): string {
 }
 
 export default function LiveMonitor() {
-  const { isAdmin, authLoading } = useAuth();
+  const { isAdmin, authLoading, profileLoading, roles } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
