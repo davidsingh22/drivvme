@@ -337,8 +337,6 @@ export default function LiveMonitor() {
         .from('presence')
         .select('user_id, last_seen_at, role')
         .gte('last_seen_at', cutoff),
-      // Always show drivers who are flagged as online in their profile,
-      // even if their heartbeat is stale (e.g. app backgrounded on mobile)
       supabase
         .from('driver_profiles')
         .select('user_id, updated_at')
@@ -353,93 +351,84 @@ export default function LiveMonitor() {
       });
     }
 
-    // Build a set of driver user_ids from user_roles for accurate classification
+    const riderRoleSet = new Set<string>();
     const driverRoleSet = new Set<string>();
+
     (rolesRes.data || []).forEach((r: any) => {
       const normalizedRole: 'rider' | 'driver' = r.role === 'driver' ? 'driver' : 'rider';
       roleByUserRef.current.set(r.user_id, normalizedRole);
-      if (normalizedRole === 'driver') driverRoleSet.add(r.user_id);
+      if (normalizedRole === 'driver') {
+        driverRoleSet.add(r.user_id);
+      } else {
+        riderRoleSet.add(r.user_id);
+      }
     });
 
     const riderRows = (riderRes.data || []) as RiderLocationRow[];
     const driverRows = (driverRes.data || []) as DriverLocationRow[];
     const rideActivityRows = (activeRidesRes.data || []) as RideActivityRow[];
     const presenceRows = (presenceRes.data || []) as { user_id: string; last_seen_at: string; role: string }[];
+    const onlineDriverProfileRows = (onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[];
 
-    // Collect latest timestamps per user across all sources
-    const allUsersLatest = new Map<string, string>();
+    const riderUsersLatest = new Map<string, string>();
+    const driverUsersLatest = new Map<string, string>();
+
+    const setLatest = (target: Map<string, string>, userId: string, timestamp: string | null | undefined) => {
+      if (!userId || !timestamp) return;
+      const prev = target.get(userId);
+      if (!prev || new Date(timestamp).getTime() > new Date(prev).getTime()) {
+        target.set(userId, timestamp);
+      }
+    };
 
     riderRows.forEach((row) => {
-      const ts = row.last_seen_at || row.updated_at;
-      const prev = allUsersLatest.get(row.user_id);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(row.user_id, ts);
-      }
-    });
-
-    driverRows.forEach((row) => {
-      const ts = row.updated_at;
-      const prev = allUsersLatest.get(row.user_id);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(row.user_id, ts);
-      }
+      if (!riderRoleSet.has(row.user_id)) return;
+      setLatest(riderUsersLatest, row.user_id, row.last_seen_at || row.updated_at);
     });
 
     rideActivityRows.forEach((row) => {
       if (!row.rider_id) return;
-      const ts = row.updated_at;
-      const prev = allUsersLatest.get(row.rider_id);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(row.rider_id, ts);
-      }
+      setLatest(riderUsersLatest, row.rider_id, row.updated_at);
     });
 
-    // Also consider presence heartbeat as an online signal
     presenceRows.forEach((row) => {
-      const ts = row.last_seen_at;
-      const prev = allUsersLatest.get(row.user_id);
-      if (!prev || new Date(ts).getTime() > new Date(prev).getTime()) {
-        allUsersLatest.set(row.user_id, ts);
-      }
-
       const normalizedPresenceRole = String(row.role || '').toLowerCase();
-      if (normalizedPresenceRole === 'driver') {
-        driverRoleSet.add(row.user_id);
-        roleByUserRef.current.set(row.user_id, 'driver');
+      if (normalizedPresenceRole === 'driver' || driverRoleSet.has(row.user_id)) {
+        return;
       }
+      setLatest(riderUsersLatest, row.user_id, row.last_seen_at);
     });
 
-    // Drivers flagged as is_online=true in driver_profiles always appear,
-    // even if heartbeat/location data is stale (backgrounded app)
-    ((onlineDriverProfilesRes.data || []) as { user_id: string; updated_at: string }[]).forEach((row) => {
+    driverRows.forEach((row) => {
       driverRoleSet.add(row.user_id);
       roleByUserRef.current.set(row.user_id, 'driver');
-      if (!allUsersLatest.has(row.user_id)) {
-        allUsersLatest.set(row.user_id, row.updated_at || new Date().toISOString());
-      }
+      setLatest(driverUsersLatest, row.user_id, row.updated_at);
     });
 
-    const allUserIds = [...allUsersLatest.keys()];
+    onlineDriverProfileRows.forEach((row) => {
+      driverRoleSet.add(row.user_id);
+      roleByUserRef.current.set(row.user_id, 'driver');
+      setLatest(driverUsersLatest, row.user_id, row.updated_at || new Date().toISOString());
+    });
+
+    const allUserIds = [...new Set([...riderUsersLatest.keys(), ...driverUsersLatest.keys()])];
     await upsertProfileNames(allUserIds);
 
-    const riders: OnlineUser[] = [];
-    const drivers: OnlineUser[] = [];
+    const riders: OnlineUser[] = [...riderUsersLatest.entries()].map(([user_id, last_seen_at]) => ({
+      user_id,
+      display_name: getCachedName(user_id),
+      source: 'native',
+      last_seen_at,
+      role: 'rider',
+    }));
 
-    allUsersLatest.forEach((last_seen_at, user_id) => {
-      const isDriver = driverRoleSet.has(user_id);
-      const entry: OnlineUser = {
-        user_id,
-        display_name: getCachedName(user_id),
-        source: 'native',
-        last_seen_at,
-        role: isDriver ? 'driver' : 'rider',
-      };
-      if (isDriver) {
-        drivers.push(entry);
-      } else {
-        riders.push(entry);
-      }
-    });
+    const drivers: OnlineUser[] = [...driverUsersLatest.entries()].map(([user_id, last_seen_at]) => ({
+      user_id,
+      display_name: getCachedName(user_id),
+      source: 'native',
+      last_seen_at,
+      role: 'driver',
+    }));
 
     setOnlineRiders(riders);
     setOnlineDrivers(drivers);
