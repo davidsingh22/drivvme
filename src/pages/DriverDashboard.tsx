@@ -728,9 +728,9 @@ const DriverDashboard = () => {
 
         // STEP 4: Direct rides table poll — catches rides even if notification INSERT was missed
         if (!pending?.ride_id && effectiveUserId) {
-          console.log(`[Recovery] (attempt ${attempt}) 🔍 STEP 4: Direct rides table poll for notified_driver_ids`);
+          console.log(`🟡 DRIVER POLL RUN — attempt=${attempt}, driverUserId=${effectiveUserId}`);
           try {
-            const { data: searchingRides } = await supabase
+            const { data: searchingRides, error: pollError } = await supabase
               .from('rides')
               .select('id, requested_at, created_at, notified_driver_ids')
               .eq('status', 'searching')
@@ -738,18 +738,30 @@ const DriverDashboard = () => {
               .order('created_at', { ascending: false })
               .limit(5);
 
+            console.log(`🟡 DRIVER POLL RESULT — ridesReturned=${searchingRides?.length ?? 0}, error=${pollError?.message ?? 'none'}`);
             if (searchingRides && searchingRides.length > 0) {
+              searchingRides.forEach((sr, idx) => {
+                console.log(`🟡 DRIVER POLL ride[${idx}]:`, JSON.stringify({ id: sr.id, notified_driver_ids: sr.notified_driver_ids, requested_at: sr.requested_at }));
+              });
               for (const sr of searchingRides) {
                 // Check if this driver was notified for this ride
                 const notifiedIds = sr.notified_driver_ids || [];
-                if (!notifiedIds.includes(effectiveUserId)) continue;
-                if (wasAlreadyHandled(sr.id) || isCurrentlyDisplayed(sr.id)) continue;
+                const driverIsNotified = notifiedIds.includes(effectiveUserId);
+                const alreadyHandled = wasAlreadyHandled(sr.id);
+                const currentlyDisplayed = isCurrentlyDisplayed(sr.id);
+                console.log(`🟡 DRIVER POLL check ride=${sr.id} — driverInNotified=${driverIsNotified}, alreadyHandled=${alreadyHandled}, currentlyDisplayed=${currentlyDisplayed}`);
+                if (!driverIsNotified) continue;
+                if (alreadyHandled || currentlyDisplayed) continue;
 
                 const srAge = (Date.now() - new Date(sr.requested_at || sr.created_at).getTime()) / 1000;
-                if (srAge > MAX_OFFER_AGE_SECONDS) continue;
+                if (srAge > MAX_OFFER_AGE_SECONDS) {
+                  console.log(`🟡 DRIVER POLL ride=${sr.id} too old — age=${Math.round(srAge)}s > ${MAX_OFFER_AGE_SECONDS}s`);
+                  continue;
+                }
 
-                console.log(`[Recovery] (attempt ${attempt}) 🎯 Found ride via direct poll:`, sr.id, 'age:', Math.round(srAge), 's');
+                console.log(`🟢 RIDE FOUND FOR DRIVER — ride=${sr.id}, age=${Math.round(srAge)}s`);
                 const directShown = await showOfferForRide(sr.id);
+                console.log(`🟢 SHOWING RIDE MODAL — ride=${sr.id}, shown=${directShown}`);
                 if (directShown) break;
               }
             }
