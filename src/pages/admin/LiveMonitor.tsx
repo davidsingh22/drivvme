@@ -323,6 +323,7 @@ export default function LiveMonitor() {
       supabase
         .from('driver_locations')
         .select('user_id, updated_at')
+        .eq('is_online', true)
         .gte('updated_at', cutoff),
       supabase
         .from('user_roles')
@@ -727,6 +728,14 @@ export default function LiveMonitor() {
       })
       .subscribe();
 
+    // Listen for driver_profiles is_online changes so going offline is reflected instantly
+    const driverProfileCh = supabase
+      .channel('admin-driver-profiles')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'driver_profiles' }, () => {
+        void loadOnlineUsers();
+      })
+      .subscribe();
+
     const poll = setInterval(loadOnlineUsers, 15_000);
 
     // Polling fallback: catch ride status changes that realtime may silently miss
@@ -797,6 +806,7 @@ export default function LiveMonitor() {
       supabase.removeChannel(notifCh);
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
+      supabase.removeChannel(driverProfileCh);
     };
   }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
 
