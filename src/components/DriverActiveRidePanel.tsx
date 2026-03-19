@@ -27,7 +27,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import { withTimeout } from '@/lib/withTimeout';
 import { persistRideStatus } from '@/lib/persistRideStatus';
-
+import DriverRideActionBar from '@/components/DriverRideActionBar';
 /** Fire push notification to rider immediately (don't wait for DB trigger) */
 const fireInstantPush = async (
   rideId: string,
