@@ -716,6 +716,7 @@ const DriverDashboard = () => {
         }
 
         const shown = await showOfferForRide(pending.ride_id);
+        if (cancelled) return; // Guard: effect was re-mounted during async fetch
         if (!shown) {
           // Ride no longer searching — mark notification read to avoid re-querying
           console.log('[Recovery] Ride not available — marking notification read');
