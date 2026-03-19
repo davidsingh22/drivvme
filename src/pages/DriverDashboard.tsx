@@ -354,6 +354,14 @@ const DriverDashboard = () => {
 
   // Track whether driver manually went offline this session
   const manuallyToggledOffRef = useRef(false);
+  const autoOnlineAttemptedRef = useRef(false);
+
+  // Sync isOnline state from driverProfile when it loads (covers late-loading profile)
+  useEffect(() => {
+    if (driverProfile && !autoOnlineAttemptedRef.current) {
+      setIsOnline(driverProfile.is_online);
+    }
+  }, [driverProfile]);
 
   // Auto-online: set driver online on mount and on app resume (unless manually toggled off)
   useEffect(() => {
@@ -362,12 +370,21 @@ const DriverDashboard = () => {
 
     const goOnline = async () => {
       if (manuallyToggledOffRef.current) return;
-      const { error } = await supabase
-        .from('driver_profiles')
-        .update({ is_online: true })
-        .eq('user_id', driverId);
-      if (!error) {
-        setIsOnline(true);
+      try {
+        // Ensure fresh session before writing
+        await supabase.auth.refreshSession().catch(() => {});
+        const { error } = await supabase
+          .from('driver_profiles')
+          .update({ is_online: true })
+          .eq('user_id', driverId);
+        if (!error) {
+          setIsOnline(true);
+          autoOnlineAttemptedRef.current = true;
+        } else {
+          console.warn('[DriverDashboard] Auto-online failed:', error.message);
+        }
+      } catch (e) {
+        console.warn('[DriverDashboard] Auto-online exception:', e);
       }
     };
 
