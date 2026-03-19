@@ -645,6 +645,15 @@ export default function LiveMonitor() {
         const rideId = notif.ride_id as string | null;
         if (!rideId) return;
 
+        // Only show dispatch offers in MSN if the driver is currently online in driver_locations
+        const { data: driverLoc } = await supabase
+          .from('driver_locations')
+          .select('is_online')
+          .eq('user_id', driverUserId)
+          .maybeSingle();
+
+        if (!driverLoc?.is_online) return;
+
         // Fetch ride details to get rider name and route
         const { data: ride } = await supabase
           .from('rides')
@@ -673,7 +682,6 @@ export default function LiveMonitor() {
         };
 
         setActiveOffers((prev) => {
-          // Don't duplicate
           if (prev.some((o) => o.id === offer.id)) return prev;
           return [offer, ...prev];
         });
