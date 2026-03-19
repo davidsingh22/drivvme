@@ -28,6 +28,7 @@ interface DriverNavigationMapProps {
   onCompleteRide?: () => void;
   onCancelRide?: () => void;
   hasArrived?: boolean;
+  isUpdating?: boolean;
 }
 
 const DriverNavigationMap = ({
@@ -42,6 +43,7 @@ const DriverNavigationMap = ({
   onCompleteRide,
   onCancelRide,
   hasArrived,
+  isUpdating = false,
 }: DriverNavigationMapProps) => {
   const { language } = useLanguage();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -369,6 +371,7 @@ const DriverNavigationMap = ({
           onStartRide={onStartRide}
           onCompleteRide={onCompleteRide}
           onCancelRide={onCancelRide}
+          isUpdating={isUpdating}
           compact
         />
       )}
@@ -490,6 +493,7 @@ const DriverNavigationMap = ({
                 onStartRide={onStartRide}
                 onCompleteRide={onCompleteRide}
                 onCancelRide={onCancelRide}
+                isUpdating={isUpdating}
                 compact
               />
             )}

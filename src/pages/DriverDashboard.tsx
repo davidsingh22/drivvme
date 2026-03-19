@@ -2114,6 +2114,7 @@ const DriverDashboard = () => {
           }
           destinationType={currentRide.status === 'in_progress' ? 'dropoff' : 'pickup'}
           rideStatus={currentRide.status}
+          isUpdating={!!busyAction}
           onClose={() => setShowGPSNavigation(false)}
           onArrived={() => updateRideStatus('arrived')}
           onStartRide={() => updateRideStatus('in_progress')}
