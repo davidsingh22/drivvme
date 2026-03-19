@@ -1724,37 +1724,37 @@ const RideBooking = () => {
       let confirmedDriverId: string | null = targetDriverId;
       let lastError: unknown = null;
 
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const { data: rpcRide, error: rpcError } = await withTimeout(
-            supabase
-              .rpc('cancel_ride', {
-                p_ride_id: rideId,
-                p_reason: 'Cancelled by rider',
-              })
-              .then((r) => r),
-            10000,
-            `Cancel ride (RPC) attempt ${attempt}`
-          );
+      // ATTEMPT 1: RPC (fastest path — atomic server-side cancel)
+      try {
+        const { data: rpcRide, error: rpcError } = await withTimeout(
+          supabase
+            .rpc('cancel_ride', {
+              p_ride_id: rideId,
+              p_reason: 'Cancelled by rider',
+            })
+            .then((r) => r),
+          6000,
+          'Cancel ride (RPC)'
+        );
 
-          if (rpcError) {
-            throw rpcError;
-          }
-
-          if (rpcRide?.status === 'cancelled') {
-            cancelConfirmed = true;
-            confirmedDriverId = rpcRide.driver_id ?? confirmedDriverId;
-            break;
-          }
-        } catch (rpcErr) {
-          lastError = rpcErr;
-          console.warn('[Cancel] RPC failed, trying REST fallback:', rpcErr);
+        if (!rpcError && rpcRide?.status === 'cancelled') {
+          cancelConfirmed = true;
+          confirmedDriverId = rpcRide.driver_id ?? confirmedDriverId;
+        } else if (rpcError) {
+          lastError = rpcError;
+          console.warn('[Cancel] RPC failed:', rpcError);
         }
+      } catch (rpcErr) {
+        lastError = rpcErr;
+        console.warn('[Cancel] RPC timeout/error:', rpcErr);
+      }
 
+      // ATTEMPT 2: REST PATCH fallback (only if RPC didn't confirm)
+      if (!cancelConfirmed) {
         try {
           const token = await getValidAccessToken();
           const controller = new AbortController();
-          const timeout = window.setTimeout(() => controller.abort(), 10000);
+          const timeout = window.setTimeout(() => controller.abort(), 6000);
 
           try {
             const res = await fetch(
@@ -1775,46 +1775,38 @@ const RideBooking = () => {
                   cancellation_reason: 'Cancelled by rider',
                 }),
                 signal: controller.signal,
+                keepalive: true,
               }
             );
 
-            if (!res.ok) {
-              const body = await res.text().catch(() => '');
-              throw new Error(`Fallback cancel failed (${res.status}): ${body}`);
-            }
-
-            const rows = (await res.json().catch(() => [])) as Array<{
-              status?: string;
-              driver_id?: string | null;
-            }>;
-            const row = Array.isArray(rows) ? rows[0] : null;
-            confirmedDriverId = row?.driver_id ?? confirmedDriverId;
-
-            if (row?.status === 'cancelled') {
-              cancelConfirmed = true;
-              break;
+            if (res.ok) {
+              const rows = (await res.json().catch(() => [])) as Array<{
+                status?: string;
+                driver_id?: string | null;
+              }>;
+              const row = Array.isArray(rows) ? rows[0] : null;
+              confirmedDriverId = row?.driver_id ?? confirmedDriverId;
+              if (row?.status === 'cancelled') {
+                cancelConfirmed = true;
+              }
             }
           } finally {
             window.clearTimeout(timeout);
           }
         } catch (fallbackErr) {
           lastError = fallbackErr;
+          console.warn('[Cancel] REST fallback failed:', fallbackErr);
         }
+      }
 
-        const verification = await verifyCancellation(rideId, userId, 4);
+      // ATTEMPT 3: Quick single verification (only if neither method confirmed)
+      if (!cancelConfirmed) {
+        const verification = await verifyCancellation(rideId, userId, 2);
         confirmedDriverId = verification.driverId ?? confirmedDriverId;
-
         if (verification.confirmed) {
           cancelConfirmed = true;
-          break;
         }
-
         lastError = verification.lastError ?? lastError;
-
-        if (attempt < 3) {
-          const delay = isTransientCancelError(lastError) ? 350 * attempt : 250;
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
       }
 
       if (!cancelConfirmed) {
