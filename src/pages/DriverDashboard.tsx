@@ -801,13 +801,12 @@ const DriverDashboard = () => {
     };
 
     const resetAndRetry = (source: string) => {
-      // CRITICAL: If a ride offer modal is currently visible and was shown recently,
-      // do NOT clear it — a focus/visibility event from the notification banner
-      // would kill the modal the driver needs to see.
+      // CRITICAL: If a ride offer modal is currently visible, NEVER clear it.
+      // Focus/visibility events (from notification banners, app resume, etc.)
+      // must not kill the modal the driver needs to interact with.
       const offerIsActive = newRideAlertOpenRef.current && newRideAlertRideIdRef.current;
-      const offerAge = alertStartTimeRef.current ? (Date.now() - alertStartTimeRef.current) / 1000 : 999;
-      if (offerIsActive && offerAge < 30) {
-        console.log(`[Recovery] 👁️ ${source} — skipping clear (active offer age: ${Math.round(offerAge)}s)`);
+      if (offerIsActive) {
+        console.log(`[Recovery] 👁️ ${source} — skipping clear (active offer displayed)`);
         // Still refresh session + GPS in background, but don't touch modal state
         supabase.auth.refreshSession().catch(() => {});
         retryGeolocation();
@@ -815,14 +814,8 @@ const DriverDashboard = () => {
         return;
       }
 
-      console.log(`[Recovery] 👁️ ${source} — clearing stale state, force-refreshing session + retrying GPS + running retry ladder`);
+      console.log(`[Recovery] 👁️ ${source} — no active offer, refreshing session + GPS + running retry ladder`);
       setRecoveredCountdown(null);
-      // Force-clear BOTH refs AND state so useEffect sync doesn't overwrite back
-      newRideAlertOpenRef.current = false;
-      newRideAlertRideIdRef.current = null;
-      setNewRideAlertOpen(false);
-      setNewRideAlertRideId(null);
-      setCachedAlertRide(null);
       // Auto-clear the GPS error banner so it doesn't block the UI on resume
       resetLocationError();
       // If a ride is active, force a GPS re-acquire so the navigation works immediately
