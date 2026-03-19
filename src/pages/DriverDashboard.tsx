@@ -1371,24 +1371,13 @@ const DriverDashboard = () => {
 
       console.log('[AcceptRide] Update result:', JSON.stringify({ data: updatedRows, error }));
 
+      // If direct update failed (error or 0 rows due to RLS), use RPC fallback
       const directSuccess = !error && updatedRows && updatedRows.length > 0;
-
+      
       if (!directSuccess) {
-        // 0 rows + no error = another driver already accepted (race condition)
-        if (!error && updatedRows && updatedRows.length === 0) {
-          console.log('[AcceptRide] Race condition — ride already taken by another driver');
-          toast({
-            title: language === 'fr' ? 'Course déjà prise' : 'Ride already taken',
-            description: language === 'fr' ? 'Un autre chauffeur a accepté cette course' : 'Another driver already accepted this ride',
-            variant: 'destructive',
-          });
-          return;
-        }
-
-        // Actual error (network/RLS) — try RPC fallback
-        console.log('[AcceptRide] Direct update error, trying RPC fallback...',
+        console.log('[AcceptRide] Direct update did not succeed, trying RPC fallback...',
           JSON.stringify({ error, rowCount: updatedRows?.length }));
-
+        
         const { data: rpcResult, error: rpcError } = await withTimeout(
           supabase.rpc('accept_ride', {
             p_ride_id: ride.id,
@@ -1398,13 +1387,13 @@ const DriverDashboard = () => {
           7000,
           'Accept ride RPC'
         );
-
+        
         console.log('[AcceptRide] RPC result:', JSON.stringify({ rpcResult, rpcError }));
-
+        
         if (rpcError || !rpcResult) {
           toast({
-            title: language === 'fr' ? 'Course déjà prise' : 'Ride already taken',
-            description: language === 'fr' ? 'Un autre chauffeur a accepté cette course' : 'Another driver already accepted this ride',
+            title: 'Error',
+            description: 'This ride is no longer available',
             variant: 'destructive',
           });
           return;

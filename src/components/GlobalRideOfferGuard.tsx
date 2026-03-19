@@ -334,9 +334,6 @@ export function GlobalRideOfferGuard() {
         try { localStorage.setItem('last_accepted_driver', userId); } catch {}
       } else {
         console.log('[GlobalGuard] Ride already taken');
-        cleanup();
-        window.location.href = '/driver';
-        return;
       }
 
       supabase.from('notifications')
