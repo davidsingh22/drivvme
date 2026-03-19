@@ -496,7 +496,7 @@ const RideBooking = () => {
   // Visibility listener: warm GPS on app resume (session refresh moved to payment handler)
   useEffect(() => {
     let lastHidden = 0;
-    const IDLE_THRESHOLD_MS = 2 * 60 * 1000;
+    const IDLE_THRESHOLD_MS = 5_000; // 5s — always re-check DB on resume
 
     const handleVisibility = async () => {
       if (document.visibilityState === 'hidden') {
@@ -505,6 +505,24 @@ const RideBooking = () => {
       }
 
       const idleMs = lastHidden ? Date.now() - lastHidden : 0;
+
+      // Always check ride status on resume when in an active ride phase
+      if (currentRide?.id && ['searching', 'matched', 'arriving', 'arrived', 'inProgress', 'completed'].includes(step)) {
+        try {
+          const { data: freshRide } = await supabase
+            .from('rides')
+            .select('status')
+            .eq('id', currentRide.id)
+            .maybeSingle();
+          if (freshRide && ['completed', 'cancelled'].includes(freshRide.status) && step !== 'completed') {
+            console.log('[RideBooking] Ride ended while backgrounded, redirecting home');
+            clearRide();
+            navigate('/rider-home', { replace: true });
+            return;
+          }
+        } catch { /* ignore */ }
+      }
+
       if (idleMs < IDLE_THRESHOLD_MS) return;
 
       console.log('[RideBooking] App resumed after', Math.round(idleMs / 1000), 's');
