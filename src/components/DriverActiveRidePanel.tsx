@@ -330,7 +330,6 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
         : `You earned ${formatCurrency(driverEarningsCalc, language)}`,
     });
 
-    // Fire instant push (non-blocking)
     fireInstantPush(rideId, 'completed', prevStatus, riderId, driverId);
 
     const updates = {
@@ -341,25 +340,24 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     };
 
     try {
-      const { error } = await withTimeout(
-        supabase
-          .from('rides')
-          .update(updates)
-          .eq('id', rideId)
-          .eq('driver_id', driverId)
-          .then(r => r),
-        7000, 'Complete ride'
-      );
+      const saved = await persistRideStatus({
+        rideId,
+        expectedStatus: 'completed',
+        updates,
+        driverId,
+        label: 'Complete ride',
+        maxAttempts: 3,
+        baseDelayMs: 400,
+        timeoutMs: 6000,
+      });
 
-      if (error) {
-        // Don't revert — start background retry
-        console.warn('[DriverActiveRidePanel] endRide DB error, retrying in background:', error.message);
-        void retryDbWrite(rideId, updates);
+      if (!saved) {
+        console.warn('[DriverActiveRidePanel] endRide did not persist immediately, retrying in background');
+        void retryDbWrite(rideId, updates, 'completed');
       }
     } catch (err) {
-      // Timeout — retry in background
-      console.warn('[DriverActiveRidePanel] endRide timeout, retrying in background:', err);
-      void retryDbWrite(rideId, updates);
+      console.warn('[DriverActiveRidePanel] endRide failed, retrying in background:', err);
+      void retryDbWrite(rideId, updates, 'completed');
     } finally {
       setBusyAction(null);
     }
