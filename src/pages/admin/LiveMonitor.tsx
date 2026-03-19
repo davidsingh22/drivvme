@@ -165,8 +165,13 @@ export default function LiveMonitor() {
     return resolved;
   }, []);
 
+  // Only redirect once on initial load — never kick out mid-session
+  const adminCheckedRef = useRef(false);
   useEffect(() => {
-    if (!authLoading && !isAdmin) navigate('/login', { replace: true });
+    if (authLoading) return;
+    if (adminCheckedRef.current) return; // already passed the gate
+    adminCheckedRef.current = true;
+    if (!isAdmin) navigate('/login', { replace: true });
   }, [authLoading, isAdmin, navigate]);
 
   // ── Rider Presence: fetch + realtime ──
