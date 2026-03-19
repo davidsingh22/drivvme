@@ -400,6 +400,15 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const cancelRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
     
+    // Ensure fresh auth before cancelling
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[DriverActiveRidePanel] cancelRide auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
+
     setBusyAction('cancel');
     const previousRide = { ...activeRide };
     const riderIdForNotif = activeRide.rider_id;

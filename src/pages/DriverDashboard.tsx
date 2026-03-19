@@ -1693,6 +1693,15 @@ const DriverDashboard = () => {
   const cancelRide = async () => {
     if (!currentRide || !user || busyAction) return;
 
+    // Ensure fresh auth before cancelling
+    try {
+      await ensureFreshSession();
+    } catch (authErr: any) {
+      console.error('[DriverDashboard] cancelRide auth refresh failed:', authErr);
+      toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+      return;
+    }
+
     // Beep stops automatically when newRideAlertOpen is cleared
     setBusyAction('cancel');
 
