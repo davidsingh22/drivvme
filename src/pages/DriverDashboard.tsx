@@ -125,31 +125,20 @@ const DriverDashboard = () => {
   };
 
   /** Background retry: keeps attempting a DB update until it succeeds (max 5 retries). */
-  const retryDbUpdate = useCallback(async (rideId: string, updates: Record<string, any>, attempt = 0) => {
-    const MAX_RETRIES = 5;
-    const DELAY = 3000;
-    if (attempt >= MAX_RETRIES) {
-      console.error('[DriverDashboard] retryDbUpdate: gave up after', MAX_RETRIES, 'attempts for ride', rideId);
-      return;
+  const retryDbUpdate = useCallback(async (rideId: string, updates: Record<string, any>, expectedStatus?: string) => {
+    const ok = await persistRideStatus({
+      rideId,
+      updates,
+      expectedStatus: expectedStatus ?? String(updates.status ?? ''),
+      label: `Retry status to ${expectedStatus ?? String(updates.status ?? '')}`,
+      maxAttempts: 5,
+      baseDelayMs: 1000,
+      timeoutMs: 12000,
+    });
+
+    if (!ok) {
+      console.error('[DriverDashboard] retryDbUpdate: failed to persist ride status', { rideId, expectedStatus, updates });
     }
-    try {
-      // First check if already in desired status
-      const { data: check } = await supabase.from('rides').select('status').eq('id', rideId).maybeSingle();
-      if (check?.status === updates.status) {
-        console.log('[DriverDashboard] retryDbUpdate: ride already in', updates.status);
-        return;
-      }
-      const { error } = await supabase.from('rides').update(updates).eq('id', rideId);
-      if (!error) {
-        console.log('[DriverDashboard] retryDbUpdate: success on attempt', attempt + 1);
-        return;
-      }
-      console.warn('[DriverDashboard] retryDbUpdate: attempt', attempt + 1, 'failed:', error.message);
-    } catch (e) {
-      console.warn('[DriverDashboard] retryDbUpdate: attempt', attempt + 1, 'exception:', e);
-    }
-    await new Promise(r => setTimeout(r, DELAY));
-    return retryDbUpdate(rideId, updates, attempt + 1);
   }, []);
 
   // Keep refs in sync with state

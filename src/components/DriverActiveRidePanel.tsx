@@ -292,18 +292,20 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   };
 
   // Background retry for DB writes
-  const retryDbWrite = useCallback(async (rideId: string, updates: Record<string, any>, attempt = 0) => {
-    const MAX = 5;
-    if (attempt >= MAX) { console.error('[DriverActiveRidePanel] retryDbWrite gave up'); return; }
-    try {
-      const { data: check } = await supabase.from('rides').select('status').eq('id', rideId).maybeSingle();
-      if (check?.status === updates.status) { console.log('[DriverActiveRidePanel] retryDbWrite: already done'); return; }
-      const { error } = await supabase.from('rides').update(updates).eq('id', rideId);
-      if (!error) { console.log('[DriverActiveRidePanel] retryDbWrite: success attempt', attempt + 1); return; }
-    } catch {}
-    await new Promise(r => setTimeout(r, 3000));
-    return retryDbWrite(rideId, updates, attempt + 1);
-  }, []);
+  const retryDbWrite = useCallback(async (rideId: string, updates: Record<string, any>, expectedStatus?: string) => {
+    const ok = await persistRideStatus({
+      rideId,
+      updates,
+      expectedStatus: expectedStatus ?? String(updates.status ?? ''),
+      driverId,
+      label: `Retry status to ${expectedStatus ?? String(updates.status ?? '')}`,
+      maxAttempts: 5,
+      baseDelayMs: 1000,
+      timeoutMs: 12000,
+    });
+
+    if (!ok) console.error('[DriverActiveRidePanel] retryDbWrite gave up', { rideId, expectedStatus, updates });
+  }, [driverId]);
 
   // End Ride action (transition to completed)
   const endRide = async () => {
