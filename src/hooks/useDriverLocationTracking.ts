@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { upsertDriverLocation, setDriverOffline } from '@/lib/driverLocation';
+import { ensureFreshSession } from '@/lib/resilientRequest';
 
 interface UseDriverLocationTrackingOptions {
   userId: string | undefined;
@@ -43,6 +44,9 @@ export function useDriverLocationTracking({
       console.warn('[DriverLocationTracking] Missing userId or driverId', { userId, driverId });
       return;
     }
+
+    // Ensure fresh auth before every location write
+    try { await ensureFreshSession(); } catch { /* proceed anyway */ }
 
     console.log('[DriverLocationTracking] Getting position...', { userId, driverId, online });
 

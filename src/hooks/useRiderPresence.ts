@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { getValidAccessToken } from '@/lib/sessionRecovery';
+import { ensureFreshSession } from '@/lib/resilientRequest';
 
 type ScreenName = 'home' | 'searching' | 'booking';
 
@@ -43,9 +43,9 @@ export function useRiderPresence(currentScreen: ScreenName) {
     if (gen !== undefined && gen !== generationRef.current) return;
 
     try {
-      // Recover session if needed (especially after backgrounding)
+      // Ensure fresh auth before every presence write
       if (status === 'online') {
-        try { await getValidAccessToken(); } catch { /* proceed anyway */ }
+        try { await ensureFreshSession(); } catch { /* proceed anyway */ }
       }
 
       await supabase.from('rider_presence' as any).upsert(
