@@ -1538,6 +1538,7 @@ const DriverDashboard = () => {
 
     // Optimistic update — instant UI feedback
     const prev = { ...currentRide };
+    rememberRideAction(prev.id, status);
     if (status === 'completed') {
       const fareForFee = currentRide.subtotal_before_tax ?? currentRide.estimated_fare;
       const fee = calculatePlatformFee(fareForFee);
@@ -1577,6 +1578,26 @@ const DriverDashboard = () => {
       );
 
       if (error) {
+        let confirmedStatus = false;
+        try {
+          const { data: latestRide } = await supabase
+            .from('rides')
+            .select('status')
+            .eq('id', prev.id)
+            .maybeSingle();
+          confirmedStatus = latestRide?.status === status;
+        } catch (verificationError) {
+          console.warn('[DriverDashboard] verifyRideStatus failed:', verificationError);
+        }
+
+        if (confirmedStatus) {
+          console.warn('[DriverDashboard] updateRideStatus returned an error after the ride was already saved:', error);
+          if (status === 'completed') {
+            void refreshDriverProfile();
+          }
+          return;
+        }
+
         setCurrentRide(prev);
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
         return;
