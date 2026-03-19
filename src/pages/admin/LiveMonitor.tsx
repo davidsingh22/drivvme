@@ -562,7 +562,6 @@ export default function LiveMonitor() {
   }, []);
 
   useEffect(() => {
-    if (authLoading) return;
     if (!isAdmin) return;
 
     feedIdsRef.current.clear();
@@ -791,7 +790,7 @@ export default function LiveMonitor() {
       supabase.removeChannel(riderLocCh);
       supabase.removeChannel(driverLocCh);
     };
-  }, [authLoading, getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
+  }, [getCachedName, isAdmin, loadInitialFeed, loadOnlineUsers, maybePushLocationFeed, pushFeedItem, removeOffersForRide, resolveRoleByUserId, upsertProfileNames]);
 
   if (authLoading || !isAdmin) {
     return (
