@@ -1099,10 +1099,10 @@ const DriverDashboard = () => {
           .eq('id', rideId)
           .maybeSingle();
 
-        // If ride is no longer visible (RLS blocks cancelled rows) or status changed
+        // If ride is no longer visible or status changed
         if (error || !data || data.status !== 'searching' || (data.driver_id && data.driver_id !== user?.id)) {
           dismissAlert('poll: ' + (data?.status || 'not visible'));
-          if (!data || data.status === 'cancelled' || (!data && !error)) {
+          if (data?.status === 'cancelled' && !wasRideJustCompleted(rideId)) {
             toast({
               title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
               description: language === 'fr' ? 'Le passager a annulé cette course' : 'The rider cancelled this ride',
