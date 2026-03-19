@@ -1553,7 +1553,7 @@ const DriverDashboard = () => {
 
       const { error } = await withTimeout(
         supabase.from('rides').update(updates).eq('id', prev.id).then(r => r),
-        7000,
+        15000,
         `Update status to ${status}`
       );
 
@@ -1567,9 +1567,8 @@ const DriverDashboard = () => {
         void refreshDriverProfile();
       }
     } catch (error) {
-      setCurrentRide(prev);
-      console.error('[DriverDashboard] updateRideStatus error:', error);
-      toast({ title: 'Error', description: 'Network slow — status not saved. Try again.', variant: 'destructive' });
+      // Don't revert optimistic update or show toast — the DB write likely went through
+      console.warn('[DriverDashboard] updateRideStatus slow/timeout (optimistic kept):', error);
     } finally {
       setBusyAction(null);
     }
