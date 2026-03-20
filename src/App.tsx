@@ -113,6 +113,7 @@ const RiderLocationTracker = () => {
 // Global presence heartbeat for all authenticated users
 const PresenceTracker = () => {
   usePresenceHeartbeat();
+  useBackgroundSessionRefresh();
   return null;
 };
 
