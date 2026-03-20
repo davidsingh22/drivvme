@@ -1546,6 +1546,7 @@ const DriverDashboard = () => {
 
   const updateRideStatus = async (status: string) => {
     if (!currentRide || !user || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
 
     setBusyAction(status);
 
