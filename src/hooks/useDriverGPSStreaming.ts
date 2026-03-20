@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { stampWatchdog } from '@/hooks/useWatchdog';
 
 export interface GPSPosition {
   lat: number;
