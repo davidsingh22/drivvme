@@ -1339,6 +1339,7 @@ const DriverDashboard = () => {
 
   const acceptRide = async (ride: RideRequest) => {
     if (!user || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
 
     console.log('[AcceptRide] START — ride.id:', ride.id, 'user.id:', user.id);
 
