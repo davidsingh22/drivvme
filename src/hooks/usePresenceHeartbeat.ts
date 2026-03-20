@@ -53,6 +53,7 @@ export function usePresenceHeartbeat() {
           { onConflict: 'user_id' }
         );
         if (error) console.error('[Presence] upsert error:', error.message);
+        else stampWatchdog('lastPresenceUpsert');
       } catch (e: any) {
         console.error('[Presence] upsert exception:', e.message);
       }
