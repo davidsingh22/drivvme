@@ -256,6 +256,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   // Start Ride action (transition from arrived -> in_progress)
   const startRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
     
     setBusyAction('start');
     const pickupAt = new Date().toISOString();
