@@ -458,6 +458,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   // Mark as arrived at pickup
   const markArrived = async () => {
     if (!activeRide || !driverId || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
     
     setBusyAction('arrived');
     setActiveRide({ ...activeRide, status: 'arrived' });
