@@ -315,6 +315,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   // End Ride action (transition to completed)
   const endRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
     
     setBusyAction('complete');
     const driverEarningsCalc = activeRide.estimated_fare - PLATFORM_FEE;
