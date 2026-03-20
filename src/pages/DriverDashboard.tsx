@@ -1662,6 +1662,7 @@ const DriverDashboard = () => {
 
   const cancelRide = async () => {
     if (!currentRide || !user || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
 
     // Beep stops automatically when newRideAlertOpen is cleared
     setBusyAction('cancel');
