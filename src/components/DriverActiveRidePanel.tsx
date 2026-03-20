@@ -344,50 +344,40 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
       driver_earnings: driverEarningsCalc,
     };
 
-    // First try a fast direct REST update so the rider sees completion immediately on reopen.
+    // Fire fast direct REST update with current token — no awaiting token refresh
     setBusyAction(null);
-    getValidAccessToken().then(async (token) => {
-      try {
-        const response = await fetch(
-          `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&driver_id=eq.${driverId}&select=id,status`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Content-Type': 'application/json',
-              apikey: ANON_KEY,
-              Authorization: `Bearer ${token}`,
-              Prefer: 'return=representation',
-            },
-            body: JSON.stringify(updates),
-            keepalive: true,
+    const currentToken = session?.access_token;
+    if (currentToken) {
+      void (async () => {
+        try {
+          const response = await fetch(
+            `${SUPABASE_URL}/rest/v1/rides?id=eq.${rideId}&driver_id=eq.${driverId}&select=id,status`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                apikey: ANON_KEY,
+                Authorization: `Bearer ${currentToken}`,
+                Prefer: 'return=representation',
+              },
+              body: JSON.stringify(updates),
+              keepalive: true,
+            }
+          );
+          if (response.ok) {
+            const rows = (await response.json().catch(() => [])) as Array<{ status?: string }>;
+            if (rows[0]?.status === 'completed') return;
           }
-        );
-
-        if (!response.ok) {
-          throw new Error(`complete ride patch failed: ${response.status}`);
+          // Fast path failed — fall through to retry
+          void retryDbWrite(rideId, updates, 'completed');
+        } catch {
+          void retryDbWrite(rideId, updates, 'completed');
         }
-
-        const rows = (await response.json().catch(() => [])) as Array<{ status?: string }>;
-        if (rows[0]?.status === 'completed') return;
-
-        void retryDbWrite(rideId, updates, 'completed');
-      } catch {
-        const saved = await persistRideStatus({
-          rideId,
-          expectedStatus: 'completed',
-          updates,
-          driverId,
-          label: 'Complete ride',
-          maxAttempts: 4,
-          baseDelayMs: 500,
-          timeoutMs: 7000,
-        });
-
-        if (!saved) void retryDbWrite(rideId, updates, 'completed');
-      }
-    }).catch(() => {
+      })();
+    } else {
+      // No token available — go straight to persistRideStatus retry
       void retryDbWrite(rideId, updates, 'completed');
-    });
+    }
   };
 
   // Cancel Ride action
