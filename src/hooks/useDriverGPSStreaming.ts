@@ -275,6 +275,7 @@ export function useDriverGPSStreaming({
           isDbSyncing: false,
           authStatus: 'ok',
         }));
+        stampWatchdog('lastGpsWrite');
         return true;
       }
     } catch (err) {

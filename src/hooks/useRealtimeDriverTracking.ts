@@ -188,6 +188,7 @@ export function useRealtimeDriverTracking({
       setIsReconnecting(false);
       setWaitingForDriver(false);
       lastRealtimeUpdateRef.current = Date.now();
+      stampWatchdog('lastRealtimeEvent');
 
       // Update ETA when driver moves
       if (targetLocation) {
