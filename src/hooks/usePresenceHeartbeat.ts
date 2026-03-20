@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
+import { stampWatchdog } from '@/hooks/useWatchdog';
 
 const HEARTBEAT_INTERVAL_MS = 20_000; // 20 seconds
 
@@ -52,6 +53,7 @@ export function usePresenceHeartbeat() {
           { onConflict: 'user_id' }
         );
         if (error) console.error('[Presence] upsert error:', error.message);
+        else stampWatchdog('lastPresenceUpsert');
       } catch (e: any) {
         console.error('[Presence] upsert exception:', e.message);
       }

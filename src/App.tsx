@@ -15,6 +15,7 @@ import { GlobalRideOfferGuard } from "@/components/GlobalRideOfferGuard";
 import { usePresenceHeartbeat } from "@/hooks/usePresenceHeartbeat";
 import { useBackgroundSessionRefresh } from "@/hooks/useBackgroundSessionRefresh";
 import { useOneSignalSync } from "@/hooks/useOneSignalSync";
+import { useWatchdog } from "@/hooks/useWatchdog";
 import { useOneSignalPlayerSync } from "@/hooks/useOneSignalPlayerSync";
 import { initOneSignalAuthLink } from "@/lib/onesignalAuthLink";
 import { initMedianOneSignalAuthLink } from "@/lib/medianOneSignalAuthLink";
@@ -114,6 +115,7 @@ const RiderLocationTracker = () => {
 const PresenceTracker = () => {
   usePresenceHeartbeat();
   useBackgroundSessionRefresh();
+  useWatchdog();
   return null;
 };
 

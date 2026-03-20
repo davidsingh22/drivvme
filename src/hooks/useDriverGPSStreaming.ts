@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { stampWatchdog } from '@/hooks/useWatchdog';
 
 export interface GPSPosition {
   lat: number;
@@ -236,6 +237,7 @@ export function useDriverGPSStreaming({
           authStatus: 'ok',
           historyWriteCount: prev.historyWriteCount + (historyResult.error ? 0 : 1),
         }));
+        stampWatchdog('lastGpsWrite');
         pendingWriteRef.current = null;
         return true;
       } else {
@@ -273,6 +275,7 @@ export function useDriverGPSStreaming({
           isDbSyncing: false,
           authStatus: 'ok',
         }));
+        stampWatchdog('lastGpsWrite');
         return true;
       }
     } catch (err) {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { stampWatchdog } from '@/hooks/useWatchdog';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 
 export interface DriverLocation {
@@ -187,6 +188,7 @@ export function useRealtimeDriverTracking({
       setIsReconnecting(false);
       setWaitingForDriver(false);
       lastRealtimeUpdateRef.current = Date.now();
+      stampWatchdog('lastRealtimeEvent');
 
       // Update ETA when driver moves
       if (targetLocation) {
