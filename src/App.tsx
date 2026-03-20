@@ -114,6 +114,7 @@ const RiderLocationTracker = () => {
 const PresenceTracker = () => {
   usePresenceHeartbeat();
   useBackgroundSessionRefresh();
+  useWatchdog();
   return null;
 };
 
