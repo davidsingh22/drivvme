@@ -28,6 +28,7 @@ import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import { withTimeout } from '@/lib/withTimeout';
 import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 import { persistRideStatus } from '@/lib/persistRideStatus';
+import { fireSessionRefresh } from '@/lib/ensureFreshSession';
 import DriverRideActionBar from '@/components/DriverRideActionBar';
 /** Fire push notification to rider immediately (don't wait for DB trigger) */
 const fireInstantPush = async (
