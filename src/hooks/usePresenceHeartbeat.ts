@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { getValidAccessToken } from '@/lib/sessionRecovery';
+import { stampWatchdog } from '@/hooks/useWatchdog';
 
 const HEARTBEAT_INTERVAL_MS = 20_000; // 20 seconds
 
