@@ -34,6 +34,7 @@ import { withTimeout } from '@/lib/withTimeout';
 import { persistRideStatus } from '@/lib/persistRideStatus';
 import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
+import { fireSessionRefresh } from '@/lib/ensureFreshSession';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
