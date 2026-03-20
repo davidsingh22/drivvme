@@ -237,6 +237,7 @@ export function useDriverGPSStreaming({
           authStatus: 'ok',
           historyWriteCount: prev.historyWriteCount + (historyResult.error ? 0 : 1),
         }));
+        stampWatchdog('lastGpsWrite');
         pendingWriteRef.current = null;
         return true;
       } else {
