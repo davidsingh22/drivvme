@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { stampWatchdog } from '@/hooks/useWatchdog';
 import { useMapboxToken } from '@/hooks/useMapboxToken';
 
 export interface DriverLocation {
