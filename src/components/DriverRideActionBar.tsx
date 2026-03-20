@@ -39,7 +39,6 @@ function TapButton({
   }, [onTap]);
 
   const handle = (e: React.SyntheticEvent) => {
-    e.preventDefault();
     e.stopPropagation();
     if (!disabled) fireOnce();
   };

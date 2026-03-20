@@ -326,6 +326,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
 
     setActiveRide(null);
     setRiderInfo(null);
+    setShowNavigation(false);
     onRideCompleted?.();
 
     toast({
