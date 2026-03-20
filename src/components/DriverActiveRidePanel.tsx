@@ -257,43 +257,44 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const startRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
     fireSessionRefresh(); // non-blocking background refresh
-    
+
     setBusyAction('start');
     const pickupAt = new Date().toISOString();
+    const rideId = activeRide.id;
+    const previousStatus = activeRide.status;
+    const riderId = activeRide.rider_id;
+
     setActiveRide({ ...activeRide, status: 'in_progress', pickup_at: pickupAt });
     onRideUpdated?.({ ...activeRide, status: 'in_progress', pickup_at: pickupAt });
-    
+
     toast({
       title: language === 'fr' ? 'Course démarrée!' : 'Ride started!',
       description: language === 'fr' ? 'En route vers la destination.' : 'Heading to the destination.',
     });
 
-    fireInstantPush(activeRide.id, 'in_progress', activeRide.status, activeRide.rider_id, driverId);
+    void fireInstantPush(rideId, 'in_progress', previousStatus, riderId, driverId);
 
     const updates = { status: 'in_progress', pickup_at: pickupAt };
+    setBusyAction(null);
 
-    try {
-      const saved = await persistRideStatus({
-        rideId: activeRide.id,
-        expectedStatus: 'in_progress',
-        updates,
-        driverId,
-        label: 'Start ride',
-        maxAttempts: 3,
-        baseDelayMs: 400,
-        timeoutMs: 6000,
-      });
-
+    void persistRideStatus({
+      rideId,
+      expectedStatus: 'in_progress',
+      updates,
+      driverId,
+      label: 'Start ride',
+      maxAttempts: 3,
+      baseDelayMs: 400,
+      timeoutMs: 6000,
+    }).then((saved) => {
       if (!saved) {
         console.warn('[DriverActiveRidePanel] startRide did not persist immediately, retrying');
-        void retryDbWrite(activeRide.id, updates, 'in_progress');
+        void retryDbWrite(rideId, updates, 'in_progress');
       }
-    } catch (err) {
+    }).catch((err) => {
       console.warn('[DriverActiveRidePanel] startRide failed, retrying:', err);
-      void retryDbWrite(activeRide.id, updates, 'in_progress');
-    } finally {
-      setBusyAction(null);
-    }
+      void retryDbWrite(rideId, updates, 'in_progress');
+    });
   };
 
   // Background retry for DB writes
@@ -316,25 +317,25 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const endRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
     fireSessionRefresh(); // non-blocking background refresh
-    
+
     setBusyAction('complete');
     const driverEarningsCalc = activeRide.estimated_fare - PLATFORM_FEE;
     const rideId = activeRide.id;
     const riderId = activeRide.rider_id;
     const prevStatus = activeRide.status;
-    
+
     setActiveRide(null);
     setRiderInfo(null);
     onRideCompleted?.();
-    
+
     toast({
       title: language === 'fr' ? 'Course terminée!' : 'Ride completed!',
-      description: language === 'fr' 
+      description: language === 'fr'
         ? `Vous avez gagné ${formatCurrency(driverEarningsCalc, language)}`
         : `You earned ${formatCurrency(driverEarningsCalc, language)}`,
     });
 
-    fireInstantPush(rideId, 'completed', prevStatus, riderId, driverId);
+    void fireInstantPush(rideId, 'completed', prevStatus, riderId, driverId);
 
     const updates = {
       status: 'completed' as const,
@@ -393,7 +394,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const cancelRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
     fireSessionRefresh(); // non-blocking background refresh
-    
+
     setBusyAction('cancel');
     const previousRide = { ...activeRide };
     const riderIdForNotif = activeRide.rider_id;
@@ -401,7 +402,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     setActiveRide(null);
     setRiderInfo(null);
     onRideCompleted?.();
-    
+
     toast({
       title: language === 'fr' ? 'Course annulée' : 'Ride cancelled',
       description: language === 'fr' ? 'La course a été annulée.' : 'The ride has been cancelled.',
@@ -409,7 +410,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
     });
 
     // Fire instant push (non-blocking)
-    fireInstantPush(rideIdForNotif, 'cancelled', previousRide.status, riderIdForNotif, driverId);
+    void fireInstantPush(rideIdForNotif, 'cancelled', previousRide.status, riderIdForNotif, driverId);
 
     // IMPORTANT: Insert cancellation notification for the rider BEFORE updating ride status.
     // RLS policy drivers_can_notify_rider_for_assigned_rides requires ride to still be active.
@@ -459,45 +460,46 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   const markArrived = async () => {
     if (!activeRide || !driverId || busyAction) return;
     fireSessionRefresh(); // non-blocking background refresh
-    
+
     setBusyAction('arrived');
+    const rideId = activeRide.id;
+    const previousStatus = activeRide.status;
+    const riderId = activeRide.rider_id;
+
     setActiveRide({ ...activeRide, status: 'arrived' });
     onRideUpdated?.({ ...activeRide, status: 'arrived' });
     setShowNavigation(false);
-    
+
     toast({
       title: language === 'fr' ? 'Arrivé!' : 'Arrived!',
-      description: language === 'fr' 
-        ? 'Le passager a été notifié de votre arrivée.' 
+      description: language === 'fr'
+        ? 'Le passager a été notifié de votre arrivée.'
         : 'The rider has been notified of your arrival.',
     });
 
-    fireInstantPush(activeRide.id, 'arrived', activeRide.status, activeRide.rider_id, driverId);
+    void fireInstantPush(rideId, 'arrived', previousStatus, riderId, driverId);
 
     const updates = { status: 'arrived' };
+    setBusyAction(null);
 
-    try {
-      const saved = await persistRideStatus({
-        rideId: activeRide.id,
-        expectedStatus: 'arrived',
-        updates,
-        driverId,
-        label: 'Mark arrived',
-        maxAttempts: 3,
-        baseDelayMs: 400,
-        timeoutMs: 6000,
-      });
-
+    void persistRideStatus({
+      rideId,
+      expectedStatus: 'arrived',
+      updates,
+      driverId,
+      label: 'Mark arrived',
+      maxAttempts: 3,
+      baseDelayMs: 400,
+      timeoutMs: 6000,
+    }).then((saved) => {
       if (!saved) {
         console.warn('[DriverActiveRidePanel] markArrived did not persist immediately, retrying');
-        void retryDbWrite(activeRide.id, updates, 'arrived');
+        void retryDbWrite(rideId, updates, 'arrived');
       }
-    } catch (err) {
+    }).catch((err) => {
       console.warn('[DriverActiveRidePanel] markArrived failed, retrying:', err);
-      void retryDbWrite(activeRide.id, updates, 'arrived');
-    } finally {
-      setBusyAction(null);
-    }
+      void retryDbWrite(rideId, updates, 'arrived');
+    });
   };
 
   // Open in Maps (Google Maps or Apple Maps deep link)
