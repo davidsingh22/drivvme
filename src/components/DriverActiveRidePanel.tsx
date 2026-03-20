@@ -392,6 +392,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   // Cancel Ride action
   const cancelRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
     
     setBusyAction('cancel');
     const previousRide = { ...activeRide };
