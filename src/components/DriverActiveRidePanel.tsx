@@ -28,6 +28,7 @@ import { formatCurrency, formatDistance, formatDuration } from '@/lib/pricing';
 import { withTimeout } from '@/lib/withTimeout';
 import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 import { persistRideStatus } from '@/lib/persistRideStatus';
+import { fireSessionRefresh } from '@/lib/ensureFreshSession';
 import DriverRideActionBar from '@/components/DriverRideActionBar';
 /** Fire push notification to rider immediately (don't wait for DB trigger) */
 const fireInstantPush = async (
@@ -255,6 +256,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   // Start Ride action (transition from arrived -> in_progress)
   const startRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
     
     setBusyAction('start');
     const pickupAt = new Date().toISOString();
@@ -313,6 +315,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   // End Ride action (transition to completed)
   const endRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
     
     setBusyAction('complete');
     const driverEarningsCalc = activeRide.estimated_fare - PLATFORM_FEE;
@@ -389,6 +392,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   // Cancel Ride action
   const cancelRide = async () => {
     if (!activeRide || !driverId || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
     
     setBusyAction('cancel');
     const previousRide = { ...activeRide };
@@ -454,6 +458,7 @@ const DriverActiveRidePanel = ({ onRideCompleted, onRideUpdated }: DriverActiveR
   // Mark as arrived at pickup
   const markArrived = async () => {
     if (!activeRide || !driverId || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
     
     setBusyAction('arrived');
     setActiveRide({ ...activeRide, status: 'arrived' });

@@ -34,6 +34,7 @@ import { withTimeout } from '@/lib/withTimeout';
 import { persistRideStatus } from '@/lib/persistRideStatus';
 import { getValidAccessToken, SUPABASE_URL, ANON_KEY } from '@/lib/sessionRecovery';
 import { consumePendingRide, onPendingRide } from '@/lib/pendingRideStore';
+import { fireSessionRefresh } from '@/lib/ensureFreshSession';
 import montrealDriverBg from '@/assets/montreal-driver-night-bg.png';
 import { HelpDialog } from '@/components/HelpDialog';
 import { useUnreadSupportMessages } from '@/hooks/useUnreadSupportMessages';
@@ -1245,25 +1246,16 @@ const DriverDashboard = () => {
 
   const toggleOnlineStatus = async () => {
     if (!user) {
-      console.warn('[DriverDashboard] toggleOnlineStatus: user not loaded yet, refreshing session...');
-      // Try to recover the session
+      console.warn('[DriverDashboard] toggleOnlineStatus: user not loaded yet, attempting fast recovery...');
+      fireSessionRefresh(); // non-blocking
+      // Try to get current session without blocking on refresh
       try {
-        const { data } = await supabase.auth.getSession();
-        if (!data.session) {
-          await supabase.auth.refreshSession();
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session?.user) {
+          toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
+          return;
         }
-      } catch (e) {
-        console.error('[DriverDashboard] session recovery failed:', e);
-      }
-      // Re-check after recovery attempt
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session?.user) {
-        toast({ title: 'Session expired', description: 'Please log in again.', variant: 'destructive' });
-        return;
-      }
-      // Use the recovered user for this toggle
-      const recoveredUser = sessionData.session.user;
-      try {
+        const recoveredUser = sessionData.session.user;
         const newStatus = !isOnline;
         const { error } = await supabase
           .from('driver_profiles')
@@ -1273,7 +1265,6 @@ const DriverDashboard = () => {
           toast({ title: 'Error', description: error.message, variant: 'destructive' });
           return;
         }
-        // Sync driver_locations and driver_presence so MSN dispatch reflects offline immediately
         if (!newStatus) {
           supabase.from('driver_locations').update({ is_online: false, updated_at: new Date().toISOString() }).eq('driver_id', recoveredUser.id).then(() => {});
           supabase.from('driver_presence').update({ status: 'offline', last_seen: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('driver_id', recoveredUser.id).then(() => {});
@@ -1281,7 +1272,7 @@ const DriverDashboard = () => {
         setIsOnline(newStatus);
         manuallyToggledOffRef.current = !newStatus;
         try { localStorage.setItem('driver_manually_offline', (!newStatus).toString()); } catch {}
-        await refreshDriverProfile();
+        refreshDriverProfile();
         toast({
           title: newStatus ? 'You are now online' : 'You are now offline',
           description: newStatus ? 'You will receive ride requests' : 'You will not receive ride requests',
@@ -1294,6 +1285,7 @@ const DriverDashboard = () => {
     }
 
     try {
+      fireSessionRefresh(); // non-blocking background refresh
       const newStatus = !isOnline;
       
       const { error } = await supabase
@@ -1348,6 +1340,7 @@ const DriverDashboard = () => {
 
   const acceptRide = async (ride: RideRequest) => {
     if (!user || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
 
     console.log('[AcceptRide] START — ride.id:', ride.id, 'user.id:', user.id);
 
@@ -1554,6 +1547,7 @@ const DriverDashboard = () => {
 
   const updateRideStatus = async (status: string) => {
     if (!currentRide || !user || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
 
     setBusyAction(status);
 
@@ -1669,6 +1663,7 @@ const DriverDashboard = () => {
 
   const cancelRide = async () => {
     if (!currentRide || !user || busyAction) return;
+    fireSessionRefresh(); // non-blocking background refresh
 
     // Beep stops automatically when newRideAlertOpen is cleared
     setBusyAction('cancel');
