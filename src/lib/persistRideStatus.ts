@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { ensureFreshSession } from '@/lib/ensureFreshSession';
 import { withTimeout } from '@/lib/withTimeout';
 
 interface PersistRideStatusOptions {
@@ -20,6 +21,23 @@ const getRetryDelayMs = (attempt: number, baseDelayMs: number) => {
   return Math.min(exponentialDelay + jitter, 6000);
 };
 
+const isAuthError = (error: unknown) => {
+  if (!error) return false;
+  const normalized = JSON.stringify(error).toLowerCase();
+  return [
+    'jwt',
+    'auth',
+    'token',
+    'session',
+    'not authenticated',
+    'unauthorized',
+    'forbidden',
+    '401',
+    '403',
+    'pgrst301',
+  ].some((term) => normalized.includes(term));
+};
+
 async function verifyRideStatus(rideId: string, expectedStatus: string) {
   try {
     const { data, error } = await supabase
@@ -34,16 +52,18 @@ async function verifyRideStatus(rideId: string, expectedStatus: string) {
   }
 }
 
-export async function persistRideStatus({
+async function attemptPersistRideStatus({
   rideId,
   expectedStatus,
   updates,
   driverId,
   label,
-  maxAttempts = 4,
-  baseDelayMs = 500,
-  timeoutMs = 10000,
-}: PersistRideStatusOptions): Promise<boolean> {
+  maxAttempts,
+  baseDelayMs,
+  timeoutMs,
+}: Required<PersistRideStatusOptions>): Promise<{ success: boolean; sawAuthError: boolean }> {
+  let sawAuthError = false;
+
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       const query = supabase
@@ -60,14 +80,20 @@ export async function persistRideStatus({
       );
 
       if (!error && data?.status === expectedStatus) {
-        return true;
+        return { success: true, sawAuthError };
       }
-    } catch {
-      // verification below handles transient failures
+
+      if (isAuthError(error)) {
+        sawAuthError = true;
+      }
+    } catch (error) {
+      if (isAuthError(error)) {
+        sawAuthError = true;
+      }
     }
 
     if (await verifyRideStatus(rideId, expectedStatus)) {
-      return true;
+      return { success: true, sawAuthError };
     }
 
     if (attempt < maxAttempts - 1) {
@@ -75,5 +101,57 @@ export async function persistRideStatus({
     }
   }
 
-  return verifyRideStatus(rideId, expectedStatus);
+  return {
+    success: await verifyRideStatus(rideId, expectedStatus),
+    sawAuthError,
+  };
+}
+
+export async function persistRideStatus({
+  rideId,
+  expectedStatus,
+  updates,
+  driverId,
+  label,
+  maxAttempts = 4,
+  baseDelayMs = 500,
+  timeoutMs = 10000,
+}: PersistRideStatusOptions): Promise<boolean> {
+  const options = {
+    rideId,
+    expectedStatus,
+    updates,
+    driverId: driverId ?? null,
+    label,
+    maxAttempts,
+    baseDelayMs,
+    timeoutMs,
+  };
+
+  const initialAttempt = await attemptPersistRideStatus(options);
+  if (initialAttempt.success) {
+    return true;
+  }
+
+  if (!initialAttempt.sawAuthError) {
+    return false;
+  }
+
+  console.warn('[persistRideStatus] auth issue detected, refreshing session before one final retry', {
+    rideId,
+    expectedStatus,
+    label,
+  });
+
+  await ensureFreshSession().catch((error) => {
+    console.warn('[persistRideStatus] session refresh failed before retry:', error);
+  });
+
+  const retryAttempt = await attemptPersistRideStatus({
+    ...options,
+    maxAttempts: Math.min(options.maxAttempts, 2),
+    baseDelayMs: Math.min(options.baseDelayMs, 300),
+  });
+
+  return retryAttempt.success;
 }

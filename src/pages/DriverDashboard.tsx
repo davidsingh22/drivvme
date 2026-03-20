@@ -1637,28 +1637,25 @@ const DriverDashboard = () => {
       return;
     }
 
-    try {
-      const saved = await persistRideStatus({
-        rideId: prev.id,
-        expectedStatus: status,
-        updates,
-        driverId: user.id,
-        label: `Update status to ${status}`,
-        maxAttempts: 3,
-        baseDelayMs: 400,
-        timeoutMs: 6000,
-      });
-
+    setBusyAction(null);
+    void persistRideStatus({
+      rideId: prev.id,
+      expectedStatus: status,
+      updates,
+      driverId: user.id,
+      label: `Update status to ${status}`,
+      maxAttempts: 3,
+      baseDelayMs: 400,
+      timeoutMs: 6000,
+    }).then((saved) => {
       if (!saved) {
         console.warn('[DriverDashboard] updateRideStatus did not persist immediately, starting background retry');
         void retryDbUpdate(prev.id, updates, status);
       }
-    } catch (error) {
+    }).catch((error) => {
       console.warn('[DriverDashboard] updateRideStatus failed, starting background retry:', error);
       void retryDbUpdate(prev.id, updates, status);
-    } finally {
-      setBusyAction(null);
-    }
+    });
   };
 
   const cancelRide = async () => {
