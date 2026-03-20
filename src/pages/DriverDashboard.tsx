@@ -1285,6 +1285,7 @@ const DriverDashboard = () => {
     }
 
     try {
+      fireSessionRefresh(); // non-blocking background refresh
       const newStatus = !isOnline;
       
       const { error } = await supabase
