@@ -285,7 +285,13 @@ const RouteRestorer = () => {
   // If a driver session exists, restore them to /driver on cold start or iOS reload.
   useEffect(() => {
     if (authLoading) return;
-    if (!session) return;
+
+    // Session is dead — clear stale route hint so we don't loop
+    if (!session) {
+      try { localStorage.removeItem('last_route'); } catch {}
+      return;
+    }
+
     if (location.pathname !== '/') return;
 
     const last = (() => {
