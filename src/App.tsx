@@ -124,15 +124,25 @@ const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
   const navigate = useNavigate();
   const [checked, setChecked] = useState(() => {
-    // Fast-path: if localStorage says last route was /driver, render immediately
+    // Fast-path: if localStorage says last route was /driver AND we still have a stored session, render immediately
     try {
-      return localStorage.getItem('last_route') === '/driver';
+      const hasLastRoute = localStorage.getItem('last_route') === '/driver';
+      // Only fast-path if there's a stored Supabase session (token exists)
+      const hasStoredSession = !!localStorage.getItem('sb-siadshsaiuecesydqzqo-auth-token');
+      return hasLastRoute && hasStoredSession;
     } catch {
       return false;
     }
   });
 
   useEffect(() => {
+    // If auth finished loading and there's no session → redirect to login immediately
+    if (!authLoading && !session?.user?.id) {
+      try { localStorage.removeItem('last_route'); } catch {}
+      navigate('/login', { replace: true });
+      return;
+    }
+
     if (checked && !authLoading) {
       // Already rendering — still verify role in background
       if (session?.user?.id && !isDriver) {
@@ -155,6 +165,7 @@ const DriverRoute = () => {
 
     if (!session?.user?.id) {
       clearTimeout(timeout);
+      try { localStorage.removeItem('last_route'); } catch {}
       navigate('/login', { replace: true });
       return () => {};
     }
@@ -274,7 +285,13 @@ const RouteRestorer = () => {
   // If a driver session exists, restore them to /driver on cold start or iOS reload.
   useEffect(() => {
     if (authLoading) return;
-    if (!session) return;
+
+    // Session is dead — clear stale route hint so we don't loop
+    if (!session) {
+      try { localStorage.removeItem('last_route'); } catch {}
+      return;
+    }
+
     if (location.pathname !== '/') return;
 
     const last = (() => {
