@@ -124,16 +124,49 @@ const DriverRoute = () => {
   const { session, authLoading, isDriver } = useAuth();
   const navigate = useNavigate();
   const [checked, setChecked] = useState(() => {
-    // Fast-path: if localStorage says last route was /driver AND we still have a stored session, render immediately
+    // Fast-path: if localStorage says last route was /driver AND we still have a VALID stored session
     try {
       const hasLastRoute = localStorage.getItem('last_route') === '/driver';
-      // Only fast-path if there's a stored Supabase session (token exists)
-      const hasStoredSession = !!localStorage.getItem('sb-siadshsaiuecesydqzqo-auth-token');
-      return hasLastRoute && hasStoredSession;
+      if (!hasLastRoute) return false;
+      const raw = localStorage.getItem('sb-siadshsaiuecesydqzqo-auth-token');
+      if (!raw) return false;
+      // Validate the refresh token hasn't fully expired by checking access token
+      const parsed = JSON.parse(raw);
+      const token = parsed?.access_token || parsed?.currentSession?.access_token;
+      const refreshToken = parsed?.refresh_token || parsed?.currentSession?.refresh_token;
+      // If no refresh token at all, session is dead
+      if (!refreshToken) return false;
+      // If access token exists, check it's not ancient (best-effort)
+      if (token) {
+        try {
+          const parts = token.split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+            const issuedAt = payload.iat || 0;
+            const nowSec = Math.floor(Date.now() / 1000);
+            // If token was issued more than 30 days ago, session is likely dead
+            if (nowSec - issuedAt > 30 * 24 * 3600) return false;
+          }
+        } catch {}
+      }
+      return true;
     } catch {
       return false;
     }
   });
+
+  // CRITICAL: If auth finished and there's truly no session, redirect immediately
+  // This catches the case where the fast-path rendered but the session is actually dead
+  const [redirectedToLogin, setRedirectedToLogin] = useState(false);
+
+  useEffect(() => {
+    if (authLoading || redirectedToLogin) return;
+    if (!session?.user?.id) {
+      setRedirectedToLogin(true);
+      try { localStorage.removeItem('last_route'); } catch {}
+      navigate('/login', { replace: true });
+    }
+  }, [authLoading, session?.user?.id, navigate, redirectedToLogin]);
 
   useEffect(() => {
     // If auth finished loading and there's no session → redirect to login immediately
@@ -203,6 +236,15 @@ const DriverRoute = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-pulse text-muted-foreground">Loading…</div>
+      </div>
+    );
+  }
+
+  // If auth resolved with no session, show nothing (redirect is in progress)
+  if (!session?.user?.id && !authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-pulse text-muted-foreground">Redirecting…</div>
       </div>
     );
   }
