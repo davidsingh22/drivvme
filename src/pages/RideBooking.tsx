@@ -914,13 +914,19 @@ const RideBooking = () => {
 
     const poll = async () => {
       try {
-        const { data: freshRide } = await supabase
+        const { data: freshRide, error } = await supabase
           .from('rides')
           .select('*')
           .eq('id', currentRide.id)
           .maybeSingle();
 
         if (cancelled || !freshRide) return;
+
+        // If the query failed due to auth, refresh and retry once
+        if (error) {
+          try { await getValidAccessToken(); } catch {}
+          return; // next poll tick will use the fresh token
+        }
 
         if (freshRide.status !== currentRide.status || freshRide.driver_id !== currentRide.driver_id) {
           console.log('[RideBooking] Poll detected ride status change:', currentRide.status, '->', freshRide.status);
