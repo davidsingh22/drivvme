@@ -3,6 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import OneSignal from 'react-onesignal';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { getValidAccessToken, hasStoredSession } from '@/lib/sessionRecovery';
 
 const isLikelyStandaloneIOS = () => {
   try {
