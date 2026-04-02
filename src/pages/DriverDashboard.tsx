@@ -392,31 +392,55 @@ const DriverDashboard = () => {
   );
 
   // Auto-online: set driver online on mount and on app resume (unless manually toggled off)
-  // This effect uses a stable ref-based approach so it works even when session isn't hydrated yet.
+  // Uses raw session recovery (bypasses GoTrue which can freeze after long backgrounding)
   const goOnlineRef = useRef<() => Promise<void>>();
 
   goOnlineRef.current = async () => {
     if (manuallyToggledOffRef.current) return;
 
-    // Always refresh session first — after hours of sleep the token is expired
-    try { await supabase.auth.refreshSession(); } catch {}
+    let driverId: string | undefined;
 
-    // Re-read session AFTER refresh — the object we closed over may be stale
-    const { data: { session: freshSession } } = await supabase.auth.getSession();
-    const driverId = freshSession?.user?.id;
+    // Step 1: Try raw session recovery first — this works even after 27+ hours of sleep
+    // because it does a direct HTTP POST instead of relying on the GoTrue JS client
+    try {
+      const token = await getValidAccessToken();
+      // Force the Supabase client to pick up the refreshed token
+      const { data: { session: freshSession } } = await supabase.auth.getSession();
+      driverId = freshSession?.user?.id;
+      if (!driverId) {
+        // Token refreshed but client doesn't have session yet — try setSession
+        try {
+          await supabase.auth.refreshSession();
+          const { data: { session: s2 } } = await supabase.auth.getSession();
+          driverId = s2?.user?.id;
+        } catch {}
+      }
+      console.log('[DriverDashboard] goOnline: raw recovery got driverId', driverId ? 'yes' : 'no');
+    } catch (e: any) {
+      console.warn('[DriverDashboard] goOnline: raw recovery failed:', e?.message);
+      // Fallback to standard refresh
+      try {
+        await supabase.auth.refreshSession();
+        const { data: { session: s } } = await supabase.auth.getSession();
+        driverId = s?.user?.id;
+      } catch {}
+    }
+
     if (!driverId) {
-      console.warn('[DriverDashboard] goOnline: no session after refresh, skipping');
+      console.warn('[DriverDashboard] goOnline: no session after all recovery attempts, skipping');
       return;
     }
 
+    // Step 2: Update DB — retry once on failure
     const { error } = await supabase
       .from('driver_profiles')
       .update({ is_online: true, updated_at: new Date().toISOString() })
       .eq('user_id', driverId);
     if (!error) {
       setIsOnline(true);
+      console.log('[DriverDashboard] goOnline: success');
     } else {
-      console.warn('[DriverDashboard] goOnline failed, retrying', error.message);
+      console.warn('[DriverDashboard] goOnline: DB update failed, retrying', error.message);
       try {
         await supabase.auth.refreshSession();
         const { error: e2 } = await supabase
