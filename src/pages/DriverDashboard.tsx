@@ -392,42 +392,50 @@ const DriverDashboard = () => {
   );
 
   // Auto-online: set driver online on mount and on app resume (unless manually toggled off)
+  // This effect uses a stable ref-based approach so it works even when session isn't hydrated yet.
+  const goOnlineRef = useRef<() => Promise<void>>();
+
+  goOnlineRef.current = async () => {
+    if (manuallyToggledOffRef.current) return;
+
+    // Always refresh session first — after hours of sleep the token is expired
+    try { await supabase.auth.refreshSession(); } catch {}
+
+    // Re-read session AFTER refresh — the object we closed over may be stale
+    const { data: { session: freshSession } } = await supabase.auth.getSession();
+    const driverId = freshSession?.user?.id;
+    if (!driverId) {
+      console.warn('[DriverDashboard] goOnline: no session after refresh, skipping');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('driver_profiles')
+      .update({ is_online: true, updated_at: new Date().toISOString() })
+      .eq('user_id', driverId);
+    if (!error) {
+      setIsOnline(true);
+    } else {
+      console.warn('[DriverDashboard] goOnline failed, retrying', error.message);
+      try {
+        await supabase.auth.refreshSession();
+        const { error: e2 } = await supabase
+          .from('driver_profiles')
+          .update({ is_online: true, updated_at: new Date().toISOString() })
+          .eq('user_id', driverId);
+        if (!e2) setIsOnline(true);
+      } catch {}
+    }
+  };
+
   useEffect(() => {
-    const driverId = session?.user?.id;
-    if (!driverId) return;
+    // Fire on mount — always try, the function handles missing session internally
+    goOnlineRef.current?.();
 
-    const goOnline = async () => {
-      if (manuallyToggledOffRef.current) return;
-      // Refresh auth session first — after hours of sleep the token is expired
-      try { await supabase.auth.refreshSession(); } catch {}
-      const { error } = await supabase
-        .from('driver_profiles')
-        .update({ is_online: true })
-        .eq('user_id', driverId);
-      if (!error) {
-        setIsOnline(true);
-      } else {
-        console.warn('[DriverDashboard] goOnline failed, retrying after session refresh', error.message);
-        // One more attempt after explicit refresh
-        try {
-          await supabase.auth.refreshSession();
-          const { error: e2 } = await supabase
-            .from('driver_profiles')
-            .update({ is_online: true })
-            .eq('user_id', driverId);
-          if (!e2) setIsOnline(true);
-        } catch {}
-      }
-    };
-
-    // Go online immediately on mount
-    goOnline();
-
-    // Go online on visibility resume (app foregrounded)
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible') goOnline();
+      if (document.visibilityState === 'visible') goOnlineRef.current?.();
     };
-    const handleFocus = () => goOnline();
+    const handleFocus = () => goOnlineRef.current?.();
 
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('focus', handleFocus);
@@ -438,6 +446,13 @@ const DriverDashboard = () => {
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('pageshow', handleFocus);
     };
+  }, []);
+
+  // Also trigger goOnline when auth finishes loading (session arrives after hydration)
+  useEffect(() => {
+    if (session?.user?.id && !manuallyToggledOffRef.current) {
+      goOnlineRef.current?.();
+    }
   }, [session?.user?.id]);
 
   // Restore active ride on page load (critical for iOS resume / page refresh)
