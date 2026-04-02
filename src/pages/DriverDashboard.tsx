@@ -398,12 +398,25 @@ const DriverDashboard = () => {
 
     const goOnline = async () => {
       if (manuallyToggledOffRef.current) return;
+      // Refresh auth session first — after hours of sleep the token is expired
+      try { await supabase.auth.refreshSession(); } catch {}
       const { error } = await supabase
         .from('driver_profiles')
         .update({ is_online: true })
         .eq('user_id', driverId);
       if (!error) {
         setIsOnline(true);
+      } else {
+        console.warn('[DriverDashboard] goOnline failed, retrying after session refresh', error.message);
+        // One more attempt after explicit refresh
+        try {
+          await supabase.auth.refreshSession();
+          const { error: e2 } = await supabase
+            .from('driver_profiles')
+            .update({ is_online: true })
+            .eq('user_id', driverId);
+          if (!e2) setIsOnline(true);
+        } catch {}
       }
     };
 
