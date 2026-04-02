@@ -499,6 +499,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (async () => {
       setAuthLoading(true);
       
+      // If there's a stored session with an expired token, do a raw HTTP refresh first.
+      // This is critical after 24+ hours of sleep when the Supabase JS client's
+      // internal GoTrue auto-refresh has staled out and getSession() returns null/expired.
+      if (hasStoredSession()) {
+        try {
+          await getValidAccessToken(); // refreshes via raw HTTP if expired
+          console.log('[Auth] Raw session recovery succeeded on init');
+        } catch (e: any) {
+          console.warn('[Auth] Raw session recovery failed on init:', e?.message);
+        }
+      }
+
       const {
         data: { session: existingSession },
       } = await supabase.auth.getSession();
