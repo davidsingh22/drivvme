@@ -596,6 +596,10 @@ const RideBooking = () => {
 
       const idleMs = lastHidden ? Date.now() - lastHidden : 0;
 
+      // Always refresh session first — after hours of sleep the JWT is expired
+      // and ride queries return nothing, leaving the stale ride UI stuck.
+      try { await getValidAccessToken(); } catch { /* best-effort */ }
+
       // Always check ride status on resume when in an active ride phase
       if (currentRide?.id && ['searching', 'matched', 'arriving', 'arrived', 'inProgress', 'completed'].includes(step)) {
         try {
@@ -608,6 +612,13 @@ const RideBooking = () => {
           if (freshRide && ['completed', 'cancelled'].includes(freshRide.status)) {
             console.log('[RideBooking] Ride ended while backgrounded, returning rider home');
             exitEndedRide();
+            return;
+          }
+
+          // If query returned null (no ride found), the ride was deleted or doesn't exist
+          if (!freshRide && currentRide?.id) {
+            console.log('[RideBooking] Ride no longer exists in DB, clearing stale UI');
+            exitEndedRide('ride not found in DB on resume');
             return;
           }
         } catch {
@@ -903,13 +914,19 @@ const RideBooking = () => {
 
     const poll = async () => {
       try {
-        const { data: freshRide } = await supabase
+        const { data: freshRide, error } = await supabase
           .from('rides')
           .select('*')
           .eq('id', currentRide.id)
           .maybeSingle();
 
         if (cancelled || !freshRide) return;
+
+        // If the query failed due to auth, refresh and retry once
+        if (error) {
+          try { await getValidAccessToken(); } catch {}
+          return; // next poll tick will use the fresh token
+        }
 
         if (freshRide.status !== currentRide.status || freshRide.driver_id !== currentRide.driver_id) {
           console.log('[RideBooking] Poll detected ride status change:', currentRide.status, '->', freshRide.status);

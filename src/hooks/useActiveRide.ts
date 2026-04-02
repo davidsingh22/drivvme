@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Database } from '@/integrations/supabase/types';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 
 type Ride = Database['public']['Tables']['rides']['Row'];
 
@@ -50,6 +51,10 @@ export function useActiveRide(userId: string | undefined) {
       setIsLoading(true);
       
       try {
+        // Refresh auth session first — after hours of sleep the JWT is expired
+        // and the query below would silently return nothing, leaving stale cached ride.
+        try { await getValidAccessToken(); } catch { /* best-effort */ }
+
         // First check localStorage for cached ride (user-specific)
         const cached = localStorage.getItem(getActiveRideKey(userId));
         let cachedState: ActiveRideState | null = null;
