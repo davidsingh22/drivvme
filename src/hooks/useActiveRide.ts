@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Database } from '@/integrations/supabase/types';
+import { getValidAccessToken } from '@/lib/sessionRecovery';
 
 type Ride = Database['public']['Tables']['rides']['Row'];
 
